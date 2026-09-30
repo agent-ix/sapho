@@ -115,3 +115,12 @@ No real findings required disposition. Corrections made during development are p
 in the reviewed commit: immediate model-failure cancellation, empty-weight membership
 checks, read-only compiled fields, validated distribution-state reporting, scoped trace
 dependency paths and retained guards. No exception or compatibility layer was introduced.
+
+## Publication and optional handoff
+
+`gh repo create agent-ix/sapho --private --source=. --remote=origin --push` exited 0.
+`gh repo view agent-ix/sapho --json visibility,url,defaultBranchRef` exited 0 and
+confirmed PRIVATE with default branch main. No visibility change was performed.
+
+Informational: assurance handoff = skipped, selected explicitly by the creator
+to keep this delivery focused on the functional engine. No provider was invoked.
