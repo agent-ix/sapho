@@ -1,0 +1,251 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Agent-IX
+//! Compiler acceptance tests: no evaluation or inference occurs.
+use super::*;
+use sapho_core::*;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
+fn lit(value: Value, t: ValueType) -> Binding {
+    Binding::Literal {
+        value: Datum::new("literal", value).unwrap(),
+        value_type: t,
+    }
+}
+fn output(node: &str) -> Binding {
+    Binding::Node {
+        node: NodeId::new(node).unwrap(),
+        port: "result".into(),
+        path: vec![],
+    }
+}
+fn node(id: &str, operation: Operation, inputs: BTreeMap<String, Binding>) -> NodeSpec {
+    NodeSpec {
+        id: NodeId::new(id).unwrap(),
+        operation,
+        inputs,
+        guard: None,
+    }
+}
+fn graph(nodes: Vec<NodeSpec>, output_binding: Binding) -> GraphSpec {
+    GraphSpec {
+        inputs: BTreeMap::new(),
+        nodes,
+        outputs: BTreeMap::from([("result".into(), output_binding)]),
+        subgraphs: BTreeMap::new(),
+    }
+}
+fn err(spec: &GraphSpec) -> ErrorCode {
+    compile(spec, &PrimitiveRegistry::default())
+        .err()
+        .unwrap()
+        .code
+}
+/// Trace: FR-007-AC-1, FR-007-AC-2, FR-007-AC-3
+#[test]
+fn toml_is_a_checked_declarative_program() {
+    let text = r#"
+[inputs.fact]
+kind = "record"
+[inputs.fact.fields.present]
+kind = "boolean"
+[outputs.result]
+kind = "node"
+node = "negate"
+port = "result"
+[[nodes]]
+id = "negate"
+[nodes.operation]
+kind = "not"
+[nodes.inputs.value]
+kind = "input"
+name = "fact"
+path = ["present"]
+"#;
+    let spec = GraphSpec::parse(text).unwrap();
+    let compiled = compile(&spec, &PrimitiveRegistry::default()).unwrap();
+    assert_eq!(compiled.signature().outputs["result"], ValueType::Boolean);
+    assert!(GraphSpec::parse(&text.replace("kind = \"not\"", "kind = \"script\"")).is_err());
+    assert!(GraphSpec::parse("unknown=1\n[outputs]\n").is_err());
+    assert_eq!(
+        GraphSpec::parse(&"x".repeat(1_048_577)).unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+}
+/// Trace: FR-008-AC-1, FR-008-AC-2
+#[test]
+fn forward_references_are_ordered_and_invalid_topology_is_refused() {
+    let a = node(
+        "a",
+        Operation::Not,
+        BTreeMap::from([(
+            "value".into(),
+            lit(Value::Boolean(false), ValueType::Boolean),
+        )]),
+    );
+    let b = node(
+        "b",
+        Operation::Not,
+        BTreeMap::from([("value".into(), output("a"))]),
+    );
+    let compiled = compile(
+        &graph(vec![b.clone(), a.clone()], output("b")),
+        &PrimitiveRegistry::default(),
+    )
+    .unwrap();
+    assert_eq!(compiled.stages()[0][0].spec().id.as_str(), "a");
+    assert_eq!(compiled.stages()[1][0].spec().id.as_str(), "b");
+    assert_eq!(
+        err(&graph(vec![a.clone(), a], output("a"))),
+        ErrorCode::DuplicateId
+    );
+    let cycle = node(
+        "a",
+        Operation::Not,
+        BTreeMap::from([("value".into(), output("b"))]),
+    );
+    assert_eq!(err(&graph(vec![cycle, b], output("a"))), ErrorCode::Cycle);
+    let unknown = node(
+        "a",
+        Operation::Not,
+        BTreeMap::from([("value".into(), output("missing"))]),
+    );
+    assert_eq!(
+        err(&graph(vec![unknown], output("a"))),
+        ErrorCode::UnknownReference
+    );
+    let bad = node(
+        "a",
+        Operation::Not,
+        BTreeMap::from([("value".into(), lit(Value::Number(1.0), ValueType::Number))]),
+    );
+    assert_eq!(err(&graph(vec![bad], output("a"))), ErrorCode::TypeMismatch);
+}
+struct CountNative(Arc<AtomicUsize>);
+impl Primitive for CountNative {
+    fn signature(&self) -> Signature {
+        Signature {
+            inputs: BTreeMap::new(),
+            outputs: BTreeMap::from([("result".into(), ValueType::Boolean)]),
+        }
+    }
+    fn execute(
+        &self,
+        _: &PrimitiveContext,
+        _: &Inputs,
+        _: &BTreeMap<String, Value>,
+    ) -> Result<Inputs> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Err(SaphoError::new(
+            ErrorCode::CodeFailed,
+            "must not execute during compile",
+        ))
+    }
+}
+/// Trace: FR-008-AC-3, FR-003-AC-1
+#[test]
+fn compilation_binds_native_code_without_evaluating_it() {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let id = PrimitiveId::new("consumer.fact").unwrap();
+    let mut registry = PrimitiveRegistry::default();
+    registry
+        .register(id.clone(), Arc::new(CountNative(counter.clone())))
+        .unwrap();
+    let spec = graph(
+        vec![node(
+            "a",
+            Operation::Code {
+                primitive: id,
+                params: BTreeMap::new(),
+            },
+            BTreeMap::new(),
+        )],
+        output("a"),
+    );
+    let compiled = compile(&spec, &registry).unwrap();
+    assert!(compiled.stages()[0][0].primitive().is_some());
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    let mut over = spec;
+    over.nodes = vec![over.nodes[0].clone(); 4097];
+    assert_eq!(
+        compile(&over, &registry).err().unwrap().code,
+        ErrorCode::LimitExceeded
+    );
+}
+/// Trace: FR-009-AC-1, FR-018-AC-2, FR-019-AC-2, FR-023-AC-2, FR-024-AC-3
+#[test]
+fn guarded_outputs_and_numeric_semantics_require_explicit_connections() {
+    let mut a = node(
+        "a",
+        Operation::Not,
+        BTreeMap::from([(
+            "value".into(),
+            lit(Value::Boolean(false), ValueType::Boolean),
+        )]),
+    );
+    a.guard = Some(lit(Value::Boolean(true), ValueType::Boolean));
+    let b = node(
+        "b",
+        Operation::Not,
+        BTreeMap::from([("value".into(), output("a"))]),
+    );
+    assert_eq!(
+        err(&graph(vec![a.clone(), b], output("b"))),
+        ErrorCode::TypeMismatch
+    );
+    let compiled = compile(&graph(vec![a], output("a")), &PrimitiveRegistry::default()).unwrap();
+    assert_eq!(
+        compiled.signature().outputs["result"],
+        ValueType::optional(ValueType::Boolean)
+    );
+    let p = Value::Probability(Probability::new(0.7).unwrap());
+    let n = node(
+        "x",
+        Operation::Complement,
+        BTreeMap::from([("value".into(), lit(p, ValueType::Probability))]),
+    );
+    assert_eq!(err(&graph(vec![n], output("x"))), ErrorCode::TypeMismatch);
+    let n = node(
+        "x",
+        Operation::Coalesce,
+        BTreeMap::from([
+            (
+                "value".into(),
+                lit(
+                    Value::Optional(None),
+                    ValueType::optional(ValueType::Number),
+                ),
+            ),
+            (
+                "default".into(),
+                lit(Value::Text("wrong".into()), ValueType::Text),
+            ),
+        ]),
+    );
+    assert_eq!(err(&graph(vec![n], output("x"))), ErrorCode::TypeMismatch);
+}
+/// Trace: FR-008-AC-2, FR-008-AC-3
+#[test]
+fn even_unused_subgraphs_are_validated_for_recursion() {
+    let body = GraphBody {
+        inputs: BTreeMap::from([("item".into(), ValueType::Boolean)]),
+        nodes: vec![node(
+            "map",
+            Operation::Map {
+                graph: "recursive".into(),
+            },
+            BTreeMap::from([(
+                "items".into(),
+                lit(Value::List(vec![]), ValueType::list(ValueType::Boolean)),
+            )]),
+        )],
+        outputs: BTreeMap::from([("result".into(), output("map"))]),
+    };
+    let mut spec = graph(vec![], lit(Value::Boolean(true), ValueType::Boolean));
+    spec.subgraphs.insert("recursive".into(), body);
+    assert_eq!(err(&spec), ErrorCode::Cycle);
+}

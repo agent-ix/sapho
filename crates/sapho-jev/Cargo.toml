@@ -1,0 +1,28 @@
+[package]
+name = "sapho-jev"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Sapho jev module."
+
+[lints]
+workspace = true
+
+[dependencies]
+sapho-core.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+typesafe-sdk-client = "=0.6.2"
+typesafe-sdk-questions = "=0.6.2"
+typesafe-sdk-answers = "=0.6.2"
+typesafe-sdk-retry = "=0.6.2"
+typesafe-sdk-error = "=0.6.2"
+
+[dev-dependencies]
+tokio.workspace = true
+async-trait.workspace = true
+typesafe-sdk-config = "=0.6.2"
+typesafe-sdk-env = "=0.6.2"
+typesafe-sdk-http = "=0.6.2"

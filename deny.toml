@@ -1,0 +1,44 @@
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+wildcards = "warn"
+
+[advisories]
+version = 2
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+# Sapho owns this license; dependencies retain the permissive allowlist above.
+[[licenses.exceptions]]
+name = "sapho"
+allow = ["AGPL-3.0-or-later"]
+[[licenses.exceptions]]
+name = "sapho-core"
+allow = ["AGPL-3.0-or-later"]
+[[licenses.exceptions]]
+name = "sapho-graph"
+allow = ["AGPL-3.0-or-later"]
+[[licenses.exceptions]]
+name = "sapho-runtime"
+allow = ["AGPL-3.0-or-later"]
+[[licenses.exceptions]]
+name = "sapho-jev"
+allow = ["AGPL-3.0-or-later"]
+[[licenses.exceptions]]
+name = "sapho-recording"
+allow = ["AGPL-3.0-or-later"]

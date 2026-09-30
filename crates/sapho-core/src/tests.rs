@@ -1,0 +1,420 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Agent-IX
+//! Offline acceptance tests for the core value and extension contracts.
+use super::*;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, atomic::AtomicBool},
+    time::{Duration, Instant},
+};
+
+fn p(v: f64) -> Probability {
+    Probability::new(v).unwrap()
+}
+fn choice() -> NamedQuestion {
+    NamedQuestion {
+        id: "q".into(),
+        question: Question::Choice {
+            instructions: "Select the described class".into(),
+            options: vec![
+                ChoiceOption {
+                    label: "z".into(),
+                    description: "z class".into(),
+                },
+                ChoiceOption {
+                    label: "a".into(),
+                    description: "a class".into(),
+                },
+            ],
+        },
+    }
+}
+fn request(q: Vec<NamedQuestion>) -> ModelRequest {
+    ModelRequest {
+        backend: BackendId::new("judge").unwrap(),
+        model: "model-1".into(),
+        expected_model: None,
+        state: Value::Record(BTreeMap::new()),
+        questions: q,
+    }
+}
+fn response(a: Answer) -> ModelResponse {
+    ModelResponse {
+        model: "model-1".into(),
+        answers: BTreeMap::from([("q".into(), a)]),
+        usage: None,
+    }
+}
+
+/// Trace: FR-001-AC-1, FR-001-AC-2, FR-001-AC-3
+#[test]
+fn value_boundaries_preserve_types_and_refuse_invalid_data() {
+    let d = Datum::new(
+        "one",
+        Value::Record(BTreeMap::from([(
+            "text".into(),
+            Value::Text("same".into()),
+        )])),
+    )
+    .unwrap();
+    let v = Value::List(vec![d.clone()]);
+    let bytes = serde_json::to_vec(&v).unwrap();
+    assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), v);
+    let ty = ValueType::list(ValueType::Record {
+        fields: BTreeMap::from([("text".into(), ValueType::Text)]),
+    });
+    ty.check(&v).unwrap();
+    assert_eq!(
+        Value::List(vec![d.clone(), d]).validate().unwrap_err().code,
+        ErrorCode::DuplicateId
+    );
+    for n in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            Value::Number(n).validate().unwrap_err().code,
+            ErrorCode::InvalidValue
+        );
+    }
+    for n in [-0.1, 1.1, f64::NAN] {
+        assert!(Probability::new(n).is_err());
+        assert!(Degree::new(n).is_err());
+    }
+    assert!(serde_json::from_str::<Probability>("1.1").is_err());
+    assert_eq!(
+        ValueType::Number
+            .check(&Value::Optional(None))
+            .unwrap_err()
+            .code,
+        ErrorCode::TypeMismatch
+    );
+    ValueType::optional(ValueType::Number)
+        .check(&Value::Optional(None))
+        .unwrap();
+    let mut nested = Value::Boolean(false);
+    for _ in 0..32 {
+        nested = Value::Optional(Some(Box::new(nested)));
+    }
+    assert_eq!(
+        nested.validate().unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+    let source = SourceRef {
+        source: SourceId::new("synthetic").unwrap(),
+        start: Some(5),
+        end: Some(4),
+    };
+    assert_eq!(source.validate().unwrap_err().code, ErrorCode::InvalidValue);
+    let wrong = Value::Record(BTreeMap::from([("extra".into(), Value::Text("x".into()))]));
+    assert_eq!(
+        ValueType::Record {
+            fields: BTreeMap::new()
+        }
+        .check(&wrong)
+        .unwrap_err()
+        .code,
+        ErrorCode::TypeMismatch
+    );
+}
+/// Trace: FR-002-AC-1, FR-002-AC-2, FR-002-AC-3
+#[test]
+fn repeated_text_keeps_occurrences_and_source_unions() {
+    let first = SourceRef {
+        source: SourceId::new("sentence").unwrap(),
+        start: Some(0),
+        end: Some(3),
+    };
+    let second = SourceRef {
+        source: SourceId::new("sentence").unwrap(),
+        start: Some(8),
+        end: Some(11),
+    };
+    let mut a = Datum::new("first", Value::Text("API".into())).unwrap();
+    a.sources.push(first.clone());
+    let mut b = Datum::new("second", Value::Text("API".into())).unwrap();
+    b.sources.push(second.clone());
+    Value::List(vec![a.clone(), b.clone()]).validate().unwrap();
+    assert_ne!(a.id, b.id);
+    a.inherit_sources([first.clone(), second.clone()]);
+    assert_eq!(a.sources, vec![first, second]);
+    assert_eq!(b.sources.len(), 1);
+}
+struct Identity;
+impl Primitive for Identity {
+    fn signature(&self) -> Signature {
+        Signature {
+            inputs: BTreeMap::from([("value".into(), ValueType::Text)]),
+            outputs: BTreeMap::from([("result".into(), ValueType::Text)]),
+        }
+    }
+    fn execute(
+        &self,
+        ctx: &PrimitiveContext,
+        inputs: &Inputs,
+        _: &BTreeMap<String, Value>,
+    ) -> Result<Inputs> {
+        ctx.check_cancelled()?;
+        Ok(Inputs::from([(
+            "result".into(),
+            inputs.get("value").unwrap().clone(),
+        )]))
+    }
+}
+/// Trace: FR-003-AC-1, FR-003-AC-2, FR-006-AC-2
+#[test]
+fn registry_collisions_never_replace_the_first_binding() {
+    let id = PrimitiveId::new("identity").unwrap();
+    let mut registry = PrimitiveRegistry::default();
+    registry.register(id.clone(), Arc::new(Identity)).unwrap();
+    assert_eq!(
+        registry
+            .register(id.clone(), Arc::new(Identity))
+            .unwrap_err()
+            .code,
+        ErrorCode::DuplicateId
+    );
+    let implementation = registry.get(&id).unwrap();
+    let context = PrimitiveContext::new(
+        Instant::now() + Duration::from_secs(5),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let inputs = Inputs::from([(
+        "value".into(),
+        Datum::new("x", Value::Text("exact".into())).unwrap(),
+    )]);
+    let out = implementation
+        .execute(&context, &inputs, &BTreeMap::new())
+        .unwrap();
+    assert_eq!(out["result"].value, Value::Text("exact".into()));
+    let mut backends = BackendRegistry::default();
+    let bid = BackendId::new("judge").unwrap();
+    let b = BackendBinding {
+        backend: Arc::new(Refusing),
+        model: "model-1".into(),
+        expected_model: None,
+    };
+    backends.register(bid.clone(), b.clone()).unwrap();
+    assert_eq!(
+        backends.register(bid, b).unwrap_err().code,
+        ErrorCode::DuplicateId
+    );
+}
+/// Trace: FR-004-AC-1, FR-004-AC-2
+#[test]
+fn typed_question_spaces_keep_order_and_validate_cardinality() {
+    let q = vec![
+        choice(),
+        NamedQuestion {
+            id: "b".into(),
+            question: Question::Boolean {
+                instructions: "Is the condition true?".into(),
+                yes: "true".into(),
+                no: "false".into(),
+            },
+        },
+        NamedQuestion {
+            id: "s".into(),
+            question: Question::Score {
+                instructions: "Rate the severity".into(),
+                levels: vec!["none".into(), "high".into()],
+            },
+        },
+    ];
+    validate_questions(&q).unwrap();
+    let encoded = serde_json::to_vec(&q).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Vec<NamedQuestion>>(&encoded).unwrap(),
+        q
+    );
+    assert_eq!(q[0].question.labels(), vec!["z", "a"]);
+    assert!(validate_questions(&[choice(), choice()]).is_err());
+    let mut bad = choice();
+    if let Question::Choice { options, .. } = &mut bad.question {
+        options[1].label = "z".into();
+    }
+    assert!(validate_questions(&[bad]).is_err());
+    for labels in [vec!["only"], vec![" ", "valid"]] {
+        let bad = NamedQuestion {
+            id: "bad".into(),
+            question: Question::Choice {
+                instructions: "classify".into(),
+                options: labels
+                    .into_iter()
+                    .map(|label| ChoiceOption {
+                        label: label.into(),
+                        description: "synthetic option".into(),
+                    })
+                    .collect(),
+            },
+        };
+        assert_eq!(
+            validate_questions(&[bad]).unwrap_err().code,
+            ErrorCode::InvalidValue
+        );
+    }
+    assert!(
+        validate_questions(&[NamedQuestion {
+            id: "x".into(),
+            question: Question::Score {
+                instructions: "rate".into(),
+                levels: vec!["one".into()]
+            }
+        }])
+        .is_err()
+    );
+}
+/// Trace: FR-005-AC-1, FR-005-AC-2, FR-005-AC-3, FR-020-AC-1, FR-020-AC-2, FR-020-AC-3
+#[test]
+fn answers_distinguish_complete_partial_unavailable_and_expected_score() {
+    let req = request(vec![choice()]);
+    let complete = response(Answer::Choice {
+        selected: "z".into(),
+        confidence: p(0.7),
+        probabilities: Some(BTreeMap::from([("z".into(), p(0.7)), ("a".into(), p(0.3))])),
+    });
+    let answers = validate_response(&req, &complete).unwrap();
+    assert_eq!(
+        answers.distribution_state("q").unwrap(),
+        DistributionState::Complete
+    );
+    assert_eq!(
+        answers
+            .probability("q", &["z".into(), "a".into()])
+            .unwrap()
+            .get(),
+        1.0
+    );
+    let partial = response(Answer::Choice {
+        selected: "z".into(),
+        confidence: p(0.7),
+        probabilities: Some(BTreeMap::from([("z".into(), p(0.7))])),
+    });
+    let answers = validate_response(&req, &partial).unwrap();
+    assert_eq!(
+        answers.distribution_state("q").unwrap(),
+        DistributionState::Partial
+    );
+    assert_eq!(
+        answers.probability("q", &["a".into()]).unwrap_err().code,
+        ErrorCode::UnsupportedDistribution
+    );
+    let absent = response(Answer::Choice {
+        selected: "z".into(),
+        confidence: p(0.7),
+        probabilities: None,
+    });
+    assert_eq!(
+        validate_response(&req, &absent)
+            .unwrap()
+            .distribution_state("q")
+            .unwrap(),
+        DistributionState::Unavailable
+    );
+    let mut bad = complete.clone();
+    bad.answers.insert(
+        "extra".into(),
+        Answer::Boolean {
+            probability: p(0.2),
+        },
+    );
+    assert!(validate_response(&req, &bad).is_err());
+    bad = complete.clone();
+    bad.answers.insert(
+        "q".into(),
+        Answer::Boolean {
+            probability: p(0.2),
+        },
+    );
+    assert_eq!(
+        validate_response(&req, &bad).unwrap_err().code,
+        ErrorCode::InvalidAnswer
+    );
+    bad = response(Answer::Choice {
+        selected: "unknown".into(),
+        confidence: p(0.7),
+        probabilities: None,
+    });
+    assert!(validate_response(&req, &bad).is_err());
+    bad = response(Answer::Choice {
+        selected: "z".into(),
+        confidence: p(0.7),
+        probabilities: Some(BTreeMap::from([("z".into(), p(0.7)), ("a".into(), p(0.7))])),
+    });
+    assert!(validate_response(&req, &bad).is_err());
+    let invalid_answers = Answers {
+        questions: req.questions.clone(),
+        values: bad.answers,
+    };
+    assert_eq!(
+        invalid_answers.distribution_state("q").unwrap_err().code,
+        ErrorCode::InvalidAnswer
+    );
+    let qr = request(vec![NamedQuestion {
+        id: "q".into(),
+        question: Question::Score {
+            instructions: "rate".into(),
+            levels: vec!["none".into(), "low".into(), "high".into()],
+        },
+    }]);
+    let score = response(Answer::Score {
+        expected: 1.4,
+        confidence: p(0.6),
+        probabilities: None,
+    });
+    assert_eq!(
+        validate_response(&qr, &score).unwrap().values["q"],
+        score.answers["q"]
+    );
+    let qr = request(vec![NamedQuestion {
+        id: "q".into(),
+        question: Question::Boolean {
+            instructions: "true?".into(),
+            yes: "yes".into(),
+            no: "no".into(),
+        },
+    }]);
+    let boolean = response(Answer::Boolean {
+        probability: p(0.7),
+    });
+    let answers = validate_response(&qr, &boolean).unwrap();
+    assert!((answers.probability("q", &["false".into()]).unwrap().get() - 0.3).abs() < 1e-12);
+    let mut strict = req;
+    strict.expected_model = Some("other".into());
+    assert_eq!(
+        validate_response(&strict, &complete).unwrap_err().code,
+        ErrorCode::ModelMismatch
+    );
+}
+struct Refusing;
+#[async_trait::async_trait]
+impl ModelBackend for Refusing {
+    async fn infer(&self, _: &ModelRequest) -> Result<ModelResponse> {
+        Err(SaphoError::new(ErrorCode::BackendFailed, "offline refusal"))
+    }
+}
+/// Trace: FR-006-AC-1, FR-006-AC-3
+#[tokio::test]
+async fn custom_backend_errors_cross_the_shared_port() {
+    let backend: Arc<dyn ModelBackend> = Arc::new(Refusing);
+    assert_eq!(
+        backend
+            .infer(&request(vec![choice()]))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::BackendFailed
+    );
+}
+/// Trace: FR-011-AC-1, FR-027-AC-3
+#[test]
+fn byte_accounting_refuses_before_growing_a_serialized_buffer() {
+    let value = Value::Text("x".repeat(100));
+    let actual = serde_json::to_vec(&value).unwrap();
+    assert_eq!(bounded_json(&value, actual.len()).unwrap(), actual);
+    assert_eq!(
+        bounded_json(&value, actual.len() - 1).unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+    assert_eq!(
+        measured_json_bytes(&value, actual.len()).unwrap(),
+        actual.len()
+    );
+}

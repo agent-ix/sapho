@@ -1,0 +1,58 @@
+[workspace]
+members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-recording"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/agent-ix/sapho"
+authors = ["Agent IX <agent@agent-ix.dev>"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+thiserror = "2"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+futures = "0.3"
+toml = "0.8"
+sapho-core = { path = "crates/sapho-core", version = "0.1.0" }
+sapho-graph = { path = "crates/sapho-graph", version = "0.1.0" }
+sapho-runtime = { path = "crates/sapho-runtime", version = "0.1.0" }
+sapho-recording = { path = "crates/sapho-recording", version = "0.1.0" }
+sapho-jev = { path = "crates/sapho-jev", version = "0.1.0" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[package]
+name = "sapho"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "AGPL-3.0-or-later"
+repository.workspace = true
+description = "Embedding facade for the Sapho configurable judgment graph engine."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+jev = ["dep:sapho-jev"]
+
+[dependencies]
+sapho-core.workspace = true
+sapho-graph.workspace = true
+sapho-runtime.workspace = true
+sapho-recording.workspace = true
+sapho-jev = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+async-trait.workspace = true
+serde_json.workspace = true
+tempfile = "3"
