@@ -32,13 +32,13 @@ The declared typed result, or a structured SaphoError. Runtime failures carry a 
 
 ## Behavior
 
-The host configures SDK credentials and endpoint outside graph config. Adapter construction disables SDK retries; one backend invocation produces at most one transport attempt. Runtime owns deadline and model-call count, while host opt-in model tests require explicit credentials. Unauthorized, rate limited, validation and network failures remain distinguishable codes. The adapter has no silent model fallback, endpoint switching or learned routing; actual identity is reported and optional expected identity is enforced by core validation.
+The host configures SDK credentials and endpoint outside graph config. Adapter construction disables SDK retries; one backend invocation produces at most one transport attempt. Runtime owns deadline and model-call count, while host opt-in model tests require explicit credentials. HTTP400 and422 map to ServiceValidation without retaining unsafe provider bodies. Unauthorized, rate limited, validation and network failures remain distinguishable codes. The adapter has no silent model fallback, endpoint switching or learned routing; actual identity is reported and optional expected identity is enforced by core validation.
 
 ## Acceptance Criteria
 
 | ID | Criteria | Verification |
 |----|----------|--------------|
-| FR-026-AC-1 | 401, 422, 429 and connection errors are returned under distinct structured error codes. | Test (TC-026) |
+| FR-026-AC-1 | 400/422 request refusals, 401, 429 and connection errors are returned under distinct structured error codes. | Test (TC-026) |
 | FR-026-AC-2 | A permanently rate-limited response causes one attempt and no invented answer. | Test (TC-026) |
 | FR-026-AC-3 | A configured expected-model mismatch fails with the actual identity retained in evidence. | Test (TC-026) |
 

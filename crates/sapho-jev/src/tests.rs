@@ -158,6 +158,7 @@ async fn sdk_failures_are_classified_sanitized_and_never_retried() {
     for (status, code) in [
         (401, ErrorCode::Unauthorized),
         (403, ErrorCode::Unauthorized),
+        (400, ErrorCode::ServiceValidation),
         (422, ErrorCode::ServiceValidation),
         (429, ErrorCode::RateLimited),
         (503, ErrorCode::BackendFailed),
