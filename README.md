@@ -1,4 +1,10 @@
+<p align="center">
+  <img src="sapho-1.png" alt="Sapho logo" width="480" />
+</p>
+
 # Sapho
+
+[![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/6qsdhSPE)
 
 Sapho composes model judgments, host Rust functions and explicit logic in a typed,
 bounded graph. The name comes from the juice Mentats drink to aid calculation.
