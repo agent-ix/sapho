@@ -1,149 +1,153 @@
 <p align="center">
-  <img src="sapho-1.png" alt="Sapho logo" width="480" />
+  <img src="sapho-1.png" alt="Sapho logo" width="240" />
 </p>
 
 # Sapho
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/6qsdhSPE)
 
-Sapho composes model judgments, host Rust functions and explicit logic in a typed,
-bounded graph. The name comes from the juice Mentats drink to aid calculation.
-This is an embedding library: consumers own extraction, questions, domain
-interpretations, review invocation and enforcement.
+**Build configurable evaluations from model judgments, Rust code and explicit logic.**
 
-## Workspace boundaries
+Sapho is a Rust library for applications that need to turn uncertain judgments
+into repeatable decisions. A model can identify an actor in a requirement,
+assess a code fragment or judge a relationship. Your application still needs
+to combine those answers with facts, apply a policy and explain the result.
+Sapho gives you a typed graph for that whole evaluation.
 
-| Crate | Responsibility | Internal dependencies |
-|---|---|---|
-| `sapho-core` | Values, source spans, question/answer contracts, primitive and backend ports | none |
-| `sapho-graph` | TOML definitions, type checking, dependency ordering | core |
-| `sapho-runtime` | Execution, guards, collection operations, logic, limits, traces | graph, core |
-| `sapho-jev` | Hosted System One translation through TypeSafe SDK | core |
-| `sapho-recording` | Explicit bounded recording and exact offline replay | core |
-| `sapho` | Embedding facade; optional `jev` feature | graph, runtime, recording, core; optional Jev |
+Define the workflow in TOML, register your Rust functions and model backends,
+then run it on your application's inputs. Change the questions, combinations
+or thresholds without rewriting the executor. Every run returns its outputs
+and an execution trace.
 
-Logic is a specification module within the runtime crate. Local Laya/KEV support
-can implement `ModelBackend`; no local model runner is included in this version.
+![An application supplies inputs to a graph of Rust transformations, model questions and logic; Sapho returns decisions and evidence.](docs/images/evaluation-flow.png)
 
-## Embedding
+The name comes from the juice Mentats drink to aid their mental calculations.
 
-Depend on `sapho` through its local checkout or private Git repository. Register
-Rust `Primitive` implementations with typed input/output signatures. Parse a
-consumer-owned TOML graph using `GraphSpec::parse`, then `compile` with the
-primitive registry. Compilation checks every definition without executing code
-or inference. Supply named `BackendBinding`s to `Engine::new`, then call `run`
-with identified inputs and explicit `RunLimits`.
+## What you can build
 
-Every code node names a registered primitive; graph config cannot load a plugin,
-execute a script or read a path. Native code can create later `Questions` from
-earlier `Answers`. One `ask` node is one ordered question batch with one Record
-state. Separate ready asks run within the configured concurrency ceiling.
+- **Code review:** extract code units, ask focused questions, combine judgments
+  with static facts, and return advisory findings to a PR or editor workflow.
+- **Requirement analysis:** classify statements, identify roles, evaluate
+  candidate relationships and assemble findings across several model stages.
+- **Semantic checks:** keep domain rules in configuration while choosing a
+  backend for each question stage.
 
-This complete TOML graph negates a Boolean input:
+Your application supplies the extraction, questions and meaning of the result.
+Sapho runs and connects them. Jev support is included as an optional feature;
+you can implement the same backend interface for local Laya, KEV or other models.
+
+## Features
+
+- **Checked graph configuration.** Compilation checks connections, types and
+  dependencies before any Rust function or model call executes.
+- **Typed questions and answers.** Batch Boolean, choice and ordinal-score
+  questions, then project the evidence you need for later stages.
+- **Explicit logic.** Combine Boolean facts with `and`, `or` and `not`; combine
+  heuristic strengths with minimum, maximum, weighted mean and complement.
+  Apply thresholds with a comparator you choose.
+- **Collections and dependent stages.** Map reusable graphs over items, filter
+  results, form candidate pairs, join records and feed earlier answers into
+  later questions. Guards skip work when a condition is false.
+- **Evidence and replay.** Preserve item identity and source references, inspect
+  intermediate results, and replay recorded model exchanges offline while
+  trying a different combination or threshold.
+- **Bounded execution.** Set ceilings for work, collection expansion, model
+  calls, concurrency, serialized data and duration.
+
+## How logic combines
+
+Suppose a review rule needs three pieces of supporting evidence. After making
+each interpretation explicit, you have strengths of **0.8, 0.4 and 0.6**.
+The combination expresses your rule's policy:
+
+- **Minimum → 0.4:** every part matters; the weakest part limits the result.
+- **Maximum → 0.8:** the strongest supporting part is sufficient.
+- **Weighted mean → 0.65:** balance the evidence, giving the first part twice
+  the weight of each other part.
+
+![Three input strengths combined by minimum, maximum and weighted mean.](docs/images/degree-combiners.png)
+
+The result is a **heuristic degree**, a strength between zero and one. It is
+not a calibrated probability that a compound statement is true. A separate
+comparison turns that degree into a Boolean decision: for example,
+`strength < 0.7` means "send this item for review." You choose both the
+combination and the threshold.
+
+The [logic walkthrough](docs/user-guide.md#combine-logic-and-evidence) explains
+the formulas, types, empty inputs and complete graph configuration.
+
+## Start using Sapho
+
+Sapho is an embedding library: call it from your Rust application, service,
+CLI or review adapter. Use Rust 1.98 or later; this repository pins 1.98.1.
+Depend on the Git repository with an account that has access:
 
 ```toml
-[inputs.fact]
-kind = "boolean"
-
-[[nodes]]
-id = "negate"
-[nodes.operation]
-kind = "not"
-[nodes.inputs.value]
-kind = "input"
-name = "fact"
-
-[outputs.result]
-kind = "node"
-node = "negate"
-port = "result"
+[dependencies]
+sapho = { git = "https://github.com/agent-ix/sapho.git" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-See the compiled [embedding example](src/lib.rs),
-[public API integration scenarios](tests/engine.rs), and
-[synthetic consumer composition](tests/scenarios/ears.rs). The consumer test
-extracts phrase occurrences, classifies roles, filters by identified masks,
-forms actor/action pairs, asks dependent relationship questions and assembles
-selected edges. All those domain primitives live only in the test harness.
+For development alongside a checkout, use
+`sapho = { path = "../sapho" }` instead. Pin a tested Git revision with `rev`
+when you need a fixed dependency version.
 
-## Values and logic
+The integration flow is:
 
-`Datum` carries an item identity, typed value and opaque source spans. Repeated
-text retains distinct IDs. Maps preserve item order and identity; filters align
-Boolean masks by ID; Cartesian pairs and many-to-many keyed joins preserve
-left/right order; collect flattens one level and rejects identity collisions.
-Record-field projections are explicit bindings.
+1. Define input types, nodes and outputs in a TOML graph.
+2. Register any Rust primitives and model bindings the graph names.
+3. Parse and compile the graph, then construct an `Engine`.
+4. Supply identified inputs and `RunLimits`, and await `engine.run(...)`.
+5. Use the outputs in your application; retain the trace when you need evidence.
 
-Boolean facts, probabilities, heuristic degrees and Optional absence have
-distinct types. Guards produce Optional outputs; `coalesce` replaces only
-absence. Choice distributions remain complete, partial or unavailable. A
-projection that requests missing mass fails instead of inventing a probability.
-Expected ordinal scores may be fractional. Conversion into Degree is explicit.
-Min, max, complement and weight-normalized mean are heuristic operations;
-they do not establish calibrated truth. Reductions declare an empty value and
-thresholds use an explicit scalar comparator, including the equality boundary.
+Start with the [complete offline example](docs/user-guide.md#run-your-first-graph).
+It compares a supplied probability against a review threshold and needs no
+model credentials. Then follow the
+[model-question example](docs/user-guide.md#ask-model-questions) to produce
+that evidence inside the graph.
 
-## Backends, evidence and bounds
+Enable the adapter when you want Jev:
 
-With feature `jev`, construct `JevBackend` from a host-configured SDK client.
-The host owns credentials, endpoint, requested model and optional strict actual
-model identity. Each graph inference has one attempt; Sapho disables SDK
-retries. No live service, credential or model download is needed for tests.
+```toml
+sapho = { git = "https://github.com/agent-ix/sapho.git", features = ["jev"] }
+```
 
-`run` returns outputs plus ordered trace evidence, or a failure plus a partial
-trace. Requests and available raw typed responses remain visible in the trace,
-including answer-validation failures. Jev diagnostics omit provider bodies that
-could echo authorization. The caller owns sensitive input handling and decides
-whether to export any evidence.
+See [Jev setup](docs/user-guide.md#connect-jev) for client configuration and
+[custom backends](docs/user-guide.md#use-another-model-backend) for other models.
 
-`RecordingBackend` decorates a backend with a finite in-memory ceiling. Export
-and synchronous file I/O are explicit. `ReplayBackend` has no live delegate and
-matches the complete reconstructed request, including state, option order and
-model binding. Re-run the same executor with replay to compare logic changes.
-Changed model questions/context cause `ReplayMiss`. Conflicting saved answers
-for an identical request are refused; this first version cannot replay a
-nondeterministic sequence of identical requests.
+## User guide and integration choices
 
-Limits apply across mapped work: node instances, collection expansion, model
-requests, concurrent work, cumulative serialized data bytes and monotonic run
-duration. Definitions are capped at 4096 nodes, map nesting at 16, value/type
-nesting at 32 and TOML input at 1 MiB. Count expansion is checked before
-allocation; bounded serialization avoids an oversized JSON scratch buffer.
-These are work/data accounting ceilings, not a process-memory sandbox.
-Host-native functions run off async workers, must cooperate with cancellation,
-and remain responsible for allocations inside their own implementations.
-Dropping pending model futures cancels their awaited work.
+The [full user guide](docs/user-guide.md) covers installation, runnable graphs,
+question types, logic, Rust extensions, multi-stage evaluation, source
+references, limits, errors, recording and replay.
 
-## Specification and checks
+Use the `sapho` facade for normal integration: `sapho::core` supplies values and
+extension traits, `sapho::graph` compiles configuration, `sapho::runtime` runs
+it, and `sapho::recording` adds model recording and replay. The `jev` feature
+adds `sapho::jev`.
 
-The [full master spec](spec/spec.md) links six module specs and 29 functional
-requirements. The base, integrity, scope-boundary and dependency reviews were
-completed before implementation. Tests carry acceptance-criterion `Trace:` tags.
-The final Rust review is under `reviews/`.
+If you only implement a model adapter, depend on `sapho-core`. If you only
+validate graph configuration, use `sapho-graph`. The
+[crate selection guide](docs/user-guide.md#choose-your-dependencies) explains
+the smaller dependencies available for those integrations.
 
-Rust is pinned in `rust-toolchain.toml`. `make test` runs both feature lanes;
-`make ci` runs formatting, both Clippy/test lanes, supply-chain checks, unsafe
-checks, docs and local Quire validation. `make build` builds the workspace in
-release mode. All commands use the workspace's `target/` directory. CI retains
-the scaffold's manual invocation policy. Spec validation uses the locally
-installed Quire tool; Rust CI does not assume an unpublished spec-tool install.
+## Behavior reference
+
+The user guide is the starting point for using Sapho. The
+[behavior specifications](spec/spec.md) define the contracts behind it:
+[values and answers](spec/modules/core/spec.md),
+[graph configuration](spec/modules/graph/spec.md),
+[execution](spec/modules/runtime/spec.md),
+[logic](spec/modules/logic/spec.md),
+[Jev translation](spec/modules/jev/spec.md) and
+[recording and replay](spec/modules/recording/spec.md).
+Use these when checking a boundary condition or implementing an adapter.
+
+Generate local API documentation with `cargo doc --no-deps --open`;
+add `--features jev` for the Jev adapter.
 
 ## License and contributions
 
-AGPL-3.0-or-later. Read [content rights](CONTENT_RIGHTS.md),
-[contributing](CONTRIBUTING.md) and the [CLA](CLA.md) before contributing.
-Private examples, model recordings and model weights are not repository assets.
-
-## Approximate provider distributions
-
-Every backend binding explicitly chooses `DistributionPolicy::Strict {}` or
-`DistributionPolicy::approximate(0.01)?`. The latter accepts complete totals
-within the configured absolute error plus numerical roundoff;0.01 is a host
-acceptance choice, not a provider precision guarantee. Bounds must be positive
-and at most0.05. Requests/Answers/recordings retain this policy. Raw probabilities,
-confidence and score remain unchanged. `Answers::distribution_adjustment` exposes
-raw mass and derived scale; `probability` applies that scale only to accepted
-complete approximate distributions. Partial distributions are never normalized.
-Replay must use the same policy; differing policies produce ReplayMiss.
-This prerelease contract requires explicit policy fields; older recordings are
-not accepted by a compatibility reader.
+Sapho is licensed under [AGPL-3.0-or-later](LICENSE). For contributions, read
+[CONTRIBUTING.md](CONTRIBUTING.md), [content rights](CONTENT_RIGHTS.md) and the
+[CLA](CLA.md). Join us on [Discord](https://discord.gg/6qsdhSPE).
