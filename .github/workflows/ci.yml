@@ -29,4 +29,4 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
-      - run: cargo deny --all-features check
+      - run: cargo deny --workspace --all-features --locked check

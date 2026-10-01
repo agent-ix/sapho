@@ -47,3 +47,16 @@ FAIL at the reviewed revision. Fix both findings before merge; preserve the find
 ## Final Review Verdict
 
 PASS after verifying the fix diff. Additional verification at 9d19ae25d2ed54463eab091f838b868670fa1bf6 exercises actual working-tree/staged/revision selectors through the stock CLI and the same typed graph boundary. Guide text now states stdin/file acquisition limits explicitly. Full gate results are recorded separately; no second independent reviewer is claimed.
+
+## Gate Findings
+
+The first complete gate passed both lint/test lanes but stopped at the supply-chain check. These additional findings were measured during the same review's fix round, not hidden by a passing test count.
+
+| ID | Severity | Summary | Refs |
+|---|---|---|---|
+| FND-003 | high | The root package is not a virtual workspace. Cargo-deny without --workspace roots only the facade and omits evidence/selection/CLI dependencies; its unmatched self-crate exceptions expose that omitted gate coverage. | Makefile:23, .github/workflows/ci.yml:38 |
+| FND-004 | medium | The stack-growth dependency brings a build-only archive writer with Apache-2.0 WITH LLVM-exception, which the original allowlist does not recognize. The first full gate refuses this exact expression. | Cargo.lock:25, deny.toml:1 |
+
+The authoritative cargo-deny help confirms --workspace root selection. The authoritative ar_archive_writer 0.5.3 LICENSE.txt was read in the Cargo cache: its exceptions add redistribution permissions to Apache-2.0. The policy change is restricted to this examined build-only crate/version, preserving the global allowlist, advisory checks and all Sapho AGPL licensing. No dependency license file is copied into this repository.
+
+The strengthened workspace check additionally found Windows capability dependency winx 0.36.4 with the same Apache/LLVM expression. Its authoritative LICENSE was read locally; its permission is likewise restricted to that exact dependency version. Cross-platform dependencies remain in the gate even on this Linux host.
