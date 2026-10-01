@@ -36,3 +36,14 @@ Scoped lint passed with all features. CLI acceptance passed with 9 default-lane 
 ## Verdict
 
 FAIL at the reviewed revision. Fix both findings before merge; preserve the findings and record their dispositions separately.
+
+## Dispositions
+
+| Finding | Outcome | Evidence |
+|---|---|---|
+| FND-001 | fixed 2a9c2e206a5f96b36fd9ac6f6eee2e32708e4556 | `--includes` enumerates effective local filter definitions. The included-config marker test failed on the reviewed source and passes after the fix; direct filters remain disabled. |
+| FND-002 | fixed 2a9c2e206a5f96b36fd9ac6f6eee2e32708e4556 | A started child publishes its PID; acquisition returns Deadline and the reaped PID is absent. No elapsed-time threshold assertion. |
+
+## Final Review Verdict
+
+PASS after verifying the fix diff. Additional verification at 9d19ae25d2ed54463eab091f838b868670fa1bf6 exercises actual working-tree/staged/revision selectors through the stock CLI and the same typed graph boundary. Guide text now states stdin/file acquisition limits explicitly. Full gate results are recorded separately; no second independent reviewer is claimed.
