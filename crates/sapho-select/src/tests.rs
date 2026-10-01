@@ -394,6 +394,29 @@ fn git_submodules_refuse_and_repository_clean_filters_never_execute() {
     )
     .unwrap();
     assert!(!marker.exists());
+    git(root.path(), &["config", "--unset", "filter.probe.clean"]);
+    let included = root.path().join(".git/filters.conf");
+    std::fs::write(
+        &included,
+        format!("[filter \"probe\"]\n    clean = {command}\n"),
+    )
+    .unwrap();
+    git(
+        root.path(),
+        &["config", "include.path", included.to_str().unwrap()],
+    );
+    select_git(
+        root.path(),
+        &GitOptions::default(),
+        &Patterns::default(),
+        &SelectionLimits::default(),
+        "items",
+    )
+    .unwrap();
+    assert!(
+        !marker.exists(),
+        "included repository filter must not execute"
+    );
 }
 /// Trace: FR-040-AC-3
 #[cfg(target_os = "linux")]
@@ -434,4 +457,39 @@ fn overproducing_owned_git_process_is_killed_and_reaped() {
     ));
     let process = std::fs::read_to_string(pid).unwrap();
     assert!(!Path::new("/proc").join(process.trim()).exists());
+}
+
+/// Trace: FR-040-AC-3
+#[cfg(target_os = "linux")]
+#[test]
+fn started_git_child_is_killed_and_reaped_when_its_deadline_expires() {
+    use std::{os::unix::fs::PermissionsExt, time::Duration};
+    let root = tempfile::tempdir().unwrap();
+    let program = root.path().join("waiting-git");
+    let pid = root.path().join("started");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\necho $$ > '{}'\nwhile :; do :; done\n",
+            pid.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let result = select_git(
+        root.path(),
+        &GitOptions {
+            program,
+            ..GitOptions::default()
+        },
+        &Patterns::default(),
+        &SelectionLimits {
+            duration: Duration::from_secs(1),
+            ..SelectionLimits::default()
+        },
+        "items",
+    );
+    assert!(matches!(result, Err(SelectionError::Deadline)));
+    let identity = std::fs::read_to_string(pid).unwrap(); // positive proof the owned child started
+    assert!(!Path::new("/proc").join(identity.trim()).exists());
 }

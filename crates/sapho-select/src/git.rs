@@ -134,6 +134,7 @@ pub fn select_git(
     let filters = git.output(&[
         "config".into(),
         "--local".into(),
+        "--includes".into(),
         "--null".into(),
         "--name-only".into(),
         "--get-regexp".into(),
