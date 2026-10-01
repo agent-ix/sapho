@@ -661,7 +661,7 @@ fn approximation_never_normalizes_partial_or_unavailable_distributions() {
     assert_eq!(error.context["coverage"], "partial");
 }
 
-/// Trace: FR-032-AC-1, FR-032-AC-2
+/// Trace: FR-032-AC-1, FR-032-AC-2, TC-032
 #[test]
 fn plain_json_conversion_is_schema_directed_and_checked() {
     let number = serde_json::json!(0.75);

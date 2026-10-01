@@ -45,7 +45,7 @@ fn err(spec: &GraphSpec) -> ErrorCode {
         .unwrap()
         .code
 }
-/// Trace: FR-007-AC-1, FR-007-AC-2, FR-007-AC-3
+/// Trace: FR-007-AC-1, FR-007-AC-2, FR-007-AC-3, TC-007
 #[test]
 fn yaml_and_json_share_a_checked_declarative_program() {
     let text = r#"

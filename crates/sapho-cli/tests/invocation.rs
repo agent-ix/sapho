@@ -54,7 +54,7 @@ fn result(output: &Output) -> serde_json::Value {
 fn path(path: &Path) -> &str {
     path.to_str().unwrap()
 }
-/// Trace: FR-033-AC-1, FR-033-AC-2, FR-033-AC-3, FR-034-AC-1, FR-034-AC-2
+/// Trace: FR-033-AC-1, FR-033-AC-2, FR-033-AC-3, FR-034-AC-1, FR-034-AC-2, TC-033, TC-034
 #[test]
 fn cli_inspection_file_stdin_types_exits_and_refusals_are_real() {
     let root = tempfile::tempdir().unwrap();
@@ -236,7 +236,7 @@ fn text_input(text: &str) -> Inputs {
         Datum::new("text", Value::Text(text.into())).unwrap(),
     )])
 }
-/// Trace: FR-034-AC-3, FR-035-AC-1, FR-035-AC-2, FR-035-AC-3, FR-037-AC-2
+/// Trace: FR-034-AC-3, FR-035-AC-1, FR-035-AC-2, FR-035-AC-3, FR-037-AC-2, TC-035
 #[tokio::test]
 async fn scripted_multilayer_capture_replays_exactly_and_preserves_partial_failures() {
     let spec = multilayer();
@@ -747,7 +747,7 @@ async fn custom_host_inspection_captures_contract_without_executing_native_work(
     );
     assert_eq!(count.load(Ordering::Relaxed), 1);
 }
-/// Trace: FR-042-AC-1, FR-042-AC-2, FR-042-AC-3, FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, FR-039-AC-1, FR-041-AC-3
+/// Trace: FR-042-AC-1, FR-042-AC-2, FR-042-AC-3, FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, FR-039-AC-1, FR-041-AC-3, TC-042
 #[test]
 fn packaged_workflows_validate_tune_combine_collect_record_and_replay_offline() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))

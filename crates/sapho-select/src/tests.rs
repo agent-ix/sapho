@@ -19,7 +19,7 @@ fn field<'a>(datum: &'a Datum, name: &str) -> &'a str {
     };
     text
 }
-/// Trace: FR-039-AC-1, FR-039-AC-2, FR-039-AC-3
+/// Trace: FR-039-AC-1, FR-039-AC-2, FR-039-AC-3, TC-039
 #[test]
 fn files_are_sorted_deduplicated_attributed_and_bounded() {
     let root = tempfile::tempdir().unwrap();
@@ -150,7 +150,7 @@ fn filesystem_symlinks_never_expose_outside_content() {
         Err(SelectionError::InvalidRoot(_))
     ));
 }
-/// Trace: FR-041-AC-1, FR-041-AC-2, FR-041-AC-3
+/// Trace: FR-041-AC-1, FR-041-AC-2, FR-041-AC-3, TC-041
 #[test]
 fn json_pointer_escapes_types_and_whole_document_sources_are_checked() {
     let bytes = br#"{"a/b":{"~key":[0.2,0.8]},"empty":[]}"#;
@@ -259,7 +259,7 @@ fn repository() -> tempfile::TempDir {
     git(root.path(), &["commit", "--quiet", "-m", "base"]);
     root
 }
-/// Trace: FR-040-AC-1, FR-040-AC-2, FR-040-AC-3
+/// Trace: FR-040-AC-1, FR-040-AC-2, FR-040-AC-3, TC-040
 #[cfg(unix)]
 #[test]
 fn git_modes_keep_complete_patches_and_literal_punctuation_paths() {

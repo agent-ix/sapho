@@ -36,7 +36,7 @@ fn outcomes(values: &[Value]) -> BTreeMap<ItemId, CaseOutcome> {
         })
         .collect()
 }
-/// Trace: FR-036-AC-1, FR-036-AC-3
+/// Trace: FR-036-AC-1, FR-036-AC-3, TC-036
 #[test]
 fn boolean_counts_have_exact_denominators_and_case_evidence() {
     let data = dataset(&[true, false, false, true]);
@@ -149,7 +149,7 @@ fn probability_scores_and_missing_degree_failures_remain_separate() {
         Some(UnscoredReason::MissingOutput)
     );
 }
-/// Trace: FR-037-AC-1, FR-037-AC-2, FR-037-AC-3
+/// Trace: FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, TC-037
 #[test]
 fn ranking_uses_complete_development_results_and_stable_ties() {
     let data = dataset(&[true, false]);
@@ -202,7 +202,7 @@ fn ranking_uses_complete_development_results_and_stable_ties() {
         Err(EvidenceError::NoCandidates)
     ));
 }
-/// Trace: FR-038-AC-1, FR-038-AC-2, FR-038-AC-3
+/// Trace: FR-038-AC-1, FR-038-AC-2, FR-038-AC-3, TC-038
 #[test]
 fn training_export_keeps_only_curated_development_rows_and_refuses_limits() {
     let mut data = dataset(&[true, false]);

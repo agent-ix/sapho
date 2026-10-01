@@ -5,7 +5,7 @@ use crate::common::*;
 use sapho::{core::*, graph::*};
 use std::collections::BTreeMap;
 
-/// Trace: FR-030-AC-1, FR-030-AC-2, FR-030-AC-3
+/// Trace: FR-030-AC-1, FR-030-AC-2, FR-030-AC-3, TC-030
 #[tokio::test]
 async fn assembled_records_project_fields_and_keep_sources() {
     let source = SourceRef {
@@ -96,7 +96,7 @@ async fn assembled_records_project_fields_and_keep_sources() {
             .is_err()
     );
 }
-/// Trace: FR-031-AC-1, FR-031-AC-2, FR-031-AC-3
+/// Trace: FR-031-AC-1, FR-031-AC-2, FR-031-AC-3, TC-031
 #[tokio::test]
 async fn list_occurrences_follow_order_share_limits_and_keep_each_source() {
     let source = SourceRef {
