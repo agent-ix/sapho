@@ -144,6 +144,7 @@ pub fn bindings(backend: Arc<dyn ModelBackend>) -> BackendRegistry {
     b.register(
         BackendId::new("judge").unwrap(),
         BackendBinding {
+            distribution_policy: sapho::core::DistributionPolicy::Strict {},
             backend,
             model: "model-1".into(),
             expected_model: Some("model-1".into()),

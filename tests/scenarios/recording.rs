@@ -195,6 +195,7 @@ async fn saved_exchanges_are_bounded_and_exclusive_file_writes_do_not_overwrite(
 #[tokio::test]
 async fn exact_matching_includes_option_order_model_state_and_backend() {
     let request = ModelRequest {
+        distribution_policy: sapho::core::DistributionPolicy::Strict {},
         backend: BackendId::new("judge").unwrap(),
         model: "model-1".into(),
         expected_model: None,
@@ -306,4 +307,185 @@ async fn failed_calls_never_become_successful_saved_exchanges() {
         ErrorCode::LimitExceeded
     );
     assert!(too_small.snapshot().unwrap().exchanges.is_empty());
+}
+
+/// Trace: FR-005-AC-4, FR-020-AC-4, FR-027-AC-1, FR-028-AC-4, FR-010-AC-3
+#[tokio::test]
+async fn approximate_graph_preserves_raw_trace_and_recording_and_replay_policy_identity() {
+    struct Rounded {
+        total: f64,
+    }
+    #[async_trait::async_trait]
+    impl ModelBackend for Rounded {
+        async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse> {
+            Ok(ModelResponse {
+                model: request.model.clone(),
+                usage: None,
+                answers: BTreeMap::from([(
+                    "q".into(),
+                    Answer::Choice {
+                        selected: "z".into(),
+                        confidence: probability(0.43),
+                        probabilities: Some(BTreeMap::from([
+                            ("z".into(), probability(0.6)),
+                            ("a".into(), probability(self.total - 0.6)),
+                        ])),
+                    },
+                )]),
+            })
+        }
+    }
+    fn configured(backend: Arc<dyn ModelBackend>, policy: DistributionPolicy) -> BackendRegistry {
+        let mut registry = BackendRegistry::default();
+        registry
+            .register(
+                BackendId::new("judge").unwrap(),
+                BackendBinding {
+                    backend,
+                    model: "model-1".into(),
+                    expected_model: None,
+                    distribution_policy: policy,
+                },
+            )
+            .unwrap();
+        registry
+    }
+    let mut spec = ask_graph(None);
+    spec.nodes[0].operation = Operation::Questions {
+        questions: vec![NamedQuestion {
+            id: "q".into(),
+            question: Question::Choice {
+                instructions: "Choose the synthetic class".into(),
+                options: vec![
+                    ChoiceOption {
+                        label: "z".into(),
+                        description: "first class".into(),
+                    },
+                    ChoiceOption {
+                        label: "a".into(),
+                        description: "second class".into(),
+                    },
+                ],
+            },
+        }],
+    };
+    spec.nodes.push(node(
+        "mass",
+        Operation::Probability {
+            question: "q".into(),
+            labels: vec!["z".into(), "a".into()],
+        },
+        [("answers", output("ask", "answers"))],
+    ));
+    spec.outputs.insert("mass".into(), output("mass", "result"));
+    for total in [0.99, 1.01] {
+        let policy = DistributionPolicy::approximate(0.01).unwrap();
+        let live = Arc::new(Rounded { total });
+        let recorder = Arc::new(RecordingBackend::new(live.clone(), 1_000_000).unwrap());
+        let result = engine(
+            &spec,
+            &PrimitiveRegistry::default(),
+            configured(recorder.clone(), policy),
+        )
+        .run(&Inputs::new(), limits())
+        .await
+        .unwrap();
+        assert!(
+            (match result.outputs["mass"].value {
+                Value::Probability(p) => p.get(),
+                _ => panic!("probability"),
+            } - 1.0)
+                .abs()
+                < 1e-12
+        );
+        let Value::Answers(answers) = &result.outputs["result"].value else {
+            panic!("answers")
+        };
+        assert_eq!(answers.distribution_policy, policy);
+        assert_eq!(
+            answers.distribution_state("q").unwrap(),
+            DistributionState::Approximate
+        );
+        assert!(
+            (answers
+                .distribution_adjustment("q")
+                .unwrap()
+                .unwrap()
+                .raw_mass
+                - total)
+                .abs()
+                < 1e-12
+        );
+        let evidence = result
+            .trace
+            .nodes
+            .iter()
+            .find_map(|n| n.model.as_ref())
+            .unwrap();
+        assert_eq!(evidence.request.distribution_policy, policy);
+        assert_eq!(evidence.response.as_ref().unwrap().answers, answers.values);
+        let saved = recorder.snapshot().unwrap();
+        assert_eq!(saved.exchanges.len(), 1);
+        assert_eq!(
+            &saved.exchanges[0].response,
+            evidence.response.as_ref().unwrap()
+        );
+        let loaded = Recording::from_json(&saved.to_json(1_000_000).unwrap(), 1_000_000).unwrap();
+        assert_eq!(loaded, saved);
+        let replay = Arc::new(ReplayBackend::new(&loaded, 1_000_000).unwrap());
+        let replayed = engine(
+            &spec,
+            &PrimitiveRegistry::default(),
+            configured(replay.clone(), policy),
+        )
+        .run(&Inputs::new(), limits())
+        .await
+        .unwrap();
+        assert_eq!(replayed.outputs, result.outputs);
+        assert_eq!(
+            serde_json::to_value(&replayed.trace).unwrap(),
+            serde_json::to_value(&result.trace).unwrap()
+        );
+        let miss = engine(
+            &spec,
+            &PrimitiveRegistry::default(),
+            configured(replay, DistributionPolicy::Strict {}),
+        )
+        .run(&Inputs::new(), limits())
+        .await
+        .unwrap_err();
+        assert_eq!(miss.error.code, ErrorCode::ReplayMiss);
+        let refused = engine(
+            &spec,
+            &PrimitiveRegistry::default(),
+            configured(live, DistributionPolicy::Strict {}),
+        )
+        .run(&Inputs::new(), limits())
+        .await
+        .unwrap_err();
+        assert_eq!(refused.error.code, ErrorCode::InvalidAnswer);
+        assert_eq!(refused.error.context["question"], "q");
+        let raw = refused
+            .trace
+            .nodes
+            .iter()
+            .find_map(|n| n.model.as_ref())
+            .unwrap()
+            .response
+            .as_ref()
+            .unwrap();
+        assert_eq!(raw.answers, answers.values);
+        let bad_recorder =
+            Arc::new(RecordingBackend::new(Arc::new(Rounded { total: 0.98 }), 1_000_000).unwrap());
+        let bad = engine(
+            &spec,
+            &PrimitiveRegistry::default(),
+            configured(bad_recorder.clone(), policy),
+        )
+        .run(&Inputs::new(), limits())
+        .await
+        .unwrap_err();
+        assert_eq!(bad.error.code, ErrorCode::InvalidAnswer);
+        assert!(bad_recorder.snapshot().unwrap().exchanges.is_empty());
+    }
 }

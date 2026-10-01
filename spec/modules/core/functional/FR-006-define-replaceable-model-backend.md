@@ -32,6 +32,9 @@ The declared typed result, or a structured SaphoError. Runtime failures carry a 
 
 ## Behavior
 
+The host binding contains an explicit DistributionPolicy. Registration validates its bound before accepting the backend. Runtime copies the policy into ModelRequest and validated Answers; it is never sent as a provider SDK field.
+
+
 ModelBackend accepts ModelRequest and returns ModelResponse or a structured SaphoError. Registrations reject duplicates. Every ModelRequest includes its BackendId, requested model, optional expected model, Record state and ordered questions. Each binding owns requested model and optional expected model identity; credentials are held by the adapter, never by graph or recording types. The caller can implement another backend without depending on graph or runtime crates. Cancellation drops the model future; usage is optional, not invented.
 
 ## Acceptance Criteria

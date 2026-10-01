@@ -34,6 +34,9 @@ The declared typed result, or a structured SaphoError. Runtime failures carry a 
 
 ## Behavior
 
+The exact request includes DistributionPolicy. Raw ModelResponse remains unchanged; loading/exporting/retention use that request policy through core validation. Projection adjustments are derived, never written over raw values. A request with a different policy is a different replay key. No compatibility reader for older recordings is supplied.
+
+
 ReplayBackend loads typed recordings with an explicit byte ceiling. Exact matching includes state, question text, question IDs, choice order, requested model and backend binding identity; no digest-only equality is required. Validate each recorded answer against its request before accepting the recording. Repeated identical exchanges with equal responses deduplicate; conflicting responses for the same exact request are RecordingMismatch, rather than first/last wins. Replay misses return ReplayMiss and have no live delegate, key lookup or network path. An optional expected model applies identically to live and replay responses.
 
 ## Acceptance Criteria
@@ -43,6 +46,7 @@ ReplayBackend loads typed recordings with an explicit byte ceiling. Exact matchi
 | FR-028-AC-1 | Exact requests replay the complete response without transport work. | Test (TC-028) |
 | FR-028-AC-2 | Changed choice order, state, model, instructions or backend identity causes ReplayMiss. | Test (TC-028) |
 | FR-028-AC-3 | Conflicting duplicate records and malformed distributions refuse loading. | Test (TC-028) |
+| FR-028-AC-4 | Approximate-policy recording export/load/replay retains exact raw0.99/1.01 values and reproduces adjustment/projection; changing only the policy causes ReplayMiss. | Test (TC-028) |
 
 ## Dependencies
 

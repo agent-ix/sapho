@@ -18,6 +18,7 @@ fn request() -> ModelRequest {
         end: Some(17),
     });
     ModelRequest {
+        distribution_policy: sapho_core::DistributionPolicy::Strict {},
         backend: BackendId::new("hosted").unwrap(),
         model: "requested-alias".into(),
         expected_model: None,
@@ -200,4 +201,59 @@ async fn sdk_invalid_unit_probability_is_refused() {
         ErrorCode::InvalidValue
     );
     assert_eq!(mock.attempts(), 1);
+}
+
+/// Trace: FR-005-AC-4, FR-020-AC-4, FR-025-AC-2
+#[tokio::test]
+async fn sdk_approximate_answers_keep_raw_values_and_policy_off_the_wire() {
+    let raw = r#"{"model":"rounded-model","answers":{"boolean":{"type":"noul","noul":0.8},"choice":{"type":"choice","choice":"z-last","confidence":0.37,"probabilities":{"z-last":0.6,"a-first":0.2,"middle":0.19}},"score":{"type":"score","score":1.4,"confidence":0.42,"legend":{"0":"absent","1":"partial","2":"complete"},"probabilities":{"0":0.11,"1":0.4,"2":0.5}}},"usage":{"input_tokens":42,"output_tokens":7}}"#;
+    let (backend, mock) = backend(vec![Exchange::ok(raw)]);
+    let mut req = request();
+    req.distribution_policy = sapho_core::DistributionPolicy::approximate(0.01).unwrap();
+    let response = backend.infer(&req).await.unwrap();
+    let answers = validate_response(&req, &response).unwrap();
+    assert_eq!(mock.attempts(), 1);
+    let wire: serde_json::Value =
+        serde_json::from_str(mock.requests()[0].body.as_ref().unwrap()).unwrap();
+    assert!(wire.get("distribution_policy").is_none());
+    assert_eq!(answers.values, response.answers);
+    assert_eq!(
+        answers.distribution_state("choice").unwrap(),
+        DistributionState::Approximate
+    );
+    assert_eq!(
+        answers.distribution_state("score").unwrap(),
+        DistributionState::Approximate
+    );
+    assert!(
+        (answers
+            .probability("choice", &["z-last".into()])
+            .unwrap()
+            .get()
+            - 0.6 / 0.99)
+            .abs()
+            < 1e-12
+    );
+    assert!(
+        (answers
+            .probability("score", &["0".into(), "1".into(), "2".into()])
+            .unwrap()
+            .get()
+            - 1.0)
+            .abs()
+            < 1e-12
+    );
+    assert_eq!(
+        response.answers["score"],
+        Answer::Score {
+            expected: 1.4,
+            confidence: Probability::new(0.42).unwrap(),
+            probabilities: Some(BTreeMap::from([
+                ("0".into(), Probability::new(0.11).unwrap()),
+                ("1".into(), Probability::new(0.4).unwrap()),
+                ("2".into(), Probability::new(0.5).unwrap())
+            ]))
+        }
+    );
+    assert_eq!(response.model, "rounded-model");
 }

@@ -31,6 +31,7 @@ fn choice() -> NamedQuestion {
 }
 fn request(q: Vec<NamedQuestion>) -> ModelRequest {
     ModelRequest {
+        distribution_policy: DistributionPolicy::Strict {},
         backend: BackendId::new("judge").unwrap(),
         model: "model-1".into(),
         expected_model: None,
@@ -187,6 +188,7 @@ fn registry_collisions_never_replace_the_first_binding() {
     let mut backends = BackendRegistry::default();
     let bid = BackendId::new("judge").unwrap();
     let b = BackendBinding {
+        distribution_policy: DistributionPolicy::Strict {},
         backend: Arc::new(Refusing),
         model: "model-1".into(),
         expected_model: None,
@@ -340,6 +342,7 @@ fn answers_distinguish_complete_partial_unavailable_and_expected_score() {
     });
     assert!(validate_response(&req, &bad).is_err());
     let invalid_answers = Answers {
+        distribution_policy: DistributionPolicy::Strict {},
         questions: req.questions.clone(),
         values: bad.answers,
     };
@@ -417,4 +420,243 @@ fn byte_accounting_refuses_before_growing_a_serialized_buffer() {
         measured_json_bytes(&value, actual.len()).unwrap(),
         actual.len()
     );
+}
+
+/// Trace: FR-005-AC-4, FR-020-AC-4
+#[test]
+fn approximate_complete_choice_and_score_preserve_raw_values_and_derive_projections() {
+    for total in [0.99, 1.01] {
+        for score in [false, true] {
+            let (question, answer, labels) = if score {
+                (
+                    NamedQuestion {
+                        id: "q".into(),
+                        question: Question::Score {
+                            instructions: "Rate synthetic strength".into(),
+                            levels: vec!["low".into(), "middle".into(), "high".into()],
+                        },
+                    },
+                    Answer::Score {
+                        expected: 1.4,
+                        confidence: p(0.31),
+                        probabilities: Some(BTreeMap::from([
+                            ("0".into(), p(0.2)),
+                            ("1".into(), p(0.3)),
+                            ("2".into(), p(total - 0.5)),
+                        ])),
+                    },
+                    vec!["0".into(), "1".into(), "2".into()],
+                )
+            } else {
+                (
+                    choice(),
+                    Answer::Choice {
+                        selected: "z".into(),
+                        confidence: p(0.31),
+                        probabilities: Some(BTreeMap::from([
+                            ("z".into(), p(0.6)),
+                            ("a".into(), p(total - 0.6)),
+                        ])),
+                    },
+                    vec!["z".into(), "a".into()],
+                )
+            };
+            let mut req = request(vec![question]);
+            let raw = response(answer.clone());
+            assert_eq!(
+                validate_response(&req, &raw).unwrap_err().code,
+                ErrorCode::InvalidAnswer
+            );
+            req.distribution_policy = DistributionPolicy::approximate(0.01).unwrap();
+            let answers = validate_response(&req, &raw).unwrap();
+            assert_eq!(answers.values["q"], answer);
+            assert_eq!(raw.answers["q"], answer);
+            assert_eq!(
+                answers.distribution_state("q").unwrap(),
+                DistributionState::Approximate
+            );
+            let adjustment = answers.distribution_adjustment("q").unwrap().unwrap();
+            assert!((adjustment.raw_mass - total).abs() < 1e-12);
+            assert!((adjustment.scale - 1.0 / total).abs() < 1e-12);
+            assert!((answers.probability("q", &labels).unwrap().get() - 1.0).abs() < 1e-12);
+            let focal = if score { "0" } else { "z" };
+            let mass = if score { 0.2 } else { 0.6 };
+            assert!(
+                (answers.probability("q", &[focal.into()]).unwrap().get() - mass / total).abs()
+                    < 1e-12
+            );
+            let loaded: Answers =
+                serde_json::from_str(&serde_json::to_string(&answers).unwrap()).unwrap();
+            loaded.validate().unwrap();
+            assert_eq!(loaded, answers);
+            assert_eq!(
+                loaded.probability("q", &labels).unwrap(),
+                answers.probability("q", &labels).unwrap()
+            );
+        }
+    }
+}
+
+/// Trace: FR-005-AC-4
+#[test]
+fn approximation_limits_and_mass_diagnostics_refuse_bad_inputs() {
+    for bound in [0.0, 0.050001, f64::NAN, f64::INFINITY, -0.01] {
+        assert_eq!(
+            DistributionPolicy::approximate(bound).unwrap_err().code,
+            ErrorCode::InvalidValue
+        );
+    }
+    DistributionPolicy::approximate(0.05).unwrap();
+    let invalid = DistributionPolicy::Approximate {
+        max_mass_error: p(0.0),
+    };
+    let mut req = request(vec![choice()]);
+    req.distribution_policy = invalid;
+    assert_eq!(req.validate().unwrap_err().code, ErrorCode::InvalidValue);
+    assert!(
+        serde_json::from_str::<DistributionPolicy>(r#"{"kind":"strict","unknown":1}"#).is_err()
+    );
+    for wire in [
+        r#"{"kind":"approximate","max_mass_error":0.01,"unknown":1}"#,
+        r#"{"kind":"approximate"}"#,
+        r#"{"kind":"approximate","max_mass_error":"not-a-number"}"#,
+    ] {
+        assert!(serde_json::from_str::<DistributionPolicy>(wire).is_err());
+    }
+    req.distribution_policy = DistributionPolicy::approximate(0.01).unwrap();
+    for total in [0.0, 0.5, 0.989998, 1.010002] {
+        let raw = response(Answer::Choice {
+            selected: "z".into(),
+            confidence: p(0.7),
+            probabilities: Some(BTreeMap::from([
+                ("z".into(), p(total / 2.0)),
+                ("a".into(), p(total / 2.0)),
+            ])),
+        });
+        let error = validate_response(&req, &raw).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidAnswer);
+        assert_eq!(error.context["question"], "q");
+        assert_eq!(error.context["coverage"], "complete");
+        assert!((error.context["mass"].parse::<f64>().unwrap() - total).abs() < 1e-12);
+        assert!((error.context["allowed_error"].parse::<f64>().unwrap() - 0.010001).abs() < 1e-12);
+    }
+    let raw = response(Answer::Choice {
+        selected: "z".into(),
+        confidence: p(0.7),
+        probabilities: Some(BTreeMap::from([
+            ("z".into(), p(0.6)),
+            ("unknown".into(), p(0.39)),
+        ])),
+    });
+    assert_eq!(
+        validate_response(&req, &raw).unwrap_err().code,
+        ErrorCode::InvalidAnswer
+    );
+    assert_eq!(
+        validate_response(
+            &req,
+            &response(Answer::Boolean {
+                probability: p(0.7)
+            })
+        )
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidAnswer
+    );
+    let mut score_request = request(vec![NamedQuestion {
+        id: "q".into(),
+        question: Question::Score {
+            instructions: "Rate synthetic strength".into(),
+            levels: vec!["low".into(), "mid".into(), "high".into()],
+        },
+    }]);
+    score_request.distribution_policy = DistributionPolicy::approximate(0.01).unwrap();
+    for expected in [f64::NAN, f64::INFINITY, -0.01, 2.01] {
+        let raw = response(Answer::Score {
+            expected,
+            confidence: p(0.7),
+            probabilities: Some(BTreeMap::from([
+                ("0".into(), p(0.33)),
+                ("1".into(), p(0.33)),
+                ("2".into(), p(0.33)),
+            ])),
+        });
+        assert_eq!(
+            validate_response(&score_request, &raw).unwrap_err().code,
+            ErrorCode::InvalidAnswer
+        );
+    }
+    let mut registry = BackendRegistry::default();
+    let backend = Arc::new(Refusing);
+    assert_eq!(
+        registry
+            .register(
+                BackendId::new("invalid-policy").unwrap(),
+                BackendBinding {
+                    backend,
+                    model: "model-1".into(),
+                    expected_model: None,
+                    distribution_policy: invalid,
+                }
+            )
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidValue
+    );
+}
+
+/// Trace: FR-005-AC-3, FR-005-AC-4, FR-020-AC-2, FR-020-AC-4
+#[test]
+fn approximation_never_normalizes_partial_or_unavailable_distributions() {
+    let mut req = request(vec![choice()]);
+    req.distribution_policy = DistributionPolicy::approximate(0.01).unwrap();
+    let partial = response(Answer::Choice {
+        selected: "z".into(),
+        confidence: p(0.4),
+        probabilities: Some(BTreeMap::from([("z".into(), p(0.7))])),
+    });
+    let answers = validate_response(&req, &partial).unwrap();
+    assert_eq!(
+        answers.distribution_state("q").unwrap(),
+        DistributionState::Partial
+    );
+    assert_eq!(answers.distribution_adjustment("q").unwrap(), None);
+    assert_eq!(answers.probability("q", &["z".into()]).unwrap().get(), 0.7);
+    assert_eq!(
+        answers.probability("q", &["a".into()]).unwrap_err().code,
+        ErrorCode::UnsupportedDistribution
+    );
+    let unavailable = response(Answer::Choice {
+        selected: "z".into(),
+        confidence: p(0.4),
+        probabilities: None,
+    });
+    let answers = validate_response(&req, &unavailable).unwrap();
+    assert_eq!(
+        answers.distribution_state("q").unwrap(),
+        DistributionState::Unavailable
+    );
+    assert_eq!(answers.distribution_adjustment("q").unwrap(), None);
+    assert_eq!(
+        answers.probability("q", &["z".into()]).unwrap_err().code,
+        ErrorCode::UnsupportedDistribution
+    );
+    let Question::Choice { options, .. } = &mut req.questions[0].question else {
+        panic!("choice")
+    };
+    options.push(ChoiceOption {
+        label: "extra".into(),
+        description: "additional synthetic class".into(),
+    });
+    let excess = response(Answer::Choice {
+        selected: "z".into(),
+        confidence: p(0.4),
+        probabilities: Some(BTreeMap::from([
+            ("z".into(), p(0.7)),
+            ("a".into(), p(0.31)),
+        ])),
+    });
+    let error = validate_response(&req, &excess).unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidAnswer);
+    assert_eq!(error.context["coverage"], "partial");
 }

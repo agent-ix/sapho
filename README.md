@@ -127,3 +127,17 @@ installed Quire tool; Rust CI does not assume an unpublished spec-tool install.
 AGPL-3.0-or-later. Read [content rights](CONTENT_RIGHTS.md),
 [contributing](CONTRIBUTING.md) and the [CLA](CLA.md) before contributing.
 Private examples, model recordings and model weights are not repository assets.
+
+## Approximate provider distributions
+
+Every backend binding explicitly chooses `DistributionPolicy::Strict {}` or
+`DistributionPolicy::approximate(0.01)?`. The latter accepts complete totals
+within the configured absolute error plus numerical roundoff;0.01 is a host
+acceptance choice, not a provider precision guarantee. Bounds must be positive
+and at most0.05. Requests/Answers/recordings retain this policy. Raw probabilities,
+confidence and score remain unchanged. `Answers::distribution_adjustment` exposes
+raw mass and derived scale; `probability` applies that scale only to accepted
+complete approximate distributions. Partial distributions are never normalized.
+Replay must use the same policy; differing policies produce ReplayMiss.
+This prerelease contract requires explicit policy fields; older recordings are
+not accepted by a compatibility reader.

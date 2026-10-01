@@ -18,6 +18,7 @@ wildcards = "warn"
 
 [advisories]
 version = 2
+db-path = "target/advisory-dbs"
 
 [sources]
 unknown-registry = "deny"
