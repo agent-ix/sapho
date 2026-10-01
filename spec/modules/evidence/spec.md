@@ -17,7 +17,7 @@ This module owns only the requirements indexed below. Domain rules, model traini
 
 ## System Overview
 
-Owning component: `sapho-evidence`. See the [workspace boundaries](../../spec.md).
+Owning component: `sapho-evidence` for dataset validation, scoring, ranking and export-record construction, with only a core dependency. The `sapho-cli` host reads paths, loads/compiles/runs candidates, invokes the pure calculations and writes artifacts; those orchestration responsibilities never introduce filesystem or runtime dependencies into the evidence crate. See the [workspace boundaries](../../spec.md).
 
 ## Requirements Architecture
 
