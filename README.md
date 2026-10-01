@@ -6,20 +6,22 @@
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/6qsdhSPE)
 
-**Build configurable evaluations from model judgments, Rust code and explicit logic.**
+**Build multi-layer evaluations from model judgments, Rust code and explicit logic.**
 
 Sapho is a Rust library for applications that need to turn uncertain judgments
 into repeatable decisions. A model can identify an actor in a requirement,
 assess a code fragment or judge a relationship. Your application still needs
 to combine those answers with facts, apply a policy and explain the result.
-Sapho gives you a typed graph for that whole evaluation.
+Sapho gives you a typed graph for that whole evaluation: several layers of
+questions, transformations and combinations, with evidence flowing between them.
 
 Define the workflow in TOML, register your Rust functions and model backends,
-then run it on your application's inputs. Change the questions, combinations
-or thresholds without rewriting the executor. Every run returns its outputs
-and an execution trace.
+then run it on your application's inputs. Run independent checks on separate
+branches, combine their results, and use an earlier layer to prepare the next
+layer's questions. Change questions, combinations or thresholds without
+rewriting the executor. Every run returns its outputs and an execution trace.
 
-![An application supplies inputs to a graph of Rust transformations, model questions and logic; Sapho returns decisions and evidence.](docs/images/evaluation-flow.png)
+![A graph mixes Rust preparation and facts with two model layers, then combines their results into findings and evidence.](docs/images/evaluation-flow.png)
 
 The name comes from the juice Mentats drink to aid their mental calculations.
 
@@ -36,8 +38,39 @@ Your application supplies the extraction, questions and meaning of the result.
 Sapho runs and connects them. Jev support is included as an optional feature;
 you can implement the same backend interface for local Laya, KEV or other models.
 
+## Build evaluations in layers
+
+A layer can ask a model, execute Rust code or combine earlier evidence. Its
+output can become the next layer's context, questions, candidate items or
+execution condition. Branches let you run several checks and bring their
+answers back together. Each model stage can use a different registered backend.
+
+For example, a requirement evaluation can move from structure to roles, then
+relationships, then a focused expert check. Rust primitives prepare each
+stage; explicit logic decides which evidence is sufficient and which items
+need another check.
+
+![Illustrative requirement evaluation: structure, roles, candidate preparation, relationships, guarded expert checks and findings.](docs/images/multi-layer-requirements.png)
+
+These are three ways to compose the same engine. The questions and policies
+are examples you define in your application:
+
+| Example | Layers and combinations | Walkthrough |
+|---|---|---|
+| Requirement analysis | Classify structure → identify actor/action/target → build candidate links → judge relationships → optionally ask an expert → assemble findings. | [Dependent model layers](docs/user-guide.md#example-1-requirements-through-several-model-layers) |
+| Code review | Combine a Rust fact with two model judgments: `changed_public_api AND (contract_risk >= 0.7 OR test_gap >= 0.8)`. | [Hard facts plus soft evidence](docs/user-guide.md#example-2-hard-facts-plus-model-evidence) |
+| A composite rule | Use minimum within required parts, maximum across acceptable alternatives, a weighted mean for supporting evidence, then a final threshold. | [Nested combinations](docs/user-guide.md#example-3-combine-combinations) |
+
+You can mix these patterns in one graph. A native primitive can turn earlier
+answers into a later question batch; `map` applies a reusable evaluation to
+each item; guards select expensive checks. The graph is acyclic: an edit and
+re-evaluation loop belongs to the calling application.
+
 ## Features
 
+- **Multi-layer composition.** Feed earlier judgments into later questions,
+  mix model stages with Rust transformations, branch into independent checks
+  and combine the results. Use a different backend for each model stage.
 - **Checked graph configuration.** Compilation checks connections, types and
   dependencies before any Rust function or model call executes.
 - **Typed questions and answers.** Batch Boolean, choice and ordinal-score
@@ -73,8 +106,14 @@ comparison turns that degree into a Boolean decision: for example,
 `strength < 0.7` means "send this item for review." You choose both the
 combination and the threshold.
 
+Reducers can also feed other reducers: combine parts into a statement,
+statements into a finding, and findings into an overall review policy.
+`complement` reverses a degree; Boolean `not` reverses a decision.
+
 The [logic walkthrough](docs/user-guide.md#combine-logic-and-evidence) explains
-the formulas, types, empty inputs and complete graph configuration.
+the formulas, types, empty inputs and complete graph configuration. The
+[worked examples](docs/user-guide.md#worked-composition-examples) show how
+several kinds of combination fit together.
 
 ## Start using Sapho
 
