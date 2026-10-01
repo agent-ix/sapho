@@ -1,6 +1,6 @@
-<p align="center">
+<div align="center">
   <img src="sapho-1.png" alt="Sapho logo" width="240" />
-</p>
+</div>
 
 # Sapho
 
