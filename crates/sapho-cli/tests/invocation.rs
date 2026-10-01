@@ -1046,3 +1046,99 @@ fn acquisition_refuses_fifos_expired_reads_and_cumulative_json_overflow() {
         "limit_exceeded"
     );
 }
+
+/// Trace: FR-040-AC-1, FR-040-AC-2, FR-034-AC-1, TC-040
+#[cfg(unix)]
+#[test]
+fn real_git_selectors_feed_the_same_typed_graph_boundary() {
+    let root = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let result = Command::new("git")
+            .current_dir(root.path())
+            .args(args)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout).unwrap().trim().to_owned()
+    };
+    git(&["init", "--quiet"]);
+    git(&["config", "user.name", "Synthetic workflow"]);
+    git(&["config", "user.email", "example@invalid.test"]);
+    let file = root.path().join("-literal.txt");
+    std::fs::write(&file, "base\n").unwrap();
+    git(&["add", "--", "-literal.txt"]);
+    git(&["commit", "--quiet", "-m", "Original test baseline"]);
+    let base = git(&["rev-parse", "HEAD"]);
+    std::fs::write(&file, "stage\n").unwrap();
+    git(&["add", "--", "-literal.txt"]);
+    std::fs::write(&file, "work\n").unwrap();
+    let graph = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/graphs/files.yaml");
+    let check = |mode: &str, references: &[&str], expected: &str| {
+        let mut args = vec!["select", "git", "--root", path(root.path()), "--mode", mode];
+        args.extend_from_slice(references);
+        let selected = cli(&args, None);
+        assert!(
+            selected.status.success(),
+            "{}",
+            String::from_utf8_lossy(&selected.stdout)
+        );
+        let inputs: Inputs = decode_json(&selected.stdout, 10000).unwrap();
+        let Value::List(items) = &inputs["items"].value else {
+            panic!("list expected")
+        };
+        assert_eq!(items.len(), 1);
+        let Value::Record(fields) = &items[0].value else {
+            panic!("record expected")
+        };
+        assert_eq!(fields["path"], Value::Text("-literal.txt".into()));
+        let Value::Text(patch) = &fields["text"] else {
+            panic!("patch expected")
+        };
+        assert!(patch.contains(expected));
+        assert_eq!(
+            items[0].sources[0].end,
+            Some(u64::try_from(patch.len()).unwrap())
+        );
+        let executed = cli(
+            &["run", path(&graph), "--typed-input"],
+            Some(&selected.stdout),
+        );
+        assert!(executed.status.success());
+        let report: RunReport = decode_json(&executed.stdout, 100000).unwrap();
+        assert_eq!(
+            report.outputs.unwrap()["context"].value,
+            Value::Record(BTreeMap::from([(
+                "files".into(),
+                inputs["items"].value.clone()
+            )]))
+        );
+    };
+    check("working_tree", &[], "+work\n");
+    check("staged", &[], "+stage\n");
+    git(&["commit", "--quiet", "-m", "Original staged change"]);
+    let head = git(&["rev-parse", "HEAD"]);
+    check("revisions", &["--base", &base, "--head", &head], "+stage\n");
+    let invalid = cli(
+        &[
+            "select",
+            "git",
+            "--root",
+            path(root.path()),
+            "--mode",
+            "revisions",
+            "--base",
+            "missing-ref",
+            "--head",
+            &head,
+        ],
+        None,
+    );
+    assert_eq!(invalid.status.code(), Some(2));
+    assert_eq!(result(&invalid)["error"]["detail"]["kind"], "revision");
+}

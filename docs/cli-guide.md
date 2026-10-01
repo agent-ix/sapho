@@ -73,6 +73,8 @@ The strengths 0.8, 0.4 and 0.6, with weights 2, 1 and 1, yield 0.65 and `needs_r
 
 `run GRAPH --input FILE` reads plain JSON input ports against the compiled schema; `--input -` reads stdin and is the default. `--typed-input` accepts existing `Inputs` and preserves caller IDs and sources. Typed inputs are the interchange produced by selectors.
 
+Named inputs must be regular files. Unix stdin has a 30-second readiness deadline without changing shared descriptor flags; named FIFOs/devices refuse. JSON selector acquisition honors its explicit deadline and both byte ceilings.
+
 Use `--output report.json` and `--trace trace.json` for explicit persistence. Destinations are exclusively claimed before evaluation and are never overwritten. A preparation failure after claiming destinations can leave empty newly created files; choose fresh names for another attempt. Completed runs contain outputs and trace; execution refusals contain an error and partial trace.
 
 Defaults per evaluation are 4096 node instances, 16384 expanded items, 128 model calls, concurrency 4, 8 MiB cumulatively accounted data and 60 seconds. Flags `--max-nodes`, `--max-items`, `--max-model-calls`, `--concurrency`, `--max-data-bytes` and `--timeout-secs` make those ceilings explicit. Input defaults to 1 MiB (`--max-input-bytes`) and report/recording artifacts to 8 MiB (`--max-artifact-bytes`). A request for larger finite limits is explicit; the CLI does not crop inputs or retry to fit.
