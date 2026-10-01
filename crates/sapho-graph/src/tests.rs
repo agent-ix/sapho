@@ -140,6 +140,18 @@ fn constrained_configuration_refuses_duplicate_keys_and_yaml_extensions() {
     ] {
         assert!(GraphSpec::parse(yaml).is_err(), "{yaml}");
     }
+    assert_eq!(
+        GraphSpec::parse("outputs: {}\n...\n[invalid")
+            .unwrap_err()
+            .code,
+        ErrorCode::Config
+    );
+    assert_eq!(
+        GraphSpec::parse("outputs: {}\n---\noutputs: {}")
+            .unwrap_err()
+            .code,
+        ErrorCode::LimitExceeded
+    );
     for yaml in ["outputs: &a {}", "outputs: &a {}\ninputs: *a"] {
         assert_eq!(
             GraphSpec::parse(yaml).unwrap_err().code,

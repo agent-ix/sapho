@@ -60,3 +60,11 @@ The first complete gate passed both lint/test lanes but stopped at the supply-ch
 The authoritative cargo-deny help confirms --workspace root selection. The authoritative ar_archive_writer 0.5.3 LICENSE.txt was read in the Cargo cache: its exceptions add redistribution permissions to Apache-2.0. The policy change is restricted to this examined build-only crate/version, preserving the global allowlist, advisory checks and all Sapho AGPL licensing. No dependency license file is copied into this repository.
 
 The strengthened workspace check additionally found Windows capability dependency winx 0.36.4 with the same Apache/LLVM expression. Its authoritative LICENSE was read locally; its permission is likewise restricted to that exact dependency version. Cross-platform dependencies remain in the gate even on this Linux host.
+
+## Complete-Stream Parser Finding
+
+| ID | Severity | Summary | Refs |
+|---|---|---|---|
+| FND-005 | high | The dependency's single-document helper deliberately ignores malformed content after an explicit `...` end marker. `outputs: {}\n...\n[invalid` is accepted as an empty graph, violating strict complete configuration refusal. | crates/sapho-graph/src/spec.rs:222 |
+
+The regression test failed with an observed Ok graph before remediation. Use the dependency's complete-stream parser with the existing one-document budget and the same stack-safe typeless visitor; no dependency implementation or legacy reader is copied into Sapho.

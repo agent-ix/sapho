@@ -217,19 +217,36 @@ pub fn parse_config<T: serde::de::DeserializeOwned>(text: &str, format: GraphFor
                 emit_comments: false,
                 with_snippet: false,
             };
-            // A typeless pass checks duplicates even in Serde-buffered tagged enums.
-            let value: serde_json::Value =
-                serde_saphyr::with_deserializer_from_str_with_options(text, options, |decoder| {
+            // Validate the complete stream: the single-document helper ignores
+            // malformed trailing content after an explicit YAML document end.
+            // The budget still permits exactly one document, including empty ones.
+            struct StackJson(serde_json::Value);
+            impl<'de> Deserialize<'de> for StackJson {
+                fn deserialize<D: serde::Deserializer<'de>>(
+                    decoder: D,
+                ) -> std::result::Result<Self, D::Error> {
                     serde_json::Value::deserialize(serde_stacker::Deserializer::new(decoder))
-                })
-                .map_err(|e| {
-                    let code = if matches!(e, serde_saphyr::Error::Budget { .. }) {
-                        ErrorCode::LimitExceeded
-                    } else {
-                        ErrorCode::Config
-                    };
-                    SaphoError::new(code, e.to_string())
-                })?;
+                        .map(Self)
+                }
+            }
+            // A typeless pass checks duplicates even in Serde-buffered tagged enums.
+            let mut documents = serde_saphyr::from_multiple_with_options::<StackJson>(
+                text, options,
+            )
+            .map_err(|e| {
+                let code = if matches!(e, serde_saphyr::Error::Budget { .. }) {
+                    ErrorCode::LimitExceeded
+                } else {
+                    ErrorCode::Config
+                };
+                SaphoError::new(code, e.to_string())
+            })?;
+            let StackJson(value) = documents.pop().ok_or_else(|| {
+                SaphoError::new(
+                    ErrorCode::Config,
+                    "Configuration requires one non-null document",
+                )
+            })?;
             serde_json::from_value(value)
                 .map_err(|e| SaphoError::new(ErrorCode::Config, e.to_string()))
         }
