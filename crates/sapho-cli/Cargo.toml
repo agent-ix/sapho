@@ -13,6 +13,8 @@ workspace = true
 [[bin]]
 name = "sapho"
 path = "src/main.rs"
+# Public API documentation belongs to the library; the binary shares the facade name.
+doc = false
 
 [features]
 default = []

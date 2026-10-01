@@ -80,3 +80,11 @@ The regression test failed with an observed Ok graph before remediation. Use the
 ## Final Fix-Round Verdict
 
 PASS: all five recorded findings have verified fixes. The final full gates must still be completed and their results retained before PR/merge; the failed initial license gate is not counted as a pass.
+
+## Documentation Gate Finding
+
+| ID | Severity | Summary | Refs |
+|---|---|---|---|
+| FND-006 | medium | The CLI binary name sapho collides with the existing facade library's generated documentation path. Cargo reports the collision even though the full gate exits successfully; one artifact can overwrite the other. Disable binary documentation and retain both public library documentation sets. | crates/sapho-cli/Cargo.toml:12 |
+
+The replay specification's mixed-modal warning was also removed by stating exact-request threshold reuse directly, with no contract change.
