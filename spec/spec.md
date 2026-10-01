@@ -86,7 +86,7 @@ Errors use a typed ErrorCode plus contextual fields, not message parsing: Config
 
 ## Probability Semantics
 
-Probability, reported confidence, expected ordinal score and heuristic Degree are different quantities. Degree reductions do not claim joint probability or labelled correctness. Missing probability entries are not zero. Consumer thresholds, domain ambiguity labels and expert-selection policy remain downstream.
+Probability, reported confidence, expected ordinal score and heuristic Degree are different quantities. Degree reductions do not claim joint probability or labelled correctness. Missing probability entries are not zero. Explicit host DistributionPolicy governs complete-distribution mass acceptance, is retained in Answers/requests/recordings, and never changes raw ModelResponse. Approximate complete projections normalize under that policy with an inspectable raw mass/scale; partial distributions are never normalized. Consumer thresholds, domain ambiguity labels and expert-selection policy remain downstream.
 
 ## Verification Strategy
 

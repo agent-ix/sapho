@@ -91,6 +91,8 @@ pub trait ModelBackend: Send + Sync {
 /// One host-configured model binding, with no serializable credentials.
 #[derive(Clone)]
 pub struct BackendBinding {
+    /// Explicit policy for complete-distribution mass interpretation.
+    pub distribution_policy: crate::DistributionPolicy,
     /// Actual implementation supplied by the host.
     pub backend: Arc<dyn ModelBackend>,
     /// Model requested by every call through this binding.
@@ -107,6 +109,7 @@ impl BackendRegistry {
     /// Register a backend and its caller-owned model selection.
     pub fn register(&mut self, id: BackendId, binding: BackendBinding) -> Result<()> {
         id.validate()?;
+        binding.distribution_policy.validate()?;
         if binding.model.is_empty()
             || binding
                 .expected_model

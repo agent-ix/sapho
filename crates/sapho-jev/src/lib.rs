@@ -129,7 +129,7 @@ fn classify(error: typesafe_sdk_error::Error) -> SaphoError {
     let code = match &error {
         typesafe_sdk_error::Error::Api(a) => match a.status {
             401 | 403 => ErrorCode::Unauthorized,
-            422 => ErrorCode::ServiceValidation,
+            400 | 422 => ErrorCode::ServiceValidation,
             429 => ErrorCode::RateLimited,
             _ => ErrorCode::BackendFailed,
         },

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Agent-IX
 //! Typed System One contracts and answer validation (FR-004/005/006).
 use crate::{BackendId, ErrorCode, Probability, Result, SaphoError, Value};
+use crate::{DistributionAdjustment, DistributionPolicy, distribution::MASS_ROUNDOFF};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -148,6 +149,8 @@ pub enum Answer {
 pub enum DistributionState {
     /// Every requested outcome was supplied and masses sum to one.
     Complete,
+    /// Every outcome was supplied with accepted nonunit mass; projection normalizes.
+    Approximate,
     /// Only some outcomes were supplied.
     Partial,
     /// No probability distribution was supplied.
@@ -157,6 +160,8 @@ pub enum DistributionState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Answers {
+    /// Explicit policy used to validate these unchanged raw answer values.
+    pub distribution_policy: DistributionPolicy,
     /// Original ordered definitions.
     pub questions: Vec<NamedQuestion>,
     /// Answer values keyed by question ID.
@@ -166,7 +171,8 @@ impl Answers {
     /// Validate this answer block after loading or native construction.
     pub fn validate(&self) -> Result<()> {
         validate_questions(&self.questions)?;
-        validate_answer_map(&self.questions, &self.values)
+        self.distribution_policy.validate()?;
+        validate_answer_map(&self.questions, &self.values, self.distribution_policy)
     }
     /// Return completeness without manufacturing missing probabilities.
     pub fn distribution_state(&self, id: &str) -> Result<DistributionState> {
@@ -177,11 +183,24 @@ impl Answers {
             Answer::Choice { probabilities, .. } | Answer::Score { probabilities, .. } => {
                 Ok(match probabilities {
                     None => DistributionState::Unavailable,
-                    Some(p) if p.len() == q.labels().len() => DistributionState::Complete,
+                    Some(p) if p.len() == q.labels().len() => {
+                        if adjustment(q, a).is_some() {
+                            DistributionState::Approximate
+                        } else {
+                            DistributionState::Complete
+                        }
+                    }
                     Some(_) => DistributionState::Partial,
                 })
             }
         }
+    }
+    /// Inspect the normalization used for approximate complete projections.
+    /// Exact, partial and unavailable distributions have no adjustment.
+    pub fn distribution_adjustment(&self, id: &str) -> Result<Option<DistributionAdjustment>> {
+        self.validate()?;
+        let (question, answer) = self.lookup(id)?;
+        Ok(adjustment(question, answer))
     }
     fn lookup(&self, id: &str) -> Result<(&Question, &Answer)> {
         let q = self.questions.iter().find(|q| q.id == id).ok_or_else(|| {
@@ -193,7 +212,7 @@ impl Answers {
         })?;
         Ok((&q.question, a))
     }
-    /// Project explicitly named mass without renormalization (FR-020).
+    /// Project known mass; normalize only explicitly accepted approximate full distributions (FR-020).
     pub fn probability(&self, id: &str, labels: &[String]) -> Result<Probability> {
         self.validate()?;
         let (q, a) = self.lookup(id)?;
@@ -234,7 +253,10 @@ impl Answers {
                 }
             };
         }
-        if sum > 1.0 + 1e-6 {
+        if let Some(derived) = adjustment(q, a) {
+            sum /= derived.raw_mass;
+        }
+        if sum > 1.0 + MASS_ROUNDOFF {
             return Err(SaphoError::new(
                 ErrorCode::InvalidAnswer,
                 "Projected mass exceeds one",
@@ -243,7 +265,30 @@ impl Answers {
         Probability::new(sum.min(1.0))
     }
 }
-fn validate_answer_map(qs: &[NamedQuestion], answers: &BTreeMap<String, Answer>) -> Result<()> {
+fn adjustment(question: &Question, answer: &Answer) -> Option<DistributionAdjustment> {
+    let probabilities = match answer {
+        Answer::Boolean { .. } => return None,
+        Answer::Choice { probabilities, .. } | Answer::Score { probabilities, .. } => {
+            probabilities.as_ref()?
+        }
+    };
+    if probabilities.len() != question.labels().len() {
+        return None;
+    }
+    let raw_mass = probabilities.values().map(|p| p.get()).sum::<f64>();
+    if (raw_mass - 1.0).abs() <= MASS_ROUNDOFF {
+        return None;
+    }
+    Some(DistributionAdjustment {
+        raw_mass,
+        scale: 1.0 / raw_mass,
+    })
+}
+fn validate_answer_map(
+    qs: &[NamedQuestion],
+    answers: &BTreeMap<String, Answer>,
+    policy: DistributionPolicy,
+) -> Result<()> {
     if answers.len() != qs.len() {
         return Err(SaphoError::new(
             ErrorCode::MissingAnswer,
@@ -300,11 +345,25 @@ fn validate_answer_map(qs: &[NamedQuestion], answers: &BTreeMap<String, Answer>)
                 ));
             }
             let mass = dist.values().map(|p| p.get()).sum::<f64>();
-            if mass > 1.0 + 1e-6 || (dist.len() == labels.len() && (mass - 1.0).abs() > 1e-6) {
-                return Err(SaphoError::new(
-                    ErrorCode::InvalidAnswer,
-                    "Invalid distribution mass",
-                ));
+            let complete = dist.len() == labels.len();
+            let allowed_error = if complete {
+                policy.allowed_error()
+            } else {
+                MASS_ROUNDOFF
+            };
+            let invalid = if complete {
+                mass <= 0.0 || (mass - 1.0).abs() > allowed_error
+            } else {
+                mass > 1.0 + allowed_error
+            };
+            if invalid {
+                return Err(
+                    SaphoError::new(ErrorCode::InvalidAnswer, "Invalid distribution mass")
+                        .with_context("question", &q.id)
+                        .with_context("coverage", if complete { "complete" } else { "partial" })
+                        .with_context("mass", mass.to_string())
+                        .with_context("allowed_error", allowed_error.to_string()),
+                );
             }
         }
     }
@@ -314,6 +373,8 @@ fn validate_answer_map(qs: &[NamedQuestion], answers: &BTreeMap<String, Answer>)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelRequest {
+    /// Explicit host distribution interpretation, included in exact replay matching.
+    pub distribution_policy: DistributionPolicy,
     /// Host registry binding identity.
     pub backend: BackendId,
     /// Requested model name or alias.
@@ -329,6 +390,7 @@ impl ModelRequest {
     /// Validate the request before transport or recording.
     pub fn validate(&self) -> Result<()> {
         self.backend.validate()?;
+        self.distribution_policy.validate()?;
         if self.model.is_empty() || self.expected_model.as_ref().is_some_and(|m| m.is_empty()) {
             return Err(SaphoError::new(
                 ErrorCode::InvalidValue,
@@ -385,8 +447,13 @@ pub fn validate_response(request: &ModelRequest, response: &ModelResponse) -> Re
         )
         .with_context("actual", &response.model));
     }
-    validate_answer_map(&request.questions, &response.answers)?;
+    validate_answer_map(
+        &request.questions,
+        &response.answers,
+        request.distribution_policy,
+    )?;
     Ok(Answers {
+        distribution_policy: request.distribution_policy,
         questions: request.questions.clone(),
         values: response.answers.clone(),
     })

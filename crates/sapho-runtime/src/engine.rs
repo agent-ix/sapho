@@ -253,6 +253,7 @@ impl Engine {
                                 ));
                             };
                             let request = ModelRequest {
+                                distribution_policy: binding.distribution_policy,
                                 backend: backend.clone(),
                                 model: binding.model,
                                 expected_model: binding.expected_model,

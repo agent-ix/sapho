@@ -30,7 +30,7 @@ The declared typed result, or a structured SaphoError. Runtime failures carry a 
 
 ## Behavior
 
-Inputs answers: Answers; params question: ID and labels: non-empty unique strings. Boolean labels are true/false and derive P(true)/1-P(true). Choice labels name declared options; Score labels name zero-based decimal indices. Return Probability. Unknown labels are InvalidAnswer; missing question is MissingAnswer; a requested probability absent from a partial/unavailable distribution is UnsupportedDistribution. A known mass in a partial distribution can be returned; no renormalization or completeness claim is made. Sum using finite arithmetic and reject mass outside [0,1] beyond roundoff tolerance.
+Inputs answers: Answers; params question: ID and labels: non-empty unique strings. Boolean labels are true/false and derive P(true)/1-P(true). Choice labels name declared options; Score labels name zero-based decimal indices. Return Probability. Unknown labels are InvalidAnswer; missing question is MissingAnswer; a requested probability absent from a partial/unavailable distribution is UnsupportedDistribution. A known mass in a partial distribution can be returned; no partial normalization or completeness claim is made. For an accepted Approximate complete distribution, projection divides the requested raw sum by the full raw mass under its recorded policy, preserving raw evidence. All-label projection is one; confidence and expected score are never recomputed. The same derived adjustment is available through Answers. Sum using finite arithmetic and reject mass outside [0,1] beyond roundoff tolerance.
 
 ## Acceptance Criteria
 
@@ -39,6 +39,7 @@ Inputs answers: Answers; params question: ID and labels: non-empty unique string
 | FR-020-AC-1 | Selecting one or several known labels yields their exact probability mass. | Test (TC-020) |
 | FR-020-AC-2 | A missing probability in a partial answer returns UnsupportedDistribution. | Test (TC-020) |
 | FR-020-AC-3 | A Boolean false projection returns one minus its true probability. | Test (TC-020) |
+| FR-020-AC-4 | Approximate complete Choice and Score projections apply their derived scale, including all-label mass1; raw answer maps remain unchanged. Exact and partial projections retain existing behavior and unavailable probabilities refuse. | Test (TC-020) |
 
 ## Dependencies
 
