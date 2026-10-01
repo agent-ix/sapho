@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+inputs:
+  items:
+    kind: list
+    item:
+      kind: record
+      fields:
+        path: {kind: text}
+        text: {kind: text}
+        status: {kind: text}
+nodes:
+  - id: context
+    operation: {kind: record}
+    inputs: {files: {kind: input, name: items}}
+outputs:
+  context: {kind: node, node: context, port: result}

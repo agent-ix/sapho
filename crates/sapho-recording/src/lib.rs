@@ -43,8 +43,13 @@ impl Recording {
         if bytes.len() > max_bytes {
             return Err(limit("Recording exceeds byte ceiling"));
         }
-        let recording: Self = serde_json::from_slice(bytes)
-            .map_err(|e| SaphoError::new(ErrorCode::RecordingMismatch, e.to_string()))?;
+        let recording: Self = sapho_core::decode_json(bytes, max_bytes).map_err(|e| {
+            if e.code == ErrorCode::Config {
+                SaphoError::new(ErrorCode::RecordingMismatch, e.message)
+            } else {
+                e
+            }
+        })?;
         recording.validate()?;
         Ok(recording)
     }

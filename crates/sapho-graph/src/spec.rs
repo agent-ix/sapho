@@ -68,6 +68,15 @@ pub enum Reducer {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    /// Assemble an exact record from named operands.
+    Record {},
+    /// Assemble ordered homogeneous occurrences from named operands.
+    List {
+        /// Declared type, including empty lists.
+        item_type: ValueType,
+        /// Distinct operand names in output order.
+        order: Vec<String>,
+    },
     /// Invoke host-native Rust code.
     Code {
         /// Registered implementation name.
@@ -179,15 +188,60 @@ pub struct GraphSpec {
     #[serde(default)]
     pub subgraphs: BTreeMap<String, GraphBody>,
 }
-impl GraphSpec {
-    /// Load TOML after applying a one-MiB pre-deserialization ceiling.
-    pub fn parse(text: &str) -> Result<Self> {
-        if text.len() > 1_048_576 {
-            return Err(SaphoError::new(
-                ErrorCode::LimitExceeded,
-                "TOML exceeds one MiB",
-            ));
+/// Explicit configuration representation; path discovery belongs to the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphFormat {
+    /// Constrained YAML 1.2 authoring profile.
+    Yaml,
+    /// Strict JSON, sharing the same typed graph schema.
+    Json,
+}
+/// Decode configuration under the same profile used by graph and CLI bindings.
+pub fn parse_config<T: serde::de::DeserializeOwned>(text: &str, format: GraphFormat) -> Result<T> {
+    if text.len() > 1_048_576 {
+        return Err(SaphoError::new(
+            ErrorCode::LimitExceeded,
+            "Configuration exceeds one MiB",
+        ));
+    }
+    match format {
+        GraphFormat::Json => sapho_core::decode_json(text.as_bytes(), 1_048_576),
+        GraphFormat::Yaml => {
+            let options = serde_saphyr::options! {
+                budget: serde_saphyr::budget! { max_depth: 128, max_documents: 1, max_aliases: 0, max_anchors: 0, max_total_scalar_bytes: 1_048_576 },
+                duplicate_keys: serde_saphyr::DuplicateKeyPolicy::Error,
+                merge_keys: serde_saphyr::MergeKeyPolicy::Error,
+                strict_booleans: true,
+                reject_unsupported_tags: true,
+                emit_comments: false,
+                with_snippet: false,
+            };
+            // A typeless pass checks duplicates even in Serde-buffered tagged enums.
+            let value: serde_json::Value =
+                serde_saphyr::with_deserializer_from_str_with_options(text, options, |decoder| {
+                    serde_json::Value::deserialize(serde_stacker::Deserializer::new(decoder))
+                })
+                .map_err(|e| {
+                    let code = if matches!(e, serde_saphyr::Error::Budget { .. }) {
+                        ErrorCode::LimitExceeded
+                    } else {
+                        ErrorCode::Config
+                    };
+                    SaphoError::new(code, e.to_string())
+                })?;
+            serde_json::from_value(value)
+                .map_err(|e| SaphoError::new(ErrorCode::Config, e.to_string()))
         }
-        toml::from_str(text).map_err(|e| SaphoError::new(ErrorCode::Config, e.to_string()))
+    }
+}
+impl GraphSpec {
+    /// Load constrained YAML after applying a one-MiB pre-deserialization ceiling.
+    pub fn parse(text: &str) -> Result<Self> {
+        Self::parse_with_format(text, GraphFormat::Yaml)
+    }
+    /// Load YAML or JSON explicitly; no TOML reader or format fallback exists.
+    pub fn parse_with_format(text: &str, format: GraphFormat) -> Result<Self> {
+        parse_config(text, format)
     }
 }

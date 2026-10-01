@@ -47,32 +47,127 @@ fn err(spec: &GraphSpec) -> ErrorCode {
 }
 /// Trace: FR-007-AC-1, FR-007-AC-2, FR-007-AC-3
 #[test]
-fn toml_is_a_checked_declarative_program() {
+fn yaml_and_json_share_a_checked_declarative_program() {
     let text = r#"
-[inputs.fact]
-kind = "record"
-[inputs.fact.fields.present]
-kind = "boolean"
-[outputs.result]
-kind = "node"
-node = "negate"
-port = "result"
-[[nodes]]
-id = "negate"
-[nodes.operation]
-kind = "not"
-[nodes.inputs.value]
-kind = "input"
-name = "fact"
-path = ["present"]
+inputs:
+  fact:
+    kind: record
+    fields:
+      present: {kind: boolean}
+outputs:
+  result: {kind: node, node: negate, port: result}
+nodes:
+  - id: negate
+    operation: {kind: not}
+    inputs:
+      value: {kind: input, name: fact, path: [present]}
 "#;
     let spec = GraphSpec::parse(text).unwrap();
+    let json = serde_json::to_string(&spec).unwrap();
+    assert_eq!(
+        GraphSpec::parse_with_format(&json, GraphFormat::Json).unwrap(),
+        spec
+    );
     let compiled = compile(&spec, &PrimitiveRegistry::default()).unwrap();
     assert_eq!(compiled.signature().outputs["result"], ValueType::Boolean);
-    assert!(GraphSpec::parse(&text.replace("kind = \"not\"", "kind = \"script\"")).is_err());
-    assert!(GraphSpec::parse("unknown=1\n[outputs]\n").is_err());
+    assert_eq!(
+        GraphSpec::parse(&text.replace("kind: not", "kind: script"))
+            .unwrap_err()
+            .code,
+        ErrorCode::Config
+    );
+    assert_eq!(
+        GraphSpec::parse("unknown: 1\noutputs: {}\n")
+            .unwrap_err()
+            .code,
+        ErrorCode::Config
+    );
     assert_eq!(
         GraphSpec::parse(&"x".repeat(1_048_577)).unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+}
+/// Trace: FR-007-AC-1, FR-007-AC-2
+#[test]
+fn question_text_and_code_parameters_are_preserved_in_both_formats() {
+    let yaml = r#"
+nodes:
+  - id: questions
+    operation:
+      kind: questions
+      questions:
+        - id: present
+          question: {kind: boolean, instructions: "Keep # / ${TEXT} unchanged", yes: Present, no: Absent}
+  - id: custom
+    operation:
+      kind: code
+      primitive: local
+      params: {limit: {kind: number, value: 2.0}}
+outputs:
+  questions: {kind: node, node: questions, port: result}
+"#;
+    let spec = GraphSpec::parse(yaml).unwrap();
+    let json = serde_json::to_string(&spec).unwrap();
+    assert_eq!(
+        GraphSpec::parse_with_format(&json, GraphFormat::Json).unwrap(),
+        spec
+    );
+    let Operation::Questions { questions } = &spec.nodes[0].operation else {
+        panic!("questions expected")
+    };
+    let Question::Boolean { instructions, .. } = &questions[0].question else {
+        panic!("boolean expected")
+    };
+    assert_eq!(instructions, "Keep # / ${TEXT} unchanged");
+    assert_eq!(
+        compile(&spec, &PrimitiveRegistry::default())
+            .err()
+            .unwrap()
+            .code,
+        ErrorCode::UnknownPrimitive
+    );
+}
+/// Trace: FR-007-AC-2
+#[test]
+fn constrained_configuration_refuses_duplicate_keys_and_yaml_extensions() {
+    for yaml in [
+        "outputs: {}\noutputs: {}",
+        "outputs: {result: {kind: input, name: a, name: b}}",
+        "outputs: !custom {}",
+        "outputs: {<<: {}}",
+        "outputs: &a {}\ninputs: *a",
+        "outputs: {}\n---\noutputs: {}",
+    ] {
+        assert!(GraphSpec::parse(yaml).is_err(), "{yaml}");
+    }
+    for yaml in ["outputs: &a {}", "outputs: &a {}\ninputs: *a"] {
+        assert_eq!(
+            GraphSpec::parse(yaml).unwrap_err().code,
+            ErrorCode::LimitExceeded
+        );
+    }
+    for yaml in [
+        "outputs: !custom {}",
+        "outputs: {<<: {}}",
+        "outputs: {}\noutputs: {}",
+    ] {
+        assert_eq!(GraphSpec::parse(yaml).unwrap_err().code, ErrorCode::Config);
+    }
+    for json in [
+        r#"{"outputs":{},"outputs":{}}"#,
+        r#"{"outputs":{"result":{"kind":"input","name":"a","name":"b"}}}"#,
+    ] {
+        assert_eq!(
+            GraphSpec::parse_with_format(json, GraphFormat::Json)
+                .unwrap_err()
+                .code,
+            ErrorCode::Config
+        );
+    }
+    assert_eq!(GraphSpec::parse("outputs: {}\nnodes: [{id: x, operation: {kind: not}, guard: {kind: literal, value_type: {kind: boolean}, value: {id: x, value: {kind: boolean, value: yes}}}}]").unwrap_err().code,ErrorCode::Config);
+    let deeply_nested = format!("outputs: {}", "[".repeat(130) + "0" + &"]".repeat(130));
+    assert_eq!(
+        GraphSpec::parse(&deeply_nested).unwrap_err().code,
         ErrorCode::LimitExceeded
     );
 }

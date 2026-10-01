@@ -43,3 +43,15 @@ allow = ["AGPL-3.0-or-later"]
 [[licenses.exceptions]]
 name = "sapho-recording"
 allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "sapho-evidence"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "sapho-select"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "sapho-cli"
+allow = ["AGPL-3.0-or-later"]

@@ -25,6 +25,8 @@ to an evaluation embedded in your own application.
 - [Operation reference](#operation-reference)
 - [Behavior contracts and contributing](#behavior-contracts-and-contributing)
 
+For a command-line workflow, start with the [CLI guide](cli-guide.md): validate, run, select files or Git changes, record/replay, measure and tune. This guide explains Rust embedding and the graph semantics shared by both hosts.
+
 ## Install
 
 Use Rust 1.98 or later. Sapho's checkout pins Rust 1.98.1. In your application:
@@ -46,30 +48,36 @@ Start with a supplied probability and a policy: send an item for review when
 its support is **strictly below 0.8**. This example makes no model calls. It
 shows the same parse, compile and run flow you use for larger graphs.
 
-Save this as `review.toml` at your application's root:
+Save this as `review.yaml` at your application's root:
 
-<!-- example: review.toml -->
-```toml
-[inputs.support]
-kind = "probability"
-
-[[nodes]]
-id = "review"
-[nodes.operation]
-kind = "compare"
-comparator = "less"
-[nodes.inputs.a]
-kind = "input"
-name = "support"
-[nodes.inputs.b]
-kind = "literal"
-value = { id = "cutoff", value = { kind = "probability", value = 0.8 } }
-value_type = { kind = "probability" }
-
-[outputs.needs_review]
-kind = "node"
-node = "review"
-port = "result"
+<!-- example: review.yaml -->
+```yaml
+inputs:
+  support:
+    kind: probability
+nodes:
+- id: review
+  operation:
+    kind: compare
+    comparator: less
+  inputs:
+    a:
+      kind: input
+      name: support
+    b:
+      kind: literal
+      value:
+        id: cutoff
+        value:
+          kind: probability
+          value: 0.8
+      value_type:
+        kind: probability
+outputs:
+  needs_review:
+    kind: node
+    node: review
+    port: result
 ```
 
 Replace `src/main.rs` with:
@@ -85,7 +93,7 @@ use sapho::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let spec = GraphSpec::parse(include_str!("../review.toml"))?;
+    let spec = GraphSpec::parse(include_str!("../review.yaml"))?;
     let graph = compile(&spec, &PrimitiveRegistry::default())?;
     let engine = Engine::new(graph, BackendRegistry::default())?;
 
@@ -114,7 +122,7 @@ Run `cargo run`. The output is `needs_review: Boolean(true)` because 0.73 is
 below 0.8. At exactly 0.8 it would be false. Use `less_equal` if equality
 should also trigger review.
 
-`GraphSpec::parse` loads the TOML. `compile` checks port names, types,
+`GraphSpec::parse` loads constrained YAML. Use `GraphSpec::parse_with_format(text, GraphFormat::Json)` for generated JSON. Both encodings use the same schema; graph TOML is no longer accepted. `compile` checks port names, types,
 references and cycles, and resolves registered Rust primitives. It executes
 neither native functions nor inference. `Engine::new` checks backend bindings;
 `run` evaluates the graph with the inputs and limits you provide.
@@ -128,76 +136,80 @@ only the example executable's error boundary; Sapho APIs return typed errors.
 
 Now let a model produce the evidence. This complete graph asks whether text
 states an observable action, projects P(true), and applies the same threshold.
-Save it as `judge.toml`:
+Save it as `judge.yaml`:
 
-<!-- example: judge.toml -->
-```toml
-[inputs.state]
-kind = "record"
-[inputs.state.fields.text]
-kind = "text"
-
-[[nodes]]
-id = "questions"
-[nodes.operation]
-kind = "questions"
-[[nodes.operation.questions]]
-id = "observable"
-[nodes.operation.questions.question]
-kind = "boolean"
-instructions = "Does the text specify an action whose occurrence can be observed?"
-yes = "The action has an observable outcome."
-no = "The action has no observable outcome."
-
-[[nodes]]
-id = "judge"
-[nodes.operation]
-kind = "ask"
-backend = "judge"
-[nodes.inputs.state]
-kind = "input"
-name = "state"
-[nodes.inputs.questions]
-kind = "node"
-node = "questions"
-port = "result"
-
-[[nodes]]
-id = "support"
-[nodes.operation]
-kind = "probability"
-question = "observable"
-labels = ["true"]
-[nodes.inputs.answers]
-kind = "node"
-node = "judge"
-port = "answers"
-
-[[nodes]]
-id = "review"
-[nodes.operation]
-kind = "compare"
-comparator = "less"
-[nodes.inputs.a]
-kind = "node"
-node = "support"
-port = "result"
-[nodes.inputs.b]
-kind = "literal"
-value = { id = "cutoff", value = { kind = "probability", value = 0.8 } }
-value_type = { kind = "probability" }
-
-[outputs.needs_review]
-kind = "node"
-node = "review"
-port = "result"
-[outputs.support]
-kind = "node"
-node = "support"
-port = "result"
+<!-- example: judge.yaml -->
+```yaml
+inputs:
+  state:
+    kind: record
+    fields:
+      text:
+        kind: text
+nodes:
+- id: questions
+  operation:
+    kind: questions
+    questions:
+    - id: observable
+      question:
+        kind: boolean
+        instructions: Does the text specify an action whose occurrence can be observed?
+        'yes': The action has an observable outcome.
+        'no': The action has no observable outcome.
+- id: judge
+  operation:
+    kind: ask
+    backend: judge
+  inputs:
+    state:
+      kind: input
+      name: state
+    questions:
+      kind: node
+      node: questions
+      port: result
+- id: support
+  operation:
+    kind: probability
+    question: observable
+    labels:
+    - 'true'
+  inputs:
+    answers:
+      kind: node
+      node: judge
+      port: answers
+- id: review
+  operation:
+    kind: compare
+    comparator: less
+  inputs:
+    a:
+      kind: node
+      node: support
+      port: result
+    b:
+      kind: literal
+      value:
+        id: cutoff
+        value:
+          kind: probability
+          value: 0.8
+      value_type:
+        kind: probability
+outputs:
+  needs_review:
+    kind: node
+    node: review
+    port: result
+  support:
+    kind: node
+    node: support
+    port: result
 ```
 
-In the first example's Rust program, load `judge.toml`, register a backend
+In the first example's Rust program, load `judge.yaml`, register a backend
 named `judge` as described below, and supply `state` instead of `support`:
 
 <!-- example: state.rs -->
@@ -251,7 +263,7 @@ typesafe-sdk-env = "=0.6.2"
 typesafe-sdk-http = "=0.6.2"
 ```
 
-This helper builds the `judge` registry used by `judge.toml`. Call it from the
+This helper builds the `judge` registry used by `judge.yaml`. Call it from the
 example's `main`, then pass its result to `Engine::new`:
 
 <!-- example: jev.rs -->
@@ -364,79 +376,89 @@ ID; missing, extra and duplicate weights fail validation.
 ### A complete combination graph
 
 This graph maps Probability inputs into Degrees, computes a weighted mean,
-then requests review below 0.7. Save it as `combine.toml`:
+then requests review below 0.7. Save it as `combine.yaml`:
 
-<!-- example: combine.toml -->
-```toml
-[inputs.evidence]
-kind = "list"
-item = { kind = "probability" }
-[inputs.weights]
-kind = "list"
-item = { kind = "number" }
-
-[[nodes]]
-id = "degrees"
-[nodes.operation]
-kind = "map"
-graph = "as_degree"
-[nodes.inputs.items]
-kind = "input"
-name = "evidence"
-
-[[nodes]]
-id = "strength"
-[nodes.operation]
-kind = "reduce"
-reducer = "weighted_mean"
-empty = 0.0
-[nodes.inputs.values]
-kind = "node"
-node = "degrees"
-port = "result"
-[nodes.inputs.weights]
-kind = "input"
-name = "weights"
-
-[[nodes]]
-id = "review"
-[nodes.operation]
-kind = "compare"
-comparator = "less"
-[nodes.inputs.a]
-kind = "node"
-node = "strength"
-port = "result"
-[nodes.inputs.b]
-kind = "literal"
-value = { id = "cutoff", value = { kind = "degree", value = 0.7 } }
-value_type = { kind = "degree" }
-
-[outputs.strength]
-kind = "node"
-node = "strength"
-port = "result"
-[outputs.needs_review]
-kind = "node"
-node = "review"
-port = "result"
-
-[subgraphs.as_degree.inputs.item]
-kind = "probability"
-[[subgraphs.as_degree.nodes]]
-id = "convert"
-[subgraphs.as_degree.nodes.operation]
-kind = "degree"
-[subgraphs.as_degree.nodes.inputs.value]
-kind = "input"
-name = "item"
-[subgraphs.as_degree.outputs.result]
-kind = "node"
-node = "convert"
-port = "result"
+<!-- example: combine.yaml -->
+```yaml
+inputs:
+  evidence:
+    kind: list
+    item:
+      kind: probability
+  weights:
+    kind: list
+    item:
+      kind: number
+nodes:
+- id: degrees
+  operation:
+    kind: map
+    graph: as_degree
+  inputs:
+    items:
+      kind: input
+      name: evidence
+- id: strength
+  operation:
+    kind: reduce
+    reducer: weighted_mean
+    empty: 0.0
+  inputs:
+    values:
+      kind: node
+      node: degrees
+      port: result
+    weights:
+      kind: input
+      name: weights
+- id: review
+  operation:
+    kind: compare
+    comparator: less
+  inputs:
+    a:
+      kind: node
+      node: strength
+      port: result
+    b:
+      kind: literal
+      value:
+        id: cutoff
+        value:
+          kind: degree
+          value: 0.7
+      value_type:
+        kind: degree
+outputs:
+  strength:
+    kind: node
+    node: strength
+    port: result
+  needs_review:
+    kind: node
+    node: review
+    port: result
+subgraphs:
+  as_degree:
+    inputs:
+      item:
+        kind: probability
+    nodes:
+    - id: convert
+      operation:
+        kind: degree
+      inputs:
+        value:
+          kind: input
+          name: item
+    outputs:
+      result:
+        kind: node
+        node: convert
+        port: result
 ```
 
-Use this input construction in the first example and load `combine.toml`:
+Use this input construction in the first example and load `combine.yaml`:
 
 <!-- example: combination-inputs.rs -->
 ```rust
@@ -515,18 +537,19 @@ fn primitives() -> Result<PrimitiveRegistry> {
 Pass that registry to `compile`. With a declared Text input named `text`, its
 node is:
 
-```toml
-[[nodes]]
-id = "present"
-[nodes.operation]
-kind = "code"
-primitive = "has_text"
-[nodes.inputs.text]
-kind = "input"
-name = "text"
+```yaml
+nodes:
+- id: present
+  operation:
+    kind: code
+    primitive: has_text
+  inputs:
+    text:
+      kind: input
+      name: text
 ```
 
-Parameters under `[nodes.operation.params]` are typed `Value`s; define their
+Parameters under `operation.params` are typed `Value`s; define their
 meaning and validate them in your primitive. The graph never loads a script
 or plugin: the host supplies all executable Rust implementations. Native work
 runs on Tokio's blocking pool. Check `context.check_cancelled()` during long
@@ -567,10 +590,14 @@ nodes can appear at any stage. You define each layer through dependency
 edges. The compiler rejects cycles; your application owns bounded retries,
 repair attempts and edit/review loops.
 
+Use the built-in `record` operation to assemble context from named bindings, and `list` to assemble ordered homogeneous values. Their types are checked during compilation; a list declares `item_type` and explicit `order`. These operations let a later question layer consume earlier evidence without writing a Rust preparation function. Domain extraction and dynamic question generation still use registered Rust primitives.
+
 ### Work with collections
 
 | Operation | Use | Identity behavior |
 |---|---|---|
+| `record` | Assemble context from named bindings. | Merges input attribution. |
+| `list` | Assemble homogeneous inputs in explicit `order`. | Creates distinct scoped occurrences and preserves each operand's sources. |
 | `map` | Run a named subgraph for every item. | Preserves input order and item IDs. |
 | `filter` | Keep items whose Boolean mask is true. | Mask entries must match item IDs exactly. |
 | `pairs` | Form every left/right candidate pair. | Returns identified records with `left` and `right` fields. |
@@ -585,7 +612,7 @@ Item iterations are currently sequential; independent ready model nodes
 within an iteration can use the configured concurrency.
 
 A record-field binding uses `path`, for example
-`{ kind = "input", name = "state", path = ["text"] }`. The compiler checks
+`{kind: input, name: state, path: [text]}`. The compiler checks
 that the declared record schema contains that field.
 
 ### Skip work with a guard
@@ -597,24 +624,35 @@ type `Optional(T)`, whether it executes or skips. An executed result is
 
 For example, with declared Boolean inputs `ready` and `fact`:
 
-```toml
-[[nodes]]
-id = "negate_when_ready"
-guard = { kind = "input", name = "ready" }
-operation = { kind = "not" }
-inputs = { value = { kind = "input", name = "fact" } }
-
-[[nodes]]
-id = "fallback"
-operation = { kind = "coalesce" }
-[nodes.inputs.value]
-kind = "node"
-node = "negate_when_ready"
-port = "result"
-[nodes.inputs.default]
-kind = "literal"
-value = { id = "fallback", value = { kind = "boolean", value = false } }
-value_type = { kind = "boolean" }
+```yaml
+nodes:
+- id: negate_when_ready
+  guard:
+    kind: input
+    name: ready
+  operation:
+    kind: not
+  inputs:
+    value:
+      kind: input
+      name: fact
+- id: fallback
+  operation:
+    kind: coalesce
+  inputs:
+    value:
+      kind: node
+      node: negate_when_ready
+      port: result
+    default:
+      kind: literal
+      value:
+        id: fallback
+        value:
+          kind: boolean
+          value: false
+      value_type:
+        kind: boolean
 ```
 
 The `fallback` node returns false when `ready` is false, and the negated
@@ -943,6 +981,8 @@ For a leaf Git dependency, use its package name with the same repository URL,
 for example `sapho-core = { git = "https://github.com/agent-ix/sapho.git" }`.
 For a local dependency, point to its crate directory. Keep all Sapho packages
 on the same revision to share compatible value and trait types.
+
+For custom command hosts, `sapho-cli::Runner` accepts the same native/backend registries. `sapho-select` gathers bounded attributable input data; `sapho-evidence` validates labels, scores outcomes and ranks candidates without running a graph or opening a file. The command host coordinates those separate responsibilities.
 
 ## Operation reference
 

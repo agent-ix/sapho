@@ -8,3 +8,6 @@ mod ears;
 mod recording;
 #[path = "scenarios/runtime.rs"]
 mod runtime;
+
+#[path = "scenarios/assembly.rs"]
+mod assembly;

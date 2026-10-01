@@ -33,3 +33,7 @@ FND-001: accepted-no-change; placeholder records the clean dependency conclusion
 ## Final Verdict
 
 Pass for implementation after the documented fixes. All four selected review lenses have validated artifacts; runtime/test evidence remains a later implementation obligation.
+
+## Implementation dependency verification
+
+The implementation lane measured host Git 2.34.1 and verified literal pathspecs and rev-parse --end-of-options against it. FR-040/NFR-005 now require Git 2.34+, matching the exercised dependency instead of the unmeasured 2.39 draft floor. This changes no selector responsibility or compatibility policy. The bounded process and actual Git integration tests verify the complete command set before delivery.
