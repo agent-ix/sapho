@@ -28,6 +28,8 @@ Owning crate: `sapho-core`. Internal prerequisites: none. See the [workspace bou
 - [FR-005: Validate model answers](functional/FR-005-validate-model-answers.md)
 - [FR-006: Define replaceable model backend](functional/FR-006-define-replaceable-model-backend.md)
 
+- [FR-032: Decode plain data by a declared type](functional/FR-032.md)
+
 ## References
 
 See the [workspace specification](../../spec.md) and the functional artifacts owned by this module.

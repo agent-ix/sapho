@@ -30,6 +30,9 @@ Owning crate: `sapho-runtime`. Internal prerequisites: core, graph. See the [wor
 - [FR-016: Collect nested identified results](functional/FR-016-collect-nested-identified-results.md)
 - [FR-017: Produce execution evidence](functional/FR-017-produce-execution-evidence.md)
 
+- [FR-030: Assemble records from graph values](functional/FR-030.md)
+- [FR-031: Assemble ordered identified lists](functional/FR-031.md)
+
 ## References
 
 See the [workspace specification](../../spec.md) and the functional artifacts owned by this module.
