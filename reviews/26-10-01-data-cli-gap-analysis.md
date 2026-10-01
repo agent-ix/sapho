@@ -40,3 +40,7 @@ FND-001: fixed 94cc08f99f295f7ae79311476c2c1ebcd5931eda. Existing behavioral tes
 ## Final Review Verdict
 
 PASS for the implementation scope after the binding fix. Matrix completion markers await the full gate. Consumer-owned EARS migration and stakeholder demonstrations remain distinct delivery evidence, not fabricated Rust test coverage.
+
+## Execution Evidence
+
+The full workspace gate exited 0 at 9609f6711344362613b7f264815ce268e7a14703, including 68 tests plus one doctest with all features and 69 tests plus one doctest without default features. The matrix's completion markers now reflect those actual passing tests. CLI workflows cover labelled threshold comparison, development/held-out separation, weighted logic, native registration, multi-layer backend capture/exact replay, strict error routing, empty/file/Git selections and package forward examples. Final pre-PR/pre-merge gates additionally include the subsequent documentation configuration fix.

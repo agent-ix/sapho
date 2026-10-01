@@ -88,3 +88,13 @@ PASS: all five recorded findings have verified fixes. The final full gates must 
 | FND-006 | medium | The CLI binary name sapho collides with the existing facade library's generated documentation path. Cargo reports the collision even though the full gate exits successfully; one artifact can overwrite the other. Disable binary documentation and retain both public library documentation sets. | crates/sapho-cli/Cargo.toml:12 |
 
 The replay specification's mixed-modal warning was also removed by stating exact-request threshold reuse directly, with no contract change.
+
+## Documentation Disposition
+
+FND-006: fixed bd0152aedfd79263cffcd76e4f87024b864ea2b6. Cargo docs now generate the facade and sapho-cli public library without the duplicate binary artifact; scoped workspace documentation exits 0 with no collision warning. No public API documentation or lint/test lane was removed.
+
+## Executed Full Gate
+
+`make ci` exited 0 at 9609f6711344362613b7f264815ce268e7a14703: all-feature lane 68 tests plus one doctest; no-default-feature lane 69 tests plus one doctest; both lint lanes; format check; complete-workspace locked advisory/bans/license/source audit; unsafe-comment audit; workspace Rust docs; specification and review validation. The initial license refusal was fixed and is not counted as a pass. A subsequent documentation collision warning was resolved as recorded above. The final pre-PR and pre-merge gate runs include that configuration fix and the verified matrix markers.
+
+All six findings have verified dispositions. Final code/Rust verdict: PASS. No live inference, installation, training or downstream consumer migration is claimed.
