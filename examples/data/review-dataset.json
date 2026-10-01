@@ -1,0 +1,59 @@
+{
+  "id": "synthetic-review-example",
+  "cases": [
+    {
+      "id": "clear",
+      "split": "development",
+      "inputs": {
+        "support": {
+          "id": "clear",
+          "value": {
+            "kind": "probability",
+            "value": 0.9
+          },
+          "sources": []
+        }
+      },
+      "labels": {
+        "needs_review": false
+      },
+      "label_provenance": "Original synthetic tutorial label; no semantic accuracy claim"
+    },
+    {
+      "id": "review",
+      "split": "development",
+      "inputs": {
+        "support": {
+          "id": "review",
+          "value": {
+            "kind": "probability",
+            "value": 0.5
+          },
+          "sources": []
+        }
+      },
+      "labels": {
+        "needs_review": true
+      },
+      "label_provenance": "Original synthetic tutorial label; no semantic accuracy claim"
+    },
+    {
+      "id": "reserved",
+      "split": "held_out",
+      "inputs": {
+        "support": {
+          "id": "reserved",
+          "value": {
+            "kind": "probability",
+            "value": 0.75
+          },
+          "sources": []
+        }
+      },
+      "labels": {
+        "needs_review": true
+      },
+      "label_provenance": "Original synthetic tutorial label; no semantic accuracy claim"
+    }
+  ]
+}

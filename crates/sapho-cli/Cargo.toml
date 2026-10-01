@@ -1,0 +1,47 @@
+[package]
+name = "sapho-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Sapho data invocation, evidence and acquisition command host."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "sapho"
+path = "src/main.rs"
+# Public API documentation belongs to the library; the binary shares the facade name.
+doc = false
+
+[features]
+default = []
+jev = ["dep:sapho-jev", "dep:typesafe-sdk-client", "dep:typesafe-sdk-config", "dep:typesafe-sdk-env", "dep:typesafe-sdk-http"]
+
+[dependencies]
+sapho-core.workspace = true
+sapho-graph.workspace = true
+sapho-runtime.workspace = true
+sapho-recording.workspace = true
+sapho-evidence.workspace = true
+sapho-select.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+clap.workspace = true
+tokio.workspace = true
+sha2.workspace = true
+sapho-jev = { workspace = true, optional = true }
+typesafe-sdk-client = { version = "=0.6.2", optional = true }
+typesafe-sdk-config = { version = "=0.6.2", optional = true }
+typesafe-sdk-env = { version = "=0.6.2", optional = true }
+typesafe-sdk-http = { version = "=0.6.2", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["event", "fs"] }
+
+[dev-dependencies]
+tempfile = "3"
+async-trait.workspace = true

@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+inputs:
+  samples:
+    kind: list
+    item:
+      kind: record
+      fields:
+        support: {kind: probability}
+        weight: {kind: number}
+nodes:
+  - id: degrees
+    operation: {kind: map, graph: as_degree}
+    inputs: {items: {kind: input, name: samples}}
+  - id: weights
+    operation: {kind: map, graph: as_weight}
+    inputs: {items: {kind: input, name: samples}}
+  - id: strength
+    operation: {kind: reduce, reducer: weighted_mean, empty: 0.0}
+    inputs:
+      values: {kind: node, node: degrees, port: result}
+      weights: {kind: node, node: weights, port: result}
+  - id: review
+    operation: {kind: compare, comparator: less}
+    inputs:
+      a: {kind: node, node: strength, port: result}
+      b:
+        kind: literal
+        value: {id: cutoff, value: {kind: degree, value: 0.7}}
+        value_type: {kind: degree}
+outputs:
+  strength: {kind: node, node: strength, port: result}
+  needs_review: {kind: node, node: review, port: result}
+subgraphs:
+  as_degree:
+    inputs:
+      item:
+        kind: record
+        fields:
+          support: {kind: probability}
+          weight: {kind: number}
+    nodes:
+      - id: convert
+        operation: {kind: degree}
+        inputs: {value: {kind: input, name: item, path: [support]}}
+    outputs: {result: {kind: node, node: convert, port: result}}
+  as_weight:
+    inputs:
+      item:
+        kind: record
+        fields:
+          support: {kind: probability}
+          weight: {kind: number}
+    outputs: {result: {kind: input, name: item, path: [weight]}}

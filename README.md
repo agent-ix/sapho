@@ -15,7 +15,7 @@ to combine those answers with facts, apply a policy and explain the result.
 Sapho gives you a typed graph for that whole evaluation: several layers of
 questions, transformations and combinations, with evidence flowing between them.
 
-Define the workflow in TOML, register your Rust functions and model backends,
+Define the workflow in YAML or JSON, register your Rust functions and model backends,
 then run it on your application's inputs. Run independent checks on separate
 branches, combine their results, and use an earlier layer to prepare the next
 layer's questions. Change questions, combinations or thresholds without
@@ -71,6 +71,7 @@ re-evaluation loop belongs to the calling application.
 - **Multi-layer composition.** Feed earlier judgments into later questions,
   mix model stages with Rust transformations, branch into independent checks
   and combine the results. Use a different backend for each model stage.
+- **Data CLI and graph skills.** Validate and run data-only graphs, gather files/Git patches/JSON, record and replay evidence, measure supplied labels, compare development candidates and export training cases. The plugin provides `create`, `tune` and `record` workflows.
 - **Checked graph configuration.** Compilation checks connections, types and
   dependencies before any Rust function or model call executes.
 - **Typed questions and answers.** Batch Boolean, choice and ordinal-score
@@ -117,7 +118,16 @@ several kinds of combination fit together.
 
 ## Start using Sapho
 
-Sapho is an embedding library: call it from your Rust application, service,
+Use the CLI for data-only graphs, or embed the same engine in your Rust application:
+
+```sh
+cargo install --path crates/sapho-cli --locked
+printf '%s' '{"support":0.7}' | sapho run examples/graphs/review.yaml --fail-on needs_review
+```
+
+Start with the [CLI guide](docs/cli-guide.md) for selectors, replay, labelled measurement, tuning and training export. Add `--features jev` when installing to enable explicitly configured live Jev calls.
+
+Sapho is also an embedding library: call it from your Rust application, service,
 CLI or review adapter. Use Rust 1.98 or later; this repository pins 1.98.1.
 Depend on the Git repository with an account that has access:
 
@@ -133,7 +143,7 @@ when you need a fixed dependency version.
 
 The integration flow is:
 
-1. Define input types, nodes and outputs in a TOML graph.
+1. Define input types, nodes and outputs in a YAML or JSON graph.
 2. Register any Rust primitives and model bindings the graph names.
 3. Parse and compile the graph, then construct an `Engine`.
 4. Supply identified inputs and `RunLimits`, and await `engine.run(...)`.
@@ -156,7 +166,7 @@ See [Jev setup](docs/user-guide.md#connect-jev) for client configuration and
 
 ## User guide and integration choices
 
-The [full user guide](docs/user-guide.md) covers installation, runnable graphs,
+The [CLI guide](docs/cli-guide.md) covers invocation, data gathering, evidence capture, measurement, tuning and training export. The [Rust user guide](docs/user-guide.md) covers installation, runnable graphs,
 question types, logic, Rust extensions, multi-stage evaluation, source
 references, limits, errors, recording and replay.
 
@@ -179,7 +189,11 @@ The user guide is the starting point for using Sapho. The
 [execution](spec/modules/runtime/spec.md),
 [logic](spec/modules/logic/spec.md),
 [Jev translation](spec/modules/jev/spec.md) and
-[recording and replay](spec/modules/recording/spec.md).
+[recording and replay](spec/modules/recording/spec.md),
+[CLI invocation](spec/modules/cli/spec.md),
+[labelled evidence](spec/modules/evidence/spec.md),
+[selectors](spec/modules/selection/spec.md) and
+[graph skills](spec/modules/skills/spec.md).
 Use these when checking a boundary condition or implementing an adapter.
 
 Generate local API documentation with `cargo doc --no-deps --open`;

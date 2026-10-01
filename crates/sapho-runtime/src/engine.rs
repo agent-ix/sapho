@@ -36,6 +36,18 @@ pub struct RunLimits {
     /// Total monotonic execution budget.
     pub duration: Duration,
 }
+impl Default for RunLimits {
+    fn default() -> Self {
+        Self {
+            node_instances: 4096,
+            collection_items: 16384,
+            model_requests: 128,
+            concurrency: 4,
+            data_bytes: 8 * 1_048_576,
+            duration: Duration::from_secs(60),
+        }
+    }
+}
 impl RunLimits {
     fn validate(&self) -> Result<()> {
         if [
@@ -363,6 +375,33 @@ impl Engine {
         state: &mut RunState,
     ) -> Result<Inputs> {
         match &node.spec().operation {
+            Operation::Record {} => one_output(
+                path,
+                Value::Record(
+                    ins.iter()
+                        .map(|(name, d)| (name.clone(), d.value.clone()))
+                        .collect(),
+                ),
+                ins,
+            ),
+            Operation::List { order, .. } => {
+                state.add_items(order.len())?;
+                let items = order
+                    .iter()
+                    .map(|name| {
+                        let input = ins.get(name).ok_or_else(|| {
+                            SaphoError::new(ErrorCode::MissingInput, "List operand absent")
+                        })?;
+                        make_datum(
+                            path,
+                            name,
+                            input.value.clone(),
+                            &Inputs::from([(name.clone(), input.clone())]),
+                        )
+                    })
+                    .collect::<Result<_>>()?;
+                one_output(path, Value::List(items), ins)
+            }
             Operation::Code { params, .. } => {
                 let primitive = node.primitive().ok_or_else(|| {
                     SaphoError::new(

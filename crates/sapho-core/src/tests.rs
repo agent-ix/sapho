@@ -660,3 +660,194 @@ fn approximation_never_normalizes_partial_or_unavailable_distributions() {
     assert_eq!(error.code, ErrorCode::InvalidAnswer);
     assert_eq!(error.context["coverage"], "partial");
 }
+
+/// Trace: FR-032-AC-1, FR-032-AC-2, TC-032
+#[test]
+fn plain_json_conversion_is_schema_directed_and_checked() {
+    let number = serde_json::json!(0.75);
+    for (ty, expected) in [
+        (ValueType::Number, Value::Number(0.75)),
+        (
+            ValueType::Probability,
+            Value::Probability(Probability::new(0.75).unwrap()),
+        ),
+        (ValueType::Degree, Value::Degree(Degree::new(0.75).unwrap())),
+    ] {
+        assert_eq!(
+            decode_plain("root", &ty, &number, &[]).unwrap().value,
+            expected
+        );
+    }
+    assert_eq!(
+        decode_plain(
+            "root",
+            &ValueType::optional(ValueType::Text),
+            &serde_json::Value::Null,
+            &[]
+        )
+        .unwrap()
+        .value,
+        Value::Optional(None)
+    );
+    assert_eq!(
+        decode_plain(
+            "root",
+            &ValueType::optional(ValueType::Text),
+            &serde_json::json!("hello"),
+            &[]
+        )
+        .unwrap()
+        .value,
+        Value::Optional(Some(Box::new(Value::Text("hello".into()))))
+    );
+    let record = ValueType::Record {
+        fields: BTreeMap::from([("flag".into(), ValueType::Boolean)]),
+    };
+    for value in [
+        serde_json::json!({}),
+        serde_json::json!({"flag":true,"extra":false}),
+        serde_json::json!({"flag":0}),
+    ] {
+        assert_eq!(
+            decode_plain("root", &record, &value, &[]).unwrap_err().code,
+            ErrorCode::TypeMismatch
+        );
+    }
+    assert_eq!(
+        decode_plain(
+            "root",
+            &ValueType::Probability,
+            &serde_json::json!(1.1),
+            &[]
+        )
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidValue
+    );
+    assert_eq!(
+        decode_plain("root", &ValueType::Boolean, &number, &[])
+            .unwrap_err()
+            .code,
+        ErrorCode::TypeMismatch
+    );
+    let mut nested = ValueType::Number;
+    for _ in 0..32 {
+        nested = ValueType::optional(nested);
+    }
+    assert_eq!(
+        decode_plain("root", &nested, &number, &[])
+            .unwrap_err()
+            .code,
+        ErrorCode::LimitExceeded
+    );
+    assert_eq!(
+        decode_json::<serde_json::Value>(b"1e999", 10)
+            .unwrap_err()
+            .code,
+        ErrorCode::Config
+    );
+}
+/// Trace: FR-032-AC-3, FR-032-AC-2
+#[test]
+fn strict_json_and_nested_occurrences_retain_identity_and_sources() {
+    let json = serde_json::json!([["same", "same"], ["same"]]);
+    let source = SourceRef {
+        source: SourceId::new("local").unwrap(),
+        start: None,
+        end: None,
+    };
+    let ty = ValueType::list(ValueType::list(ValueType::Text));
+    let a = decode_plain("root:/[]", &ty, &json, std::slice::from_ref(&source)).unwrap();
+    assert_eq!(
+        decode_plain("root:/[]", &ty, &json, std::slice::from_ref(&source)).unwrap(),
+        a
+    );
+    let Value::List(outer) = a.value else {
+        panic!("list expected")
+    };
+    let Value::List(first) = &outer[0].value else {
+        panic!("nested list expected")
+    };
+    assert_ne!(first[0].id, first[1].id);
+    assert_ne!(outer[0].id, first[0].id);
+    assert_eq!(first[0].sources, vec![source]);
+    assert_eq!(
+        decode_json::<serde_json::Value>(br#"{"a":{"b":1,"b":2}}"#, 100)
+            .unwrap_err()
+            .code,
+        ErrorCode::Config
+    );
+    let depth = "[".repeat(128) + "0" + &"]".repeat(128);
+    assert_eq!(
+        decode_json::<serde_json::Value>(depth.as_bytes(), 1000)
+            .unwrap_err()
+            .code,
+        ErrorCode::LimitExceeded
+    );
+    assert_eq!(
+        decode_json::<serde_json::Value>(b"{}", 1).unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+}
+
+/// Trace: FR-032-AC-1, FR-041-AC-2
+#[test]
+fn plain_question_and_answer_inputs_validate_their_full_typed_contract() {
+    let questions = vec![choice()];
+    let q = decode_plain(
+        "q",
+        &ValueType::Questions,
+        &serde_json::to_value(&questions).unwrap(),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(q.value, Value::Questions(questions.clone()));
+    let answers = validate_response(
+        &request(questions.clone()),
+        &response(Answer::Choice {
+            selected: "z".into(),
+            confidence: p(0.75),
+            probabilities: Some(BTreeMap::from([
+                ("z".into(), p(0.75)),
+                ("a".into(), p(0.25)),
+            ])),
+        }),
+    )
+    .unwrap();
+    assert_eq!(
+        decode_plain(
+            "a",
+            &ValueType::Answers,
+            &serde_json::to_value(&answers).unwrap(),
+            &[]
+        )
+        .unwrap()
+        .value,
+        Value::Answers(answers.clone())
+    );
+    for (schema, value) in [
+        (ValueType::Questions, serde_json::json!({})),
+        (ValueType::Answers, serde_json::json!([])),
+    ] {
+        assert_eq!(
+            decode_plain("bad", &schema, &value, &[]).unwrap_err().code,
+            ErrorCode::TypeMismatch
+        );
+    }
+    let mut invalid = serde_json::to_value(answers).unwrap();
+    invalid["values"]["q"]["probabilities"]["a"] = serde_json::json!(0.1);
+    assert_eq!(
+        decode_plain("bad", &ValueType::Answers, &invalid, &[])
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidAnswer
+    );
+    let mut invalid = serde_json::to_value(questions).unwrap();
+    invalid[0]["question"]["extra"] = serde_json::json!(true);
+    assert_eq!(
+        decode_plain("bad", &ValueType::Questions, &invalid, &[])
+            .unwrap_err()
+            .code,
+        ErrorCode::TypeMismatch
+    );
+}

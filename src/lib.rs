@@ -11,19 +11,15 @@
 //!
 //! # async fn evaluate() -> Result<()> {
 //! let spec = GraphSpec::parse(r#"
-//! [inputs.fact]
-//! kind = "boolean"
-//! [[nodes]]
-//! id = "negate"
-//! [nodes.operation]
-//! kind = "not"
-//! [nodes.inputs.value]
-//! kind = "input"
-//! name = "fact"
-//! [outputs.result]
-//! kind = "node"
-//! node = "negate"
-//! port = "result"
+//! inputs:
+//!   fact: {kind: boolean}
+//! nodes:
+//!   - id: negate
+//!     operation: {kind: not}
+//!     inputs:
+//!       value: {kind: input, name: fact}
+//! outputs:
+//!   result: {kind: node, node: negate, port: result}
 //! "#)?;
 //! let compiled = compile(&spec, &PrimitiveRegistry::default())?;
 //! let engine = Engine::new(compiled, BackendRegistry::default())?;

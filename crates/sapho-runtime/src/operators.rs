@@ -151,7 +151,9 @@ pub(crate) fn logic(op: &Operation, input: &Inputs) -> Result<Value> {
                 Value::Degree(Degree::new(value.clamp(0.0, 1.0))?)
             }
         }
-        Operation::Code { .. }
+        Operation::Record {}
+        | Operation::List { .. }
+        | Operation::Code { .. }
         | Operation::Questions { .. }
         | Operation::Ask { .. }
         | Operation::Map { .. }

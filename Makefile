@@ -20,7 +20,7 @@ build:
 clean:
 	$(CARGO) clean
 deny:
-	$(CARGO) deny --all-features check
+	$(CARGO) deny --workspace --all-features --locked check
 audit-unsafe:
 	bash scripts/check_unsafe_comments.sh
 docs:

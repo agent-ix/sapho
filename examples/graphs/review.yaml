@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+inputs:
+  support: {kind: probability}
+nodes:
+  - id: review
+    operation: {kind: compare, comparator: less}
+    inputs:
+      a: {kind: input, name: support}
+      b:
+        kind: literal
+        value: {id: cutoff, value: {kind: probability, value: 0.8}}
+        value_type: {kind: probability}
+outputs:
+  needs_review: {kind: node, node: review, port: result}

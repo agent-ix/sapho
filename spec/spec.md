@@ -16,15 +16,15 @@ Sapho executes configurable graphs of native code, typed model questions and log
 
 ### 2.1 In Scope
 
-Typed values and provenance; native Rust extension registration; TOML graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev adapter; caller-controlled recording and exact offline replay.
+Typed values and provenance; native Rust extension registration; YAML/JSON graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev adapter; caller-controlled recording and exact offline replay.
 
 ### 2.2 Out of Scope
 
-EARS extractors or questions, test-adequacy rules, code-review findings, PR rendering, repository discovery, edit hooks, repair loops, arbitrary scripts, graph cycles, model training, labelled calibration, expert training, local inference runtimes, CLI or service deployment. Downstream applications implement these using the extension boundaries.
+EARS extractors or questions, test-adequacy rules, code-review findings, PR rendering, implicit repository discovery, edit hooks, repair loops, arbitrary scripts, graph cycles, model training, expert/model training execution, local inference runtimes or service deployment. Downstream applications implement these using the extension boundaries.
 
 ## System Overview
 
-An embedding Rust application supplies inputs, graph config, native primitives, backend bindings and limits. Native primitives are trusted application code. Model responses and config are validated data. The Jev adapter calls a configured SDK client. Recording paths are chosen explicitly by the caller.
+A Rust embedding application or the Sapho CLI host supplies inputs, graph config, native primitives, backend bindings and limits. Native primitives are trusted application code. Model responses and config are validated data. The Jev adapter calls a configured SDK client. Recording paths are chosen explicitly by the caller.
 
 ## Requirements Architecture
 
@@ -37,6 +37,11 @@ An embedding Rust application supplies inputs, graph config, native primitives, 
 | [jev](modules/jev/spec.md) | `sapho-jev` | Hosted Jev backend adapter |
 | [recording](modules/recording/spec.md) | `sapho-recording` | Exact recording and offline replay |
 
+| [cli](modules/cli/spec.md) | `sapho-cli` | Checked command-line invocation and host-owned I/O, backends and exit policy |
+| [evidence](modules/evidence/spec.md) | `sapho-evidence` | Curated labelled cases, reproducible measurements, development tuning and training exports |
+| [selection](modules/selection/spec.md) | `sapho-select` | Bounded acquisition of identified file, Git-diff and JSON units outside the executor |
+| [skills](modules/skills/spec.md) | `plugins/sapho` | Graph creation, tuning and recording workflows using the public CLI |
+
 ## Crate Dependency Boundaries
 
 ```mermaid
@@ -48,11 +53,11 @@ flowchart TD
  recording[sapho-recording] --> core
 ```
 
-The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev` feature is disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. Core owns the shared ports so recording and Jev need no runtime dependency.
+The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev` feature is disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording and Jev need no runtime dependency.
 
 ## Public Contract
 
-`GraphSpec::parse` loads TOML. `compile` binds checked graph operations and native implementations. `Engine::run` accepts named Datum values and finite RunLimits, returning RunResult or RunFailure with partial Trace. Registries reject duplicate names. ModelBackend is the asynchronous inference seam; Primitive is the synchronous native-code seam.
+`GraphSpec::parse` loads constrained YAML; `parse_with_format` chooses YAML or JSON explicitly. TOML graph consumption is removed without a compatibility layer. `compile` binds checked graph operations and native implementations. `Engine::run` accepts named Datum values and finite RunLimits, returning RunResult or RunFailure with partial Trace. Registries reject duplicate names. ModelBackend is the asynchronous inference seam; Primitive is the synchronous native-code seam.
 
 Each binding names a graph input, a node port, or a typed literal and may select a record-field path. Each operation declares its input/output port types. Guarded ports are Optional; consumers explicitly coalesce them. Model calls accept a Record state and ordered Questions and return validated Answers. Explicit ask nodes define batching; the executor never merges different ask nodes.
 
@@ -90,11 +95,17 @@ Probability, reported confidence, expected ordinal score and heuristic Degree ar
 
 ## Verification Strategy
 
-Each functional artifact declares three acceptance criteria and one planned TC. Integration artifacts exercise cross-crate seams. Tests bind exact AC IDs using `Trace:` tags. The EARS-shaped synthetic integration test establishes engine composition only, not semantic model quality. Default tests run offline.
+Each functional artifact declares observable acceptance criteria and one planned TC. Integration artifacts exercise cross-crate seams. Tests bind exact AC IDs using `Trace:` tags. The EARS-shaped synthetic integration test establishes engine composition only, not semantic model quality. Default tests run offline.
 
 ## Lifecycle and Change Control
 
 First-release requirements are specified and reviewed before code. Requirement IDs are global across the module directories. Changes update their owning artifact and affected tests. Implemented/verified status is reported from measured evidence rather than a copied ticket claim.
+
+## CLI and Evidence Contracts
+
+The initial command set is validate, inspect, run, record, replay, select (files/git/json), measure, tune and export-training. Commands consume explicitly selected graph/input/binding/dataset paths. Machine output is typed JSON. Existing application-owned Rust registries remain the extension boundary; the stock executable never loads arbitrary code. Dataset curation requires independent Boolean labels and provenance, explicit development/held_out splits and stable case identities. Reports separate scored coverage from errors/unscored outputs. Only Probability is measured by Brier score; Degree remains a heuristic. Tuning ranks complete development candidates only; training export excludes held-out cases. Exact replay and raw evidence policy remain unchanged.
+
+All approved acquisition and graph-skill behavior is specified before implementation. Generic selectors live outside the runtime and retain full selected bytes/context with source references. EARS owns its separate consumer migration, coordinated through SAPHO-4; no EARS data or extractor source is copied here. The skills create/tune/record operate through the same CLI and guide.
 
 ## References
 

@@ -243,6 +243,35 @@ impl Compiler<'_> {
         let mut primitive = None;
         let mut mapped = None;
         let (inputs, outputs) = match op {
+            Operation::Record {} => (
+                ins.clone(),
+                one(
+                    "result",
+                    ValueType::Record {
+                        fields: ins.clone(),
+                    },
+                ),
+            ),
+            Operation::List { item_type, order } => {
+                item_type.validate()?;
+                let names = order.iter().collect::<BTreeSet<_>>();
+                if names.len() != order.len() || !names.iter().copied().eq(ins.keys()) {
+                    return Err(SaphoError::new(
+                        ErrorCode::Config,
+                        "List order must name each operand exactly once",
+                    ));
+                }
+                for name in order {
+                    validate_name(name)?;
+                }
+                if ins.values().any(|ty| ty != item_type) {
+                    return Err(mismatch("List operands must match item_type"));
+                }
+                (
+                    ins.clone(),
+                    one("result", ValueType::list(item_type.clone())),
+                )
+            }
             Operation::Code {
                 primitive: id,
                 params,

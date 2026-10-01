@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+inputs: {text: {kind: text}}
+nodes:
+  - id: context
+    operation: {kind: record}
+    inputs: {text: {kind: input, name: text}}
+  - id: questions
+    operation:
+      kind: questions
+      questions:
+        - id: q
+          question: {kind: boolean, instructions: "Does the property hold?", yes: Holds, no: Absent}
+  - id: ask
+    operation: {kind: ask, backend: judge}
+    inputs:
+      state: {kind: node, node: context, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: probability
+    operation: {kind: probability, question: q, labels: ["true"]}
+    inputs: {answers: {kind: node, node: ask, port: answers}}
+  - id: context2
+    operation: {kind: record}
+    inputs:
+      text: {kind: input, name: text}
+      support: {kind: node, node: probability, port: result}
+  - id: ask2
+    operation: {kind: ask, backend: judge}
+    inputs:
+      state: {kind: node, node: context2, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: result
+    operation: {kind: probability, question: q, labels: ["true"]}
+    inputs: {answers: {kind: node, node: ask2, port: answers}}
+outputs: {result: {kind: node, node: result, port: result}}

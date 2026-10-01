@@ -43,3 +43,28 @@ allow = ["AGPL-3.0-or-later"]
 [[licenses.exceptions]]
 name = "sapho-recording"
 allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "sapho-evidence"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "sapho-select"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "sapho-cli"
+allow = ["AGPL-3.0-or-later"]
+
+# Build-only stacker/psm archive writer: its authoritative LICENSE.txt is Apache
+# 2.0 with LLVM's redistribution exceptions. This narrowly permits the examined
+# release; it does not broaden the dependency allowlist or exempt advisories.
+[[licenses.exceptions]]
+name = "ar_archive_writer"
+version = "=0.5.3"
+allow = ["Apache-2.0 WITH LLVM-exception"]
+# Windows capability support uses the same examined Apache/LLVM expression.
+[[licenses.exceptions]]
+name = "winx"
+version = "=0.36.4"
+allow = ["Apache-2.0 WITH LLVM-exception"]
