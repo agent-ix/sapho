@@ -68,3 +68,15 @@ The strengthened workspace check additionally found Windows capability dependenc
 | FND-005 | high | The dependency's single-document helper deliberately ignores malformed content after an explicit `...` end marker. `outputs: {}\n...\n[invalid` is accepted as an empty graph, violating strict complete configuration refusal. | crates/sapho-graph/src/spec.rs:222 |
 
 The regression test failed with an observed Ok graph before remediation. Use the dependency's complete-stream parser with the existing one-document budget and the same stack-safe typeless visitor; no dependency implementation or legacy reader is copied into Sapho.
+
+## Gate-Finding Dispositions
+
+| Finding | Outcome | Evidence |
+|---|---|---|
+| FND-003 | fixed cc67c9115f4f63dfc750135312a4dcabb2e1a167 | Local and CI cargo-deny now use --workspace --all-features --locked; all new workspace crates and cross-platform dependencies are checked. No feature lane removed. |
+| FND-004 | fixed cc67c9115f4f63dfc750135312a4dcabb2e1a167 | Two examined Apache/LLVM dependency versions have narrow license permissions; workspace advisories, bans, licenses and sources checks pass. Sapho remains AGPL. |
+| FND-005 | fixed 34193c29109943f2e244faca463a4bef81ec5252 | Complete-stream parsing rejects malformed trailing content as Config and a second YAML document as LimitExceeded. Anchor/alias, depth, duplicate, merge, tag and representation-equivalence tests still pass. |
+
+## Final Fix-Round Verdict
+
+PASS: all five recorded findings have verified fixes. The final full gates must still be completed and their results retained before PR/merge; the failed initial license gate is not counted as a pass.
