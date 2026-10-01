@@ -3,7 +3,7 @@ id: SR-012
 title: "Approximate-distribution implementation coverage"
 type: SpecReview
 analysis: gap-analysis
-scope: "sapho@cfb659fd3ce833ec1ebe3d513a52de4d4bd9609b; focused contract change FR-005/006/020/027/028 in Sapho and FR-007/010 in consumer, source/tests and Quire coverage report"
+scope: "sapho@9865821b16b0ba1162ef6110e2e10b485d05f0ba; focused contract change FR-005/006/020/027/028 in Sapho and FR-007/010 in consumer, source/tests and Quire coverage report"
 review_set: subset
 ---
 # Focused implementation gap analysis
@@ -21,3 +21,5 @@ No plan bundle was created for this confined contract fix. The targeted owning r
 ## Verdict
 
 PASS. Quire reconciles 90/90 functional ACs with zero unbacked rows, status lies or untracked symbols. Live model quality and human adjudication remain outside this review. No independent semantic review claimed.
+
+The immediate FR-026 request-refusal and FR-010-AC-3 context contracts are also implemented and behaviorally covered. Coverage excludes stakeholder/non-functional criteria from the functional numerator; those are not claimed as runtime-tested.

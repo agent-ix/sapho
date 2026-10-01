@@ -3,7 +3,7 @@ id: SR-011
 title: "Approximate-distribution Rust idioms and coverage review"
 type: SpecReview
 analysis: code-review
-scope: "sapho@cfb659fd3ce833ec1ebe3d513a52de4d4bd9609b; complete focused PR diff; files: Cargo.toml, README.md, crates/sapho-core/src/distribution.rs, crates/sapho-core/src/lib.rs, crates/sapho-core/src/model.rs, crates/sapho-core/src/ports.rs, crates/sapho-core/src/tests.rs, crates/sapho-jev/src/tests.rs, crates/sapho-runtime/src/engine.rs, deny.toml, tests/common/mod.rs, tests/scenarios/recording.rs; owning changed spec/TC/review artifacts and committed repo conventions; Sapho/consumer boundary source also read"
+scope: "sapho@9865821b16b0ba1162ef6110e2e10b485d05f0ba; complete focused PR diff; files: Cargo.toml, README.md, crates/sapho-core/src/distribution.rs, crates/sapho-core/src/lib.rs, crates/sapho-core/src/model.rs, crates/sapho-core/src/ports.rs, crates/sapho-core/src/tests.rs, crates/sapho-jev/src/lib.rs, crates/sapho-jev/src/tests.rs, crates/sapho-runtime/src/engine.rs, deny.toml, tests/common/mod.rs, tests/scenarios/recording.rs; owning changed spec/TC/review artifacts and committed repo conventions; Sapho/consumer boundary source also read"
 review_set: subset
 ---
 # Formal Rust and code review
@@ -29,3 +29,7 @@ The original Sapho SR-006/FND-001 strict-mass boundary finding is fixed by the e
 ## Verification
 
 Scoped core/Jev/recording tests, consumer full-layer approximate/replay test and workspace all-feature Clippy passed. Full gates are recorded in the companion verification artifact before publication. Coverage reconciles 90/90 functional acceptance criteria, no unbacked rows/status lies/untracked symbols; test assertions were read, not merely counted.
+
+## Final token-boundary fix review
+
+Reviewed the full PR diff again after the real provider refusal. HTTP400/422 maps to ServiceValidation by typed status, with no body/credential leakage or retry. Consumer context is a private borrowed Serialize projection: all prepared source/context/spans, action frames and previous raw answers/policies survive; current plans reference IDs whose full question definitions appear once in the Questions port. Native Work/results retain complete question evidence. Expert projection includes assembled findings. The acceptance test inspects every default/expert request and retained result, while existing exact replay tests exercise the changed pipeline. No batching, source truncation, compatibility reader or new dependency. No new findings.
