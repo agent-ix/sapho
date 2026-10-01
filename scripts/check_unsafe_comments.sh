@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
 # Enforce that every `unsafe {` block in src/ has a `// SAFETY:` comment within
 # the 3 lines preceding it. Pre-existing exemptions live in the baseline file
 # below; regenerate with `--update-baseline`.
