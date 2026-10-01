@@ -15,6 +15,7 @@ to an evaluation embedded in your own application.
 - [Combine logic and evidence](#combine-logic-and-evidence)
 - [Extend the graph with Rust](#extend-the-graph-with-rust)
 - [Build multi-stage evaluations](#build-multi-stage-evaluations)
+- [Worked composition examples](#worked-composition-examples)
 - [Preserve identity and source references](#preserve-identity-and-source-references)
 - [Set execution limits](#set-execution-limits)
 - [Inspect outputs and failures](#inspect-outputs-and-failures)
@@ -547,6 +548,25 @@ Use different backend names for stages when you want different models or
 experts. A Rust routing primitive plus guarded branches can select among
 those configured bindings; Sapho does not train or load adapters itself.
 
+### What can pass between layers?
+
+A later layer can receive selected facts, identified items, role records,
+probabilities, degrees or complete Answers. A Rust primitive can interpret
+that evidence, build a new Record state and return a new Questions value.
+Connect those two outputs to the next `ask`. The dependency edges make that
+ask wait for the preparation work.
+
+For example, a relationship question can name the actors and actions selected in the roles
+layer, and an expert check can examine the relationship candidates selected
+after that. Build compact context from the relevant earlier evidence while
+keeping the raw answers in the trace.
+
+Independent branches can ask separate questions about the same input, or use
+different backends, then join their evidence in a later node. Model and code
+nodes can appear at any stage. You define each layer through dependency
+edges. The compiler rejects cycles; your application owns bounded retries,
+repair attempts and edit/review loops.
+
 ### Work with collections
 
 | Operation | Use | Identity behavior |
@@ -610,6 +630,111 @@ runs the graph and formats findings for the review. For an editor or per-edit
 invocation, it selects affected units and calls the same engine. The host
 owns change selection, scheduling, finding deduplication and any repair loop;
 use a host-level attempt bound if results trigger another edit and evaluation.
+
+## Worked composition examples
+
+These examples use application-owned rules, synthetic inputs and illustrative
+numbers. Each equation describes a policy you build from the existing
+operations in the [operation reference](#operation-reference).
+
+### Example 1: requirements through several model layers
+
+Consider this example statement: **"When pressure is high, the controller
+shall close the valve."** Instead of asking one broad question, pass structured
+evidence through several focused stages.
+
+![Requirement evaluation with four model layers separated by Rust preparation and logic.](images/multi-layer-requirements.png)
+
+| Stage | Work | Evidence for the next stage |
+|---|---|---|
+| Prepare | A Rust extractor creates statement/span records. | Original text, item IDs and context. |
+| Layer 1: structure | Ask which requirement patterns and conditions are present. | Candidate pattern and condition evidence. |
+| Layer 2: roles | Ask about actor, action and target using the prepared text and earlier evidence. | Candidate controller/close/valve role records. |
+| Prepare candidates | Rust builds candidate links; `filter` keeps selected items and `pairs` or `join` connects candidates. | Identified role pairs and relevant condition context. |
+| Layer 3: relationships | Ask whether the selected condition gates the selected action, and which roles are related. | Relationship answers and projected support. |
+| Layer 4: expert check | A Boolean guard enables a configured expert for selected ambiguous or conflicting cases. | Optional expert evidence. |
+| Assemble | Rust and logic combine evidence and emit findings with source references. | The application's selected roles, links and review decisions. |
+
+The controller/action/target values illustrate the candidate evidence passed
+between stages. The structure and roles stages can use one backend;
+relationship or expert stages can name another. Local model hosting and expert loading remain in
+your backend implementation.
+
+A primitive can create later questions from earlier Answers, so each stage
+can ask about the specific candidates that emerged. Guarded expert outputs
+are Optional: the assembly primitive must handle that type, or the graph
+must explicitly coalesce it. Decide what absent expert evidence means for
+your rule; it is distinct from a failed judgment.
+
+Use `map` to reuse the per-statement evaluation across a document. Filter
+candidates before Cartesian pairing when you can; request and collection
+ceilings still apply across every layer and mapped item.
+
+### Example 2: hard facts plus model evidence
+
+A code-review rule might require a deterministic fact about the diff, plus
+either of two model judgments:
+
+```text
+report = changed_public_api
+         AND (contract_risk >= 0.7 OR test_gap >= 0.8)
+```
+
+![A Rust Boolean fact combines with two thresholded model degrees using OR then AND.](images/code-review-combinations.png)
+
+The Rust extractor emits `changed_public_api: Boolean`. Two `ask` nodes
+judge contract risk and test coverage; your projections and explicit `degree`
+conversions give the corresponding heuristic strengths. Two `compare` nodes
+produce Booleans. An `or` combines those decisions, then an `and` combines
+the result with the Rust fact.
+
+For an illustrative run, the public API changed, contract risk is 0.72 and
+test gap is 0.45. The comparisons are true and false; the OR is true and
+the final AND is true. If the API-change fact is false, this rule's final
+decision is false even if either risk comparison is true.
+
+Boolean `and` and `or` combine values after their configured upstream work.
+To skip model calls when the API did not change, guard the `ask` nodes
+themselves and explicitly handle their Optional outputs downstream. This
+makes cost control part of your execution policy.
+
+Use `not` for a Boolean exception, such as an application-owned exemption
+fact. For a heuristic reversal, use `complement`: support 0.65 becomes concern
+0.35. Those two operations have different input and output types.
+
+### Example 3: combine combinations
+
+A larger rule can give its subrules different policies. In this synthetic
+requirement check, every role matters, any accepted pattern can support
+structure, and relationship evidence contributes to a softer summary:
+
+```text
+role_fit     = min(actor_fit=0.9, action_fit=0.8, target_fit=0.7) = 0.7
+pattern_fit  = max(conditional_fit=0.6, state_fit=0.3)          = 0.6
+semantic_fit = weighted_mean(role_fit, link_fit=0.8; 2:1)     ≈ 0.733
+overall      = min(pattern_fit, semantic_fit)                 = 0.6
+needs_review = overall < 0.75                                = true
+```
+
+![Nested combinations: minimum for roles, maximum for pattern alternatives, weighted mean for semantic evidence, and a final minimum and threshold.](images/hierarchical-combinations.png)
+
+All inputs here are Degrees with application-defined meanings. Each `min`,
+`max` or `weighted_mean` is a `reduce` node over an identified degree list.
+Rust primitives can assemble the lists from earlier results. The semantic
+mean gives role fit twice the weight of link fit. A final `compare` applies
+the review threshold.
+
+The outer minimum keeps low pattern fit from being hidden by a high semantic
+summary. The inner weighted mean deliberately allows its two inputs to
+compensate for each other. Choose the point where compensation is acceptable
+and the point where a prerequisite should cap the result. Define each
+reducer's `empty` value and align its weights by item ID.
+
+The same structure can aggregate a code unit's checks, then units into a
+file-level decision, then files into a PR review. Treat the resulting degrees
+as heuristic strengths. Replay fixed model exchanges while changing downstream
+weights or thresholds to compare policies; use labeled cases to decide which
+policy is useful.
 
 ## Preserve identity and source references
 
@@ -867,5 +992,10 @@ commands. The [AGPL license](../LICENSE), [CLA](../CLA.md) and
 
 The diagrams are embedded as PNG images. For reuse at other sizes, the
 [flow](images/evaluation-flow.svg), [logic](images/logic-flow.svg) and
-[combination chart](images/degree-combiners.svg) also have SVG versions. Their
+[combination chart](images/degree-combiners.svg) also have SVG versions.
+The [requirements](images/multi-layer-requirements.svg),
+[code review](images/code-review-combinations.svg) and
+[nested-rule](images/hierarchical-combinations.svg) examples have the same
+formats. Transparent canvases and self-contained pastel labels keep all
+six images legible in light and dark mode. The
 [renderer](images/generate.py) recreates them using Matplotlib.
