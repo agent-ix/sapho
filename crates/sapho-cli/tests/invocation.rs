@@ -54,7 +54,7 @@ fn result(output: &Output) -> serde_json::Value {
 fn path(path: &Path) -> &str {
     path.to_str().unwrap()
 }
-/// Trace: FR-033-AC-1, FR-033-AC-2, FR-033-AC-3, FR-034-AC-1, FR-034-AC-2, TC-033, TC-034
+/// Trace: FR-046-AC-1, FR-033-AC-1, FR-033-AC-2, FR-033-AC-3, FR-034-AC-1, FR-034-AC-2, TC-033, TC-034
 #[test]
 fn cli_inspection_file_stdin_types_exits_and_refusals_are_real() {
     let root = tempfile::tempdir().unwrap();
@@ -581,7 +581,7 @@ async fn real_measure_tune_export_use_selected_labels_and_never_evaluate_heldout
     );
     assert_eq!(std::fs::read(exported).unwrap(), preserved);
 }
-/// Trace: FR-041-AC-3, FR-034-AC-1, FR-035-AC-3
+/// Trace: NFR-005-M-3, FR-041-AC-3, FR-034-AC-1, FR-035-AC-3
 #[test]
 fn selector_pipeline_and_offline_recording_use_real_commands_without_overwriting() {
     let root = tempfile::tempdir().unwrap();
@@ -688,7 +688,7 @@ fn live_provider_is_explicitly_refused_when_jev_feature_is_absent() {
     assert_eq!(result(&refusal)["error"]["kind"], "feature");
 }
 
-/// Trace: FR-034-AC-3, FR-033-AC-2
+/// Trace: NFR-005-M-2, FR-034-AC-3, FR-033-AC-2
 #[tokio::test]
 async fn custom_host_inspection_captures_contract_without_executing_native_work() {
     struct Invert(Arc<AtomicUsize>);
@@ -967,7 +967,7 @@ fn packaged_workflows_validate_tune_combine_collect_record_and_replay_offline() 
             .success()
     );
 }
-/// Trace: FR-041-AC-1, FR-041-AC-3
+/// Trace: NFR-005-M-1, FR-041-AC-1, FR-041-AC-3
 #[cfg(unix)]
 #[test]
 fn acquisition_refuses_fifos_expired_reads_and_cumulative_json_overflow() {

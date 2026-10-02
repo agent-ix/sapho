@@ -26,9 +26,9 @@ impl ExitStatus {
     /// Process code: success 0, selected finding 1, refusal 2.
     pub const fn code(self) -> u8 {
         match self {
-            Self::Completed => 0,
-            Self::Finding => 1,
-            Self::Refused => 2,
+            Self::Completed => ix_cli_kit::Outcome::Ok.code(),
+            Self::Finding => ix_cli_kit::Outcome::Partial.code(),
+            Self::Refused => ix_cli_kit::Outcome::Refused.code(),
         }
     }
 }

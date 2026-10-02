@@ -3,8 +3,8 @@
 //! Contract tests at the real SDK transport seam; no sockets or credentials.
 use super::*;
 use sapho_core::{
-    BackendId, ChoiceOption, Datum, DistributionState, NamedQuestion, SourceId, SourceRef, Value,
-    validate_response,
+    BackendId, ChoiceOption, Datum, DistributionState, NamedQuestion, Question, SourceId,
+    SourceRef, Value, validate_response,
 };
 use std::sync::Arc;
 use typesafe_sdk_config::Builder;
@@ -110,6 +110,7 @@ async fn sdk_translation_preserves_order_rubrics_state_and_raw_answer_evidence()
     assert_eq!(
         response.usage,
         Some(Usage {
+            billing_units: None,
             input_tokens: 42,
             output_tokens: 7
         })

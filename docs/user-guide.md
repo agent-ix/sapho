@@ -12,6 +12,7 @@ to an evaluation embedded in your own application.
 - [Run your first graph](#run-your-first-graph)
 - [Ask model questions](#ask-model-questions)
 - [Connect Jev](#connect-jev)
+- [Connect CLM](#connect-clm)
 - [Combine logic and evidence](#combine-logic-and-evidence)
 - [Extend the graph with Rust](#extend-the-graph-with-rust)
 - [Build multi-stage evaluations](#build-multi-stage-evaluations)
@@ -321,6 +322,32 @@ that interpretation. Keep the same policy for replay.
 One graph call is one attempt; the adapter disables SDK retries. Authentication,
 rate limiting and provider validation refusals return structured errors. The
 engine does not initiate repair or additional model calls for you.
+
+## Connect CLM
+
+Enable `clm` on the facade dependency and configure the host-managed service before evaluating a graph. The adapter does not download weights, start a server or resolve credentials itself. A host that needs credentials resolves them synchronously through ix-cli-kit and passes a `SecretValue` reference to construction.
+
+```rust
+use std::sync::Arc;
+use sapho::{clm::{ClmBackend, Limits, DEFAULT_MODEL},
+    core::{BackendBinding, BackendId, BackendRegistry, DistributionPolicy}};
+
+fn clm_backends() -> sapho::core::Result<BackendRegistry> {
+    let backend = ClmBackend::new("http://127.0.0.1:8700", None, Limits::default())
+        .map_err(|_| sapho::core::SaphoError::new(
+            sapho::core::ErrorCode::BackendFailed, "CLM configuration refused"))?;
+    let mut backends = BackendRegistry::default();
+    backends.register(BackendId::new("judge")?, BackendBinding {
+        backend: Arc::new(backend), model: DEFAULT_MODEL.into(), expected_model: None,
+        distribution_policy: DistributionPolicy::Strict {},
+    })?;
+    Ok(backends)
+}
+```
+
+The host can reduce finite `Limits` and choose an HTTPS endpoint; HTTP is restricted to loopback. Headers, private request/response bodies and native transport errors are excluded from diagnostics. The adapter preserves CLM confidence (top probability minus mean of the rest), probability distributions, fractional expected scores and usage including `billing_units`. Core/runtime apply the binding's distribution policy without changing raw values. Rust code constructing `Usage` supplies `billing_units: None` when the provider reports only token counts. Jev does so; CLM reports question charges separately.
+
+See [CLI CLM setup](cli-guide.md#bind-clm-explicitly) for environment/OS-store precedence and offline replay. Jev and CLM share one source-free request translator in `sapho-systemone`, consuming SDK-owned wire types; each adapter owns its transport and response boundary.
 
 ## Combine logic and evidence
 
@@ -975,6 +1002,8 @@ are available when you only need part of the API:
 | `sapho-graph` | You load, inspect or compile graph configuration. | `sapho::graph` |
 | `sapho-runtime` | You need the executor directly. | `sapho::runtime` |
 | `sapho-recording` | You add recording/replay to a model backend. | `sapho::recording` |
+| `sapho-clm` | You configure a bounded host-managed CLM service. | `sapho::clm` with feature `clm` |
+| `sapho-systemone` | Jev and CLM share source-free request translation using SDK-owned types. | Adapter implementation dependency |
 | `sapho-jev` | You connect a host-configured TypeSafe SDK client to Jev. | `sapho::jev` with feature `jev` |
 
 For a leaf Git dependency, use its package name with the same repository URL,

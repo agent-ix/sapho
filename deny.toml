@@ -23,6 +23,7 @@ db-path = "target/advisory-dbs"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+allow-git = ["https://github.com/agent-ix/ix-cli-kit"]
 
 # Sapho owns this license; dependencies retain the permissive allowlist above.
 [[licenses.exceptions]]
@@ -68,3 +69,15 @@ allow = ["Apache-2.0 WITH LLVM-exception"]
 name = "winx"
 version = "=0.36.4"
 allow = ["Apache-2.0 WITH LLVM-exception"]
+
+[[licenses.exceptions]]
+name = "sapho-clm"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "ix-cli-kit"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+name = "sapho-systemone"
+allow = ["AGPL-3.0-or-later"]

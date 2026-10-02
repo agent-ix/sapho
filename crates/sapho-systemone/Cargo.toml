@@ -1,0 +1,16 @@
+[package]
+name = "sapho-systemone"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared source-free System One request translation."
+
+[lints]
+workspace = true
+
+[dependencies]
+sapho-core.workspace = true
+typesafe-sdk-client = "=0.6.2"
+typesafe-sdk-questions = "=0.6.2"

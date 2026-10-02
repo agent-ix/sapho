@@ -4,9 +4,13 @@
 mod args;
 mod command;
 use clap::Parser;
+use ix_cli_kit::{
+    Outcome,
+    streams::{write_primary_stdout, write_result},
+};
 use sapho_cli::CliError;
 use sapho_core::bounded_json;
-use std::{io::Write, process::ExitCode};
+use std::process::ExitCode;
 fn main() -> ExitCode {
     let cli = match args::Cli::try_parse() {
         Ok(cli) => cli,
@@ -23,13 +27,11 @@ fn main() -> ExitCode {
     };
     match command::execute(cli) {
         Ok(response) => {
-            if std::io::stdout()
-                .lock()
-                .write_all(&response.bytes)
-                .and_then(|()| std::io::stdout().lock().write_all(b"\n"))
+            if write_primary_stdout(&response.bytes)
+                .and_then(|()| write_primary_stdout(b"\n"))
                 .is_err()
             {
-                return ExitCode::from(2);
+                return Outcome::Refused.into();
             }
             ExitCode::from(response.exit.code())
         }
@@ -37,14 +39,14 @@ fn main() -> ExitCode {
     }
 }
 fn failure(error: CliError) -> ExitCode {
-    let _ = writeln!(std::io::stderr().lock(), "{error}");
+    let _ = write_result(&mut std::io::stderr().lock(), &error.to_string());
     #[derive(serde::Serialize)]
     struct Failure<'a> {
         error: &'a CliError,
     }
     if let Ok(bytes) = bounded_json(&Failure { error: &error }, 8 * 1_048_576) {
-        let _ = std::io::stdout().lock().write_all(&bytes);
-        let _ = std::io::stdout().lock().write_all(b"\n");
+        let _ = write_primary_stdout(&bytes);
+        let _ = write_primary_stdout(b"\n");
     }
-    ExitCode::from(2)
+    Outcome::Refused.into()
 }

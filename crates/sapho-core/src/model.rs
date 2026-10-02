@@ -411,6 +411,9 @@ impl ModelRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Usage {
+    /// Provider-reported question charges, distinct from token counts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub billing_units: Option<u64>,
     /// Input tokens charged or counted by the provider.
     pub input_tokens: u64,
     /// Output tokens reported by the provider.

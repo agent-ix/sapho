@@ -581,7 +581,7 @@ async fn collection_flattening_preserves_order_and_refuses_identity_collisions()
         Value::List(vec![])
     );
 }
-/// Trace: FR-012-AC-1, FR-012-AC-2, FR-012-AC-3, FR-011-AC-2, FR-002-AC-2
+/// Trace: NFR-002-M-1, FR-012-AC-1, FR-012-AC-2, FR-012-AC-3, FR-011-AC-2, FR-002-AC-2
 #[tokio::test]
 async fn mapped_subgraphs_keep_ids_context_and_shared_limits() {
     let counter = Arc::new(AtomicUsize::new(0));

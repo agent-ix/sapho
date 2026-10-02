@@ -1,6 +1,6 @@
 # Sapho
 
-Sapho is a Rust workspace containing core, graph, runtime, Jev, recording, evidence, selection and CLI crates.
+Sapho is a Rust workspace containing core, graph, runtime, Jev, CLM, System One codec, recording, evidence, selection and CLI crates.
 Read spec/spec.md and the owning module before changing behavior. Specifications
 precede implementation; domain adapters and rules remain downstream.
 
@@ -12,7 +12,7 @@ Borrow inputs; avoid clones except for owned async work or retained evidence.
 Use BTreeMap for deterministic named maps and Vec for ordered model criteria.
 Validate public deserialized payloads and reject unknown fields. Public APIs and
 modules have Rust documentation. Core has no sibling dependency; graph depends
-on core; runtime depends on graph/core; Jev and recording depend only on core. Evidence and selection depend only on core among workspace crates; evidence is pure and selection owns bounded host acquisition. CLI coordinates these crates, with synchronous acquisition/persistence outside async evaluation.
+on core; runtime depends on graph/core; Recording depends only on core. Jev and CLM depend on core and the shared systemone request codec; systemone depends only on core among workspace crates. Evidence and selection depend only on core among workspace crates; evidence is pure and selection owns bounded host acquisition. CLI coordinates these crates, with synchronous acquisition/persistence outside async evaluation.
 No native or filesystem blocking on Tokio workers. Runtime limits cover nested
 work. No lock is held across await. Tests use Trace: acceptance-criterion tags,
 assert observable values, and inject doubles only at native/backend seams.

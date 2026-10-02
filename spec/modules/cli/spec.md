@@ -25,6 +25,9 @@ Owning component: `sapho-cli`. See the [workspace boundaries](../../spec.md).
 - [FR-034: Invoke bounded graphs from data](functional/FR-034.md)
 - [FR-035: Record and replay CLI evaluations](functional/FR-035.md)
 
+- [FR-045](functional/FR-045.md): host provider credentials
+- [FR-046](functional/FR-046.md): shared CLI foundations
+
 ## References
 
 The [workspace contract](../../spec.md) and the [shared CLI/evidence limits](../cli/non-functional/NFR-005.md).
