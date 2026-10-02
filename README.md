@@ -8,18 +8,13 @@
 
 **Build multi-layer evaluations from model judgments, Rust code and explicit logic.**
 
-Sapho is a Rust library for applications that need to turn uncertain judgments
-into repeatable decisions. A model can identify an actor in a requirement,
-assess a code fragment or judge a relationship. Your application still needs
-to combine those answers with facts, apply a policy and explain the result.
-Sapho gives you a typed graph for that whole evaluation: several layers of
-questions, transformations and combinations, with evidence flowing between them.
+Sapho is a Rust library and command-line tool for making compound decisions with
+System One models such as Jev. System One models cut inference time and cost
+significantly, and they are fast enough to run on an M5 laptop.
 
-Define the workflow in YAML or JSON, register your Rust functions and model backends,
-then run it on your application's inputs. Run independent checks on separate
-branches, combine their results, and use an earlier layer to prepare the next
-layer's questions. Change questions, combinations or thresholds without
-rewriting the executor. Every run returns its outputs and an execution trace.
+Sapho splits a decision into many simple questions, asks the model each one, and
+combines the answers using rules you write. Rules use logic operators such as
+and, or, min and max, and you can build larger rules out of smaller ones.
 
 ![A graph mixes Rust preparation and facts with two model layers, then combines their results into findings and evidence.](docs/images/evaluation-flow.png)
 
