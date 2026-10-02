@@ -34,6 +34,7 @@ A Rust embedding application or the Sapho CLI host supplies inputs, graph config
 | [graph](modules/graph/spec.md) | `sapho-graph` | Declarative graph definition and compilation |
 | [runtime](modules/runtime/spec.md) | `sapho-runtime` | Bounded graph execution and collection identity |
 | [logic](modules/logic/spec.md) | `sapho-runtime` | Crisp logic and heuristic degree operations |
+| [clm](modules/clm/spec.md) | `sapho-clm` | Host-configured bounded CLM backend adapter |
 | [jev](modules/jev/spec.md) | `sapho-jev` | Hosted Jev backend adapter |
 | [recording](modules/recording/spec.md) | `sapho-recording` | Exact recording and offline replay |
 
@@ -110,3 +111,5 @@ All approved acquisition and graph-skill behavior is specified before implementa
 ## References
 
 The authoritative TypeSafe SDK is a package dependency. Native domain adapters and private evidence are supplied from their owning repositories, never copied into Sapho.
+
+CLM and shared CLI foundations are specified in [CLM](modules/clm/spec.md), [provider credentials](modules/cli/functional/FR-045.md), and [CLI foundations](modules/cli/functional/FR-046.md). [Decisions contract acquisition](modules/clm/functional/FR-047.md) remains an external prerequisite; no wire schema is assumed.
