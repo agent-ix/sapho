@@ -18,9 +18,13 @@ doc = false
 
 [features]
 default = []
-jev = ["dep:sapho-jev", "dep:typesafe-sdk-client", "dep:typesafe-sdk-config", "dep:typesafe-sdk-env", "dep:typesafe-sdk-http"]
+clm = ["dep:sapho-clm"]
+jev = ["dep:sapho-jev", "dep:typesafe-sdk-client", "dep:typesafe-sdk-config", "dep:typesafe-sdk-env", "dep:typesafe-sdk-http", "dep:typesafe-sdk-log"]
 
 [dependencies]
+ix-cli-kit.workspace = true
+sapho-systemone.workspace = true
+sapho-clm = { workspace = true, optional = true }
 sapho-core.workspace = true
 sapho-graph.workspace = true
 sapho-runtime.workspace = true
@@ -37,6 +41,7 @@ sapho-jev = { workspace = true, optional = true }
 typesafe-sdk-client = { version = "=0.6.2", optional = true }
 typesafe-sdk-config = { version = "=0.6.2", optional = true }
 typesafe-sdk-env = { version = "=0.6.2", optional = true }
+typesafe-sdk-log = { version = "=0.6.2", optional = true }
 typesafe-sdk-http = { version = "=0.6.2", optional = true }
 
 [target.'cfg(unix)'.dependencies]

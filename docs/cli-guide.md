@@ -97,9 +97,38 @@ judge:
   distribution_policy: {kind: strict}
 ```
 
-Then invoke `sapho run examples/graphs/multilayer.yaml --input INPUT.json --bindings bindings.yaml`. SDK environment configuration supplies endpoint and credentials; [Jev setup](user-guide.md#connect-jev) documents it. Credential fields in graphs/bindings are refused. The default executable refuses live providers; it still supports offline logic and replay. Calls have no implicit retries.
+Then invoke `sapho run examples/graphs/multilayer.yaml --input INPUT.json --bindings bindings.yaml`. The host resolves `TYPESAFE_API_KEY` before macOS Keychain/Linux Secret Service/Windows Credential Manager (scope `agent-ix/sapho`, account `jev-api-key`); the SDK receives the resolved secret. Endpoint configuration stays in the SDK. Transport debug logging is disabled in the CLI; [Jev setup](user-guide.md#connect-jev) documents it. Credential fields in graphs/bindings are refused. The default executable refuses live providers; it still supports offline logic and replay. Calls have no implicit retries.
 
 A custom host can register a local Laya/KEV backend through `ModelBackend` and domain functions through `PrimitiveRegistry`. `sapho-cli::Runner::new` and its async `run` method accept those registries. Acquire inputs before the async call and persist the returned report afterwards. The process CLI does not load arbitrary scripts, libraries or LoRA adapters.
+
+## Bind CLM explicitly
+
+Use an already running host-managed [CLM service](https://github.com/Contrastive-LM/CLM); Sapho does not install or download a model.
+
+```sh
+cargo install --path crates/sapho-cli --locked --features clm
+```
+
+```yaml
+judge:
+  provider: clm
+  model: clm-latest
+  distribution_policy: {kind: strict}
+```
+
+`model` may be omitted for CLM and defaults to `clm-latest`. Jev still requires an explicit model. Set `CLM_BASE_URL` to the service base URL (default `http://127.0.0.1:8700`); Sapho appends `/v1/systemone`. HTTPS is required for remote services. Cleartext is permitted for loopback; embedded URL credentials, query strings and fragments are refused. `CLM_API_KEY` overrides the OS credential at scope `agent-ix/sapho`, account `clm-api-key`. An absent credential permits an unauthenticated local service; a locked/unavailable store is a typed refusal. Set/store credentials through your host's secret tooling, never in a graph, binding, recording or argv. No credential-file fallback exists.
+
+```sh
+sapho run examples/graphs/multilayer.yaml --input INPUT.json --bindings bindings.yaml
+sapho record examples/graphs/multilayer.yaml --input INPUT.json --bindings bindings.yaml --recording saved.json
+sapho replay examples/graphs/multilayer.yaml --input INPUT.json --bindings bindings.yaml --recording saved.json
+```
+
+Replay works with either inferred identity or explicit CLM metadata and never reads credentials or contacts the service. Only required live bindings resolve credentials; validation/inspection and replay-backed measure/tune remain offline.
+
+CLM calls use a 30-second queue/HTTP/decode deadline, a 1 MiB request ceiling, an 8 MiB response ceiling and four simultaneous requests per adapter. Runtime's separate limits still apply. There are no retries or redirects. Boolean criteria map to `true`/`false`; question and option order are preserved. Reported confidence is retained independently of probability: CLM defines it as top probability minus the mean of the others. Usage retains `input_tokens`, `output_tokens` and optional `billing_units` separately. Raw distributions remain unchanged under strict or approximate-complete policy.
+
+OpenAI Decisions integration awaits its official preview wire contract. The current CLI offers Jev and CLM; no substitute API is presented as Decisions.
 
 ## Record and replay
 

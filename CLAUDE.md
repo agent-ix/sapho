@@ -1,6 +1,6 @@
 # Sapho
 
-Sapho is a Rust workspace containing core, graph, runtime, Jev, recording, evidence, selection and CLI crates.
+Sapho is a Rust workspace containing core, graph, runtime, Jev, CLM, System One codec, recording, evidence, selection and CLI crates.
 Read spec/spec.md and the owning module before changing behavior. Specifications
 precede implementation; domain adapters and rules remain downstream.
 

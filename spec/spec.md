@@ -16,7 +16,7 @@ Sapho executes configurable graphs of native code, typed model questions and log
 
 ### 2.1 In Scope
 
-Typed values and provenance; native Rust extension registration; YAML/JSON graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev adapter; caller-controlled recording and exact offline replay.
+Typed values and provenance; native Rust extension registration; YAML/JSON graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev and host-configured CLM adapters; caller-controlled recording and exact offline replay.
 
 ### 2.2 Out of Scope
 
@@ -24,7 +24,7 @@ EARS extractors or questions, test-adequacy rules, code-review findings, PR rend
 
 ## System Overview
 
-A Rust embedding application or the Sapho CLI host supplies inputs, graph config, native primitives, backend bindings and limits. Native primitives are trusted application code. Model responses and config are validated data. The Jev adapter calls a configured SDK client. Recording paths are chosen explicitly by the caller.
+A Rust embedding application or the Sapho CLI host supplies inputs, graph config, native primitives, backend bindings and limits. Native primitives are trusted application code. Model responses and config are validated data. Jev uses a configured SDK client; CLM uses a bounded host-configured HTTP transport. Recording paths are chosen explicitly by the caller.
 
 ## Requirements Architecture
 
@@ -52,10 +52,14 @@ flowchart TD
  runtime --> core[sapho-core]
  graph --> core
  jev[sapho-jev] --> core
+ jev --> systemone[sapho-systemone]
+ clm[sapho-clm] --> core
+ clm --> systemone
+ systemone --> core
  recording[sapho-recording] --> core
 ```
 
-The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev` feature is disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording and Jev need no runtime dependency. Jev and CLM depend on `sapho-systemone` for their identical request translation; systemone depends only on core among workspace crates and uses SDK-owned request/question types.
+The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev` and `clm` features are disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording and Jev need no runtime dependency. Jev and CLM depend on `sapho-systemone` for their identical request translation and shared CLM model alias; systemone depends only on core among workspace crates and uses SDK-owned request/question types.
 
 ## Public Contract
 

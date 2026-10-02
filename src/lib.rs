@@ -40,3 +40,7 @@ pub use sapho_graph as graph;
 pub use sapho_jev as jev;
 pub use sapho_recording as recording;
 pub use sapho_runtime as runtime;
+
+#[cfg(feature = "clm")]
+/// Host-configured CLM System One backend.
+pub use sapho_clm as clm;

@@ -259,7 +259,7 @@ printf '%s' '{"text":"The controller shall illuminate the warning lamp."}' |
 
 This example makes two model calls, passing the first answer into the second
 layer's context. Replace its demonstration question with the questions your
-rule needs. Keep credentials in the environment; bindings describe the backend,
+rule needs. Keep credentials in the environment or the shared OS credential store; bindings describe the backend,
 model and answer policy. See [Jev setup](docs/user-guide.md#connect-jev) for the
 available settings and [model questions](docs/user-guide.md#ask-model-questions)
 for a complete question-based rule.
@@ -278,11 +278,19 @@ Replay matches the model, answer policy, input context and questions exactly.
 You can change a threshold and reuse the answers when those requests stay the
 same. Choose fresh recording and trace paths for each capture.
 
+For an existing CLM service, install with `--features clm`, choose `provider: clm`
+and `model: clm-latest` in the same bindings document, and set `CLM_BASE_URL` on
+its host. Sapho sends typed questions to that service without installing models.
+[CLM setup](docs/cli-guide.md#bind-clm-explicitly) explains authentication, limits
+and the confidence/usage semantics. Rust hosts enable `clm` and construct
+[`sapho::clm::ClmBackend`](docs/user-guide.md#connect-clm). Offline replay works
+without credentials or a running provider.
+
 ## Use Sapho in a Rust project
 
 Use the library when your application needs custom extraction, Rust functions
 or model backends. The stock CLI runs graphs using data operations and its
-configured Jev adapter; your registered Rust functions belong in an application
+configured Jev or CLM adapter; your registered Rust functions belong in an application
 host.
 
 Add these dependencies to your application's `Cargo.toml`:

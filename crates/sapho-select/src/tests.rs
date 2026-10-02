@@ -418,8 +418,8 @@ fn git_submodules_refuse_and_repository_clean_filters_never_execute() {
         "included repository filter must not execute"
     );
 }
-/// Trace: FR-040-AC-3
-#[cfg(target_os = "linux")]
+/// Trace: NFR-005-M-4, FR-040-AC-3
+#[cfg(unix)]
 #[test]
 fn overproducing_owned_git_process_is_killed_and_reaped() {
     use std::os::unix::fs::PermissionsExt;
@@ -456,11 +456,18 @@ fn overproducing_owned_git_process_is_killed_and_reaped() {
         })
     ));
     let process = std::fs::read_to_string(pid).unwrap();
-    assert!(!Path::new("/proc").join(process.trim()).exists());
+    assert_eq!(
+        rustix::process::waitpid(
+            rustix::process::Pid::from_raw(process.trim().parse().unwrap()),
+            rustix::process::WaitOptions::NOHANG
+        )
+        .unwrap_err(),
+        rustix::io::Errno::CHILD
+    );
 }
 
-/// Trace: FR-040-AC-3
-#[cfg(target_os = "linux")]
+/// Trace: NFR-005-M-4, FR-040-AC-3
+#[cfg(unix)]
 #[test]
 fn started_git_child_is_killed_and_reaped_when_its_deadline_expires() {
     use std::{os::unix::fs::PermissionsExt, time::Duration};
@@ -491,5 +498,12 @@ fn started_git_child_is_killed_and_reaped_when_its_deadline_expires() {
     );
     assert!(matches!(result, Err(SelectionError::Deadline)));
     let identity = std::fs::read_to_string(pid).unwrap(); // positive proof the owned child started
-    assert!(!Path::new("/proc").join(identity.trim()).exists());
+    assert_eq!(
+        rustix::process::waitpid(
+            rustix::process::Pid::from_raw(identity.trim().parse().unwrap()),
+            rustix::process::WaitOptions::NOHANG
+        )
+        .unwrap_err(),
+        rustix::io::Errno::CHILD
+    );
 }

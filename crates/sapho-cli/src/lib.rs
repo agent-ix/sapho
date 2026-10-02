@@ -15,3 +15,6 @@ pub use io::{
     ArtifactWriter, GraphArtifact, load_graph, read_bytes, read_bytes_with_timeout, select_format,
     write_new,
 };
+
+mod credentials;
+pub use credentials::{resolve_credential, resolve_endpoint};

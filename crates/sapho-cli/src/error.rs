@@ -32,11 +32,22 @@ pub enum CliError {
     #[error("Unknown format for {0}; use .yaml/.yml/.json or --format")]
     Format(PathBuf),
     /// Live provider support was not compiled.
-    #[error("Provider {0:?} requires the jev feature")]
+    #[error("Provider {0:?} support was not compiled")]
     Feature(Provider),
     /// SDK environment/transport preparation was refused; credentials are never retained.
-    #[error("Unable to configure Jev client")]
+    #[error("Unable to configure live provider")]
     ProviderConfiguration,
+    /// Typed native credential failure; no backend text or secret is retained.
+    #[error("Credential resolution failed: {0}")]
+    Credential(
+        #[serde(serialize_with = "serialize_secret_error")] ix_cli_kit::secrets::SecretError,
+    ),
+    /// Required live provider has no resolved credential.
+    #[error("Missing credential for {0:?}")]
+    CredentialMissing(Provider),
+    /// Explicit or resolved credential was empty.
+    #[error("Invalid provider credential")]
+    CredentialInvalid,
     /// Named input is not a regular file; pipes are accepted only through stdin.
     #[error("Input is not a regular file: {0}")]
     InputFileType(PathBuf),
@@ -49,4 +60,25 @@ pub enum CliError {
     /// Command syntax was invalid.
     #[error("{0}")]
     Arguments(String),
+}
+
+impl From<ix_cli_kit::secrets::SecretError> for CliError {
+    fn from(error: ix_cli_kit::secrets::SecretError) -> Self {
+        Self::Credential(error)
+    }
+}
+
+fn serialize_secret_error<S: serde::Serializer>(
+    error: &ix_cli_kit::secrets::SecretError,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use ix_cli_kit::secrets::SecretError;
+    serializer.serialize_str(match error {
+        SecretError::InvalidScope => "invalid_scope",
+        SecretError::InvalidKey => "invalid_key",
+        SecretError::InvalidEnvironment => "invalid_environment",
+        SecretError::Locked => "locked",
+        SecretError::Unavailable => "unavailable",
+        SecretError::BackendFailure => "backend_failure",
+    })
 }
