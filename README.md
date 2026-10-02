@@ -6,7 +6,7 @@
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/6qsdhSPE)
 
-**Build multi-layer evaluations from model judgments, Rust code and explicit logic.**
+**Make compound decisions with System One models and rules you write.**
 
 Sapho is a Rust library and command-line tool for making compound decisions with
 System One models such as Jev. System One models cut inference time and cost
@@ -16,115 +16,276 @@ Sapho splits a decision into many simple questions, asks the model each one, and
 combines the answers using rules you write. Rules use logic operators such as
 and, or, min and max, and you can build larger rules out of smaller ones.
 
-![A graph mixes Rust preparation and facts with two model layers, then combines their results into findings and evidence.](docs/images/evaluation-flow.png)
+Write your questions and rules in YAML or JSON. Run them from the command line,
+or use Sapho in a Rust application. Keep the answers and intermediate results
+so you can see how a decision was made, measure it against labelled examples,
+and improve the rule.
 
-The name comes from the juice Mentats drink to aid their mental calculations.
+[CLI setup](#install-the-cli) · [Rust integration](#use-sapho-in-a-rust-project) ·
+[Claude Code](#use-the-skills-in-claude-code) · [User guide](docs/user-guide.md)
 
-## What you can build
+## How it works
 
-- **Code review:** extract code units, ask focused questions, combine judgments
-  with static facts, and return advisory findings to a PR or editor workflow.
-- **Requirement analysis:** classify statements, identify roles, evaluate
-  candidate relationships and assemble findings across several model stages.
-- **Semantic checks:** keep domain rules in configuration while choosing a
-  backend for each question stage.
+Suppose you want to decide whether a code change needs closer review. Break that
+decision into questions:
 
-Your application supplies the extraction, questions and meaning of the result.
-Sapho runs and connects them. Jev support is included as an optional feature;
-you can implement the same backend interface for local Laya, KEV or other models.
+- Did the public API change?
+- Could the change break an existing contract?
+- Are important cases missing from the tests?
 
-## Build evaluations in layers
+Your code can answer the first question. A model can help answer the other two.
+Then a rule combines those answers. For example, you could use this policy:
 
-A layer can ask a model, execute Rust code or combine earlier evidence. Its
-output can become the next layer's context, questions, candidate items or
-execution condition. Branches let you run several checks and bring their
-answers back together. Each model stage can use a different registered backend.
-
-For example, a requirement evaluation can move from structure to roles, then
-relationships, then a focused expert check. Rust primitives prepare each
-stage; explicit logic decides which evidence is sufficient and which items
-need another check.
-
-![Illustrative requirement evaluation: structure, roles, candidate preparation, relationships, guarded expert checks and findings.](docs/images/multi-layer-requirements.png)
-
-These are three ways to compose the same engine. The questions and policies
-are examples you define in your application:
-
-| Example | Layers and combinations | Walkthrough |
-|---|---|---|
-| Requirement analysis | Classify structure → identify actor/action/target → build candidate links → judge relationships → optionally ask an expert → assemble findings. | [Dependent model layers](docs/user-guide.md#example-1-requirements-through-several-model-layers) |
-| Code review | Combine a Rust fact with two model judgments: `changed_public_api AND (contract_risk >= 0.7 OR test_gap >= 0.8)`. | [Hard facts plus soft evidence](docs/user-guide.md#example-2-hard-facts-plus-model-evidence) |
-| A composite rule | Use minimum within required parts, maximum across acceptable alternatives, a weighted mean for supporting evidence, then a final threshold. | [Nested combinations](docs/user-guide.md#example-3-combine-combinations) |
-
-You can mix these patterns in one graph. A native primitive can turn earlier
-answers into a later question batch; `map` applies a reusable evaluation to
-each item; guards select expensive checks. The graph is acyclic: an edit and
-re-evaluation loop belongs to the calling application.
-
-## Features
-
-- **Multi-layer composition.** Feed earlier judgments into later questions,
-  mix model stages with Rust transformations, branch into independent checks
-  and combine the results. Use a different backend for each model stage.
-- **Data CLI and graph skills.** Validate and run data-only graphs, gather files/Git patches/JSON, record and replay evidence, measure supplied labels, compare development candidates and export training cases. The plugin provides `create`, `tune` and `record` workflows.
-- **Checked graph configuration.** Compilation checks connections, types and
-  dependencies before any Rust function or model call executes.
-- **Typed questions and answers.** Batch Boolean, choice and ordinal-score
-  questions, then project the evidence you need for later stages.
-- **Explicit logic.** Combine Boolean facts with `and`, `or` and `not`; combine
-  heuristic strengths with minimum, maximum, weighted mean and complement.
-  Apply thresholds with a comparator you choose.
-- **Collections and dependent stages.** Map reusable graphs over items, filter
-  results, form candidate pairs, join records and feed earlier answers into
-  later questions. Guards skip work when a condition is false.
-- **Evidence and replay.** Preserve item identity and source references, inspect
-  intermediate results, and replay recorded model exchanges offline while
-  trying a different combination or threshold.
-- **Bounded execution.** Set ceilings for work, collection expansion, model
-  calls, concurrency, serialized data and duration.
-
-## How logic combines
-
-Suppose a review rule needs three pieces of supporting evidence. After making
-each interpretation explicit, you have strengths of **0.8, 0.4 and 0.6**.
-The combination expresses your rule's policy:
-
-- **Minimum → 0.4:** every part matters; the weakest part limits the result.
-- **Maximum → 0.8:** the strongest supporting part is sufficient.
-- **Weighted mean → 0.65:** balance the evidence, giving the first part twice
-  the weight of each other part.
-
-![Three input strengths combined by minimum, maximum and weighted mean.](docs/images/degree-combiners.png)
-
-The result is a **heuristic degree**, a strength between zero and one. It is
-not a calibrated probability that a compound statement is true. A separate
-comparison turns that degree into a Boolean decision: for example,
-`strength < 0.7` means "send this item for review." You choose both the
-combination and the threshold.
-
-Reducers can also feed other reducers: combine parts into a statement,
-statements into a finding, and findings into an overall review policy.
-`complement` reverses a degree; Boolean `not` reverses a decision.
-
-The [logic walkthrough](docs/user-guide.md#combine-logic-and-evidence) explains
-the formulas, types, empty inputs and complete graph configuration. The
-[worked examples](docs/user-guide.md#worked-composition-examples) show how
-several kinds of combination fit together.
-
-## Start using Sapho
-
-Use the CLI for data-only graphs, or embed the same engine in your Rust application:
-
-```sh
-cargo install --path crates/sapho-cli --locked
-printf '%s' '{"support":0.7}' | sapho run examples/graphs/review.yaml --fail-on needs_review
+```text
+needs_review = public_api_changed AND
+               (contract_risk >= 0.7 OR test_gap >= 0.8)
 ```
 
-Start with the [CLI guide](docs/cli-guide.md) for selectors, replay, labelled measurement, tuning and training export. Add `--features jev` when installing to enable explicitly configured live Jev calls.
+You choose the questions, the meaning of each answer, and the thresholds.
+Sapho runs the steps and returns the decision with a trace of the work that
+produced it.
 
-Sapho is also an embedding library: call it from your Rust application, service,
-CLI or review adapter. Use Rust 1.98 or later; this repository pins 1.98.1.
-Depend on the Git repository with an account that has access:
+![Code prepares the input, models answer questions, and rules combine the answers into a decision.](docs/images/evaluation-flow.png)
+
+## Combine answers into rules
+
+Some answers are yes or no. Others express how strongly a model supports an
+answer. Sapho gives you operators for both:
+
+| Operator | Use it when… |
+|---|---|
+| `and` | Every yes/no condition must hold. |
+| `or` | Any one yes/no condition is enough. |
+| `not` | You want to reverse a yes/no answer. |
+| `min` | The weakest supporting part should limit the rule. |
+| `max` | The strongest supporting part should determine the rule. |
+| `weighted_mean` | Several answers contribute, with weights you choose. |
+| `complement` | You want to reverse a strength: `1 − strength`. |
+| `compare` | A score must cross a threshold to produce a yes/no decision. |
+
+For strengths of **0.8, 0.4 and 0.6**, `min` gives **0.4**, `max` gives **0.8**,
+and a weighted mean with weights **2, 1 and 1** gives **0.65**.
+
+![The same three strengths produce different results with minimum, maximum and weighted mean.](docs/images/degree-combiners.png)
+
+A combined strength is a heuristic score between zero and one. The combination
+expresses your policy; a threshold turns the score into a decision. For example,
+`strength < 0.7` could mean "send this item for review."
+
+Rules can contain other rules. Combine the required parts of a statement with
+`min`, combine acceptable alternatives with `max`, then apply a threshold to
+the result. The [logic guide](docs/user-guide.md#combine-logic-and-evidence)
+explains the operators and their input types.
+
+## Build decisions in layers
+
+An answer can help prepare the next question. For a requirement, you might first
+ask what kind of statement it is, then identify its actor, action and target,
+then ask how it relates to other requirements.
+
+![A requirement passes through structure, roles, relationships and an optional expert check before producing findings.](docs/images/multi-layer-requirements.png)
+
+Each layer can use model questions, Rust functions, or smaller rules. Checks can
+branch and combine again. Earlier answers can decide whether a later check is
+needed, and different layers can use different registered model backends.
+
+| Use case | A possible decision flow |
+|---|---|
+| Code review | Extract changed code → check facts and ask risk questions → combine the answers → flag changes for review. |
+| Requirements | Classify statements → identify actors, actions and targets → prepare candidate links → judge relationships → produce findings. |
+| A larger policy | Evaluate smaller rules → combine required parts and alternatives → decide whether the overall policy holds. |
+
+You define the domain rules and extraction functions. Sapho connects and runs
+them. See the [worked examples](docs/user-guide.md#worked-composition-examples)
+for several ways to build these decisions.
+
+## What Sapho gives you
+
+- **Questions and rules in configuration.** Change questions, combinations and
+  thresholds in YAML or JSON. Ask Boolean, choice or ordinal-score questions.
+- **Models and code in the same decision.** Use Jev through the included adapter,
+  or register your own Rust functions and backend for local Laya, KEV or other models.
+- **Rules for collections.** Apply a rule to each item, filter results, compare
+  candidate pairs and join related records.
+- **Input gathering.** Select files, Git changes or parts of a JSON document,
+  with item identities and source references carried into the evaluation.
+- **Evidence and improvement tools.** Record model answers, replay them offline,
+  measure agreement with supplied labels, compare rule candidates and export
+  development examples for a downstream trainer.
+- **Checks before execution and limits during it.** Catch invalid graph
+  connections and types before evaluation. Set limits for model calls, items,
+  concurrency, data and time.
+
+## Install the CLI
+
+You need Rust 1.98 or later and access to this repository. The checkout pins
+Rust 1.98.1.
+
+```sh
+git clone https://github.com/agent-ix/sapho.git
+cd sapho
+cargo install --path crates/sapho-cli --locked
+```
+
+Try the included combination rule. It uses supplied scores and makes no model
+calls:
+
+```sh
+sapho validate examples/graphs/combine.yaml
+sapho run examples/graphs/combine.yaml --input examples/data/combine-input.json
+```
+
+The JSON report contains a `strength` output of **0.65** and a `needs_review`
+output of **true**. The rule combines three strengths with weights 2, 1 and 1,
+then asks for review when the result is below 0.7.
+
+## Write your first rule
+
+Here is a complete rule that asks for review when support is below 0.8.
+Save it as `review.yaml`:
+
+```yaml
+inputs:
+  support: {kind: probability}
+nodes:
+  - id: review
+    operation: {kind: compare, comparator: less}
+    inputs:
+      a: {kind: input, name: support}
+      b:
+        kind: literal
+        value: {id: cutoff, value: {kind: probability, value: 0.8}}
+        value_type: {kind: probability}
+outputs:
+  needs_review: {kind: node, node: review, port: result}
+```
+
+Run it with a supplied answer:
+
+```sh
+printf '%s' '{"support":0.7}' | sapho run review.yaml
+```
+
+The `needs_review` output is **true**. Change support to 0.9 and it becomes
+**false**. At exactly 0.8 it is also false because the rule uses `less`.
+This example keeps the input simple; a model question can produce the support
+value in a larger graph.
+
+To use the decision in a shell or CI job, add `--fail-on needs_review`:
+
+```sh
+printf '%s' '{"support":0.7}' | sapho run review.yaml --fail-on needs_review
+```
+
+That command exits **1** when review is needed and **0** otherwise.
+Configuration or execution failures exit **2**. JSON reports go to stdout;
+diagnostics go to stderr.
+
+## Use the CLI in a workflow
+
+| Command | What it does |
+|---|---|
+| `sapho validate GRAPH` | Check a rule graph before running it. |
+| `sapho inspect GRAPH` | Show its inputs, outputs, stages and required backends. |
+| `sapho run GRAPH` | Evaluate inputs and return outputs with a trace. |
+| `sapho select files`, `git` or `json` | Gather input for a matching graph. |
+| `sapho record GRAPH` | Run a graph and save model exchanges. |
+| `sapho replay GRAPH` | Run offline with saved model exchanges. |
+| `sapho measure GRAPH` | Compare outputs with supplied labelled examples. |
+| `sapho tune` | Compare candidate graphs using development examples. |
+| `sapho export-training` | Export labelled development cases as JSONL. |
+
+For example, gather Rust files or staged Git changes and pass them into the
+included file-context graph:
+
+```sh
+sapho select files --root ./src --include '**/*.rs' |
+  sapho run examples/graphs/files.yaml --typed-input
+
+sapho select git --root . --mode staged |
+  sapho run examples/graphs/files.yaml --typed-input
+```
+
+The example returns the selected files as context. Add your own questions and
+rules to turn that context into findings. A review application can invoke the
+graph for a PR, after an edit, or whenever its inputs change.
+
+Measure the included tutorial rule and compare two threshold candidates:
+
+```sh
+sapho measure examples/graphs/review.yaml \
+  --dataset examples/data/review-dataset.json --split development
+
+sapho tune \
+  --candidate examples/graphs/review.yaml \
+  --candidate examples/graphs/review-conservative.yaml \
+  --dataset examples/data/review-dataset.json \
+  --output-name needs_review --metric agreement
+
+sapho export-training --dataset examples/data/review-dataset.json \
+  --output development.jsonl
+```
+
+Supply labels for the decisions you want to measure. `tune` compares the
+candidates you provide on the development split; evaluate the chosen rule
+separately on held-out examples. The included dataset is synthetic tutorial
+data. The [CLI guide](docs/cli-guide.md) covers recording, exact replay, JSON
+selection, training export and execution limits.
+
+### Ask Jev from the CLI
+
+Install with Jev support when you want model calls:
+
+```sh
+cargo install --path crates/sapho-cli --locked --features jev
+```
+
+Model graphs refer to a backend by name. For the included two-layer graph,
+save this as `bindings.yaml`:
+
+```yaml
+judge:
+  provider: jev
+  model: jev-latest
+  distribution_policy: {kind: strict}
+```
+
+Configure `TYPESAFE_API_KEY` in your environment, then run:
+
+```sh
+printf '%s' '{"text":"The controller shall illuminate the warning lamp."}' |
+  sapho run examples/graphs/multilayer.yaml --bindings bindings.yaml
+```
+
+This example makes two model calls, passing the first answer into the second
+layer's context. Replace its demonstration question with the questions your
+rule needs. Keep credentials in the environment; bindings describe the backend,
+model and answer policy. See [Jev setup](docs/user-guide.md#connect-jev) for the
+available settings and [model questions](docs/user-guide.md#ask-model-questions)
+for a complete question-based rule.
+
+To keep a run's answers and replay them later, save the input and record the run:
+
+```sh
+printf '%s' '{"text":"The controller shall illuminate the warning lamp."}' > input.json
+sapho record examples/graphs/multilayer.yaml --input input.json \
+  --bindings bindings.yaml --recording saved.json --trace trace.json
+sapho replay examples/graphs/multilayer.yaml --input input.json --recording saved.json
+```
+
+Recording makes the model calls; replay uses their saved answers offline.
+Replay matches the model, answer policy, input context and questions exactly.
+You can change a threshold and reuse the answers when those requests stay the
+same. Choose fresh recording and trace paths for each capture.
+
+## Use Sapho in a Rust project
+
+Use the library when your application needs custom extraction, Rust functions
+or model backends. The stock CLI runs graphs using data operations and its
+configured Jev adapter; your registered Rust functions belong in an application
+host.
+
+Add these dependencies to your application's `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -132,70 +293,100 @@ sapho = { git = "https://github.com/agent-ix/sapho.git" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-For development alongside a checkout, use
-`sapho = { path = "../sapho" }` instead. Pin a tested Git revision with `rev`
-when you need a fixed dependency version.
+For local development, use `sapho = { path = "../sapho" }` instead, adjusting
+the path to your checkout. Add `features = ["jev"]` to the Sapho dependency
+when you need the included Jev adapter.
 
-The integration flow is:
+Put the `review.yaml` rule above at your application's root and this code in
+`src/main.rs`:
 
-1. Define input types, nodes and outputs in a YAML or JSON graph.
-2. Register any Rust primitives and model bindings the graph names.
-3. Parse and compile the graph, then construct an `Engine`.
-4. Supply identified inputs and `RunLimits`, and await `engine.run(...)`.
-5. Use the outputs in your application; retain the trace when you need evidence.
+```rust
+//! A minimal Sapho decision in a Rust application.
 
-Start with the [complete offline example](docs/user-guide.md#run-your-first-graph).
-It compares a supplied probability against a review threshold and needs no
-model credentials. Then follow the
-[model-question example](docs/user-guide.md#ask-model-questions) to produce
-that evidence inside the graph.
+use sapho::{
+    core::{BackendRegistry, Datum, PrimitiveRegistry, Probability, Value},
+    graph::{GraphSpec, compile},
+    runtime::{Engine, RunLimits},
+};
+use std::collections::BTreeMap;
 
-Enable the adapter when you want Jev:
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let spec = GraphSpec::parse(include_str!("../review.yaml"))?;
+    let graph = compile(&spec, &PrimitiveRegistry::default())?;
+    let engine = Engine::new(graph, BackendRegistry::default())?;
+    let inputs = BTreeMap::from([(
+        "support".into(),
+        Datum::new("statement-1", Value::Probability(Probability::new(0.7)?))?,
+    )]);
 
-```toml
-sapho = { git = "https://github.com/agent-ix/sapho.git", features = ["jev"] }
+    let run = engine.run(&inputs, RunLimits::default()).await?;
+    for (name, datum) in &run.outputs {
+        println!("{name}: {:?}", datum.value);
+    }
+    Ok(())
+}
 ```
 
-See [Jev setup](docs/user-guide.md#connect-jev) for client configuration and
-[custom backends](docs/user-guide.md#use-another-model-backend) for other models.
+Run `cargo run`. It prints `needs_review: Boolean(true)` without calling a model.
+For a model-based rule, register its backends before constructing the engine.
+For custom Rust steps, register functions before compiling the graph.
 
-## User guide and integration choices
+The [Rust user guide](docs/user-guide.md) walks through
+[Jev integration](docs/user-guide.md#connect-jev),
+[Rust functions](docs/user-guide.md#extend-the-graph-with-rust),
+[other model backends](docs/user-guide.md#use-another-model-backend),
+and [multi-stage evaluations](docs/user-guide.md#build-multi-stage-evaluations).
 
-The [CLI guide](docs/cli-guide.md) covers invocation, data gathering, evidence capture, measurement, tuning and training export. The [Rust user guide](docs/user-guide.md) covers installation, runnable graphs,
-question types, logic, Rust extensions, multi-stage evaluation, source
-references, limits, errors, recording and replay.
+## Use the skills in Claude Code
 
-Use the `sapho` facade for normal integration: `sapho::core` supplies values and
-extension traits, `sapho::graph` compiles configuration, `sapho::runtime` runs
-it, and `sapho::recording` adds model recording and replay. The `jev` feature
-adds `sapho::jev`.
+The bundled [Sapho plugin](plugins/sapho/plugin.json) provides three skills:
 
-If you only implement a model adapter, depend on `sapho-core`. If you only
-validate graph configuration, use `sapho-graph`. The
-[crate selection guide](docs/user-guide.md#choose-your-dependencies) explains
-the smaller dependencies available for those integrations.
+| Skill | What it helps you do |
+|---|---|
+| `/sapho:create` | Turn a decision into questions and rules, then build and validate a graph. |
+| `/sapho:tune` | Measure a graph and compare candidates against development labels. |
+| `/sapho:record` | Save evaluation evidence and check exact offline replay. |
 
-## Behavior reference
+Install the Sapho CLI first. From the Sapho checkout, start Claude Code with:
 
-The user guide is the starting point for using Sapho. The
-[behavior specifications](spec/spec.md) define the contracts behind it:
-[values and answers](spec/modules/core/spec.md),
-[graph configuration](spec/modules/graph/spec.md),
-[execution](spec/modules/runtime/spec.md),
-[logic](spec/modules/logic/spec.md),
-[Jev translation](spec/modules/jev/spec.md) and
-[recording and replay](spec/modules/recording/spec.md),
-[CLI invocation](spec/modules/cli/spec.md),
-[labelled evidence](spec/modules/evidence/spec.md),
-[selectors](spec/modules/selection/spec.md) and
-[graph skills](spec/modules/skills/spec.md).
-Use these when checking a boundary condition or implementing an adapter.
+```sh
+claude --plugin-dir ./plugins/sapho
+```
 
-Generate local API documentation with `cargo doc --no-deps --open`;
-add `--features jev` for the Jev adapter.
+When working in another project, pass the absolute path to that same plugin
+directory. This loads the skills for that session; include `--plugin-dir` when
+starting a new session. See Claude Code's
+[local plugin loading instructions](https://code.claude.com/docs/en/plugins/create#load-a-plugin-for-one-session).
+
+For example, ask Claude:
+
+```text
+/sapho:create Build a rule that checks whether a requirement names an actor,
+an observable action and a target. Combine the three strengths with min and
+flag statements below 0.8. Include an input example and validate the graph.
+```
+
+The skills use the same CLI and graphs as your application. Model calls need
+the backend configuration described above.
+
+## Guides and reference
+
+- [CLI guide](docs/cli-guide.md): commands, input gathering, model bindings,
+  recording, replay, measurement, tuning and training export.
+- [Rust user guide](docs/user-guide.md): complete examples, question types,
+  logic, Rust extensions, model adapters and integration choices.
+- [Behavior specifications](spec/spec.md): the contracts for values, graphs,
+  execution, logic, evidence and extensions. Use these when implementing an
+  adapter or checking a boundary condition.
+
+Generate local API documentation with `cargo doc --no-deps --open`.
+Add `--features jev` to include the Jev adapter.
 
 ## License and contributions
 
-Sapho is licensed under [AGPL-3.0-or-later](LICENSE). For contributions, read
+Sapho is licensed under [AGPL-3.0-or-later](LICENSE). Read
 [CONTRIBUTING.md](CONTRIBUTING.md), [content rights](CONTENT_RIGHTS.md) and the
-[CLA](CLA.md). Join us on [Discord](https://discord.gg/6qsdhSPE).
+[CLA](CLA.md) before contributing. Join us on [Discord](https://discord.gg/6qsdhSPE).
+
+The name comes from the juice Mentats drink to aid their mental calculations.
