@@ -28,3 +28,7 @@ Reviewed the complete authorized provider/CLI change before implementation again
 | StR-011 | Sapho host boundary | cross-cutting |
 
 Core owns typed usage/answers; runtime owns policy validation; recording owns exact matching; CLM owns wire/HTTP; CLI owns synchronous secret acquisition and process streams. CLM service availability, actual model behavior and OS credential availability are assumed host dependencies. Adapter-to-wire behavior is guaranteed by synthetic transport contract tests (IT-006); provider quality is not claimed. ix-cli-kit implementation is consumed directly, never copied. Decisions contract is an external unavailable dependency, not assumed data. No downstream source/data or deployments enter scope.
+
+## Request Translation Allocation
+
+Pre-refactor review identified that CLM request translation duplicated the existing Jev translator. Both adapters now allocate identical request encoding to sapho-systemone, directly using SDK-owned wire types. No duplicate custom question/request schema remains; response decoding stays provider-specific because CLM usage and strict structural requirements differ from SDK decoding. Core has no sibling dependencies. Ordering is unchanged: shared codec precedes both adapters. The existing Jev public export refers to the moved implementation, with no fallback or compatibility reader.

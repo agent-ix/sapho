@@ -34,6 +34,7 @@ A Rust embedding application or the Sapho CLI host supplies inputs, graph config
 | [graph](modules/graph/spec.md) | `sapho-graph` | Declarative graph definition and compilation |
 | [runtime](modules/runtime/spec.md) | `sapho-runtime` | Bounded graph execution and collection identity |
 | [logic](modules/logic/spec.md) | `sapho-runtime` | Crisp logic and heuristic degree operations |
+| [systemone](modules/systemone/spec.md) | `sapho-systemone` | Shared source-free request translation into SDK-owned wire types |
 | [clm](modules/clm/spec.md) | `sapho-clm` | Host-configured bounded CLM backend adapter |
 | [jev](modules/jev/spec.md) | `sapho-jev` | Hosted Jev backend adapter |
 | [recording](modules/recording/spec.md) | `sapho-recording` | Exact recording and offline replay |
@@ -54,7 +55,7 @@ flowchart TD
  recording[sapho-recording] --> core
 ```
 
-The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev` feature is disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording and Jev need no runtime dependency.
+The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev` feature is disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording and Jev need no runtime dependency. Jev and CLM depend on `sapho-systemone` for their identical request translation; systemone depends only on core among workspace crates and uses SDK-owned request/question types.
 
 ## Public Contract
 

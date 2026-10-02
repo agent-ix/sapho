@@ -23,7 +23,7 @@ Model downloads, installation, training, deployment, rank endpoint, temperature 
 
 ## System Overview
 
-`sapho-clm` depends only on core among workspace crates. The host supplies an endpoint and optional redacted credential. Runtime retains its existing semantic validation responsibility. CLI resolves credentials synchronously; the adapter performs bounded asynchronous HTTP. Recording depends only on core.
+`sapho-clm` depends on core and the shared systemone request codec among workspace crates. The host supplies an endpoint and optional redacted credential. Runtime retains its existing semantic validation responsibility. CLI resolves credentials synchronously; the adapter performs bounded asynchronous HTTP. Recording depends only on core.
 
 ## Requirements Architecture
 

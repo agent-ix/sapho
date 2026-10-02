@@ -23,3 +23,7 @@ US-011 → FR-043..047 → StR-011 → declared Test/Inspection methods. No conf
 ## Dispositions
 
 Pre-review refinement fixed guessed replay-provider identity, clarified timeout queue scope and credential-feature ordering, and replaced an assumed shared version formatter with the actual shared Agreement mechanism. No unresolved conflict remains.
+
+## Request Translation Allocation
+
+Pre-refactor review identified that CLM request translation duplicated the existing Jev translator. Both adapters now allocate identical request encoding to sapho-systemone, directly using SDK-owned wire types. No duplicate custom question/request schema remains; response decoding stays provider-specific because CLM usage and strict structural requirements differ from SDK decoding. Core has no sibling dependencies. Ordering is unchanged: shared codec precedes both adapters. The existing Jev public export refers to the moved implementation, with no fallback or compatibility reader.
