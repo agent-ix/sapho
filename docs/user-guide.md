@@ -354,6 +354,9 @@ See [CLI CLM setup](cli-guide.md#bind-clm-explicitly) for environment/OS-store p
 
 ## Combine logic and evidence
 
+[How Sapho works](how-it-works.md#what-a-model-answer-is) explains why
+these types are kept apart. This section gives the exact rules.
+
 Sapho distinguishes four things you may want to combine:
 
 | Type | Meaning | Typical operation |
@@ -363,7 +366,6 @@ Sapho distinguishes four things you may want to combine:
 | `Degree` | Your heuristic strength on [0, 1] | `reduce`, `complement` |
 | `Optional(T)` | A value that may be absent | `coalesce` |
 
-![Model probability is explicitly interpreted as a degree, combined with other strengths, then compared against a threshold to produce a decision.](images/logic-flow.png)
 
 Boolean `and` and `or` take two Boolean operands; `not` takes one. There is
 no implicit probability-to-Boolean conversion. `compare` produces a Boolean
@@ -379,7 +381,10 @@ to `degree` and expect automatic scaling.
 
 ### Choose a combination that matches the rule
 
-![Minimum, maximum and weighted mean produce different heuristic strengths from the same three inputs.](images/degree-combiners.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/combine-strengths-dark.svg">
+  <img alt="Strengths A 0.8, B 0.4 and C 0.6. Minimum gives 0.40 and maximum 0.80; a weighted mean with weights 2, 1 and 1 gives 0.65. With review when the result is below 0.7, minimum and mean ask for review and maximum does not." src="images/combine-strengths-light.svg">
+</picture>
 
 For degrees **0.8, 0.4 and 0.6**, with weights **2, 1 and 1**:
 
@@ -701,76 +706,15 @@ use a host-level attempt bound if results trigger another edit and evaluation.
 
 ## Worked composition examples
 
-These examples use application-owned rules, synthetic inputs and illustrative
-numbers. Each equation describes a policy you build from the existing
-operations in the [operation reference](#operation-reference).
+[How Sapho works](how-it-works.md) walks through two complete examples with
+real recorded Jev answers you can replay offline: the
+[code-review rule](how-it-works.md#a-decision-is-a-graph), which combines a
+fact from your code with two thresholded model answers, and the
+[requirement check](how-it-works.md#ask-in-layers), which feeds a layer-1
+answer into layer 2 and asks an expert only when layer 2 is unsure. The
+example below shows nested combinations.
 
-### Example 1: requirements through several model layers
-
-Consider this example statement: **"When pressure is high, the controller
-shall close the valve."** Instead of asking one broad question, pass structured
-evidence through several focused stages.
-
-![Requirement evaluation with four model layers separated by Rust preparation and logic.](images/multi-layer-requirements.png)
-
-| Stage | Work | Evidence for the next stage |
-|---|---|---|
-| Prepare | A Rust extractor creates statement/span records. | Original text, item IDs and context. |
-| Layer 1: structure | Ask which requirement patterns and conditions are present. | Candidate pattern and condition evidence. |
-| Layer 2: roles | Ask about actor, action and target using the prepared text and earlier evidence. | Candidate controller/close/valve role records. |
-| Prepare candidates | Rust builds candidate links; `filter` keeps selected items and `pairs` or `join` connects candidates. | Identified role pairs and relevant condition context. |
-| Layer 3: relationships | Ask whether the selected condition gates the selected action, and which roles are related. | Relationship answers and projected support. |
-| Layer 4: expert check | A Boolean guard enables a configured expert for selected ambiguous or conflicting cases. | Optional expert evidence. |
-| Assemble | Rust and logic combine evidence and emit findings with source references. | The application's selected roles, links and review decisions. |
-
-The controller/action/target values illustrate the candidate evidence passed
-between stages. The structure and roles stages can use one backend;
-relationship or expert stages can name another. Local model hosting and expert loading remain in
-your backend implementation.
-
-A primitive can create later questions from earlier Answers, so each stage
-can ask about the specific candidates that emerged. Guarded expert outputs
-are Optional: the assembly primitive must handle that type, or the graph
-must explicitly coalesce it. Decide what absent expert evidence means for
-your rule; it is distinct from a failed judgment.
-
-Use `map` to reuse the per-statement evaluation across a document. Filter
-candidates before Cartesian pairing when you can; request and collection
-ceilings still apply across every layer and mapped item.
-
-### Example 2: hard facts plus model evidence
-
-A code-review rule might require a deterministic fact about the diff, plus
-either of two model judgments:
-
-```text
-report = changed_public_api
-         AND (contract_risk >= 0.7 OR test_gap >= 0.8)
-```
-
-![A Rust Boolean fact combines with two thresholded model degrees using OR then AND.](images/code-review-combinations.png)
-
-The Rust extractor emits `changed_public_api: Boolean`. Two `ask` nodes
-judge contract risk and test coverage; your projections and explicit `degree`
-conversions give the corresponding heuristic strengths. Two `compare` nodes
-produce Booleans. An `or` combines those decisions, then an `and` combines
-the result with the Rust fact.
-
-For an illustrative run, the public API changed, contract risk is 0.72 and
-test gap is 0.45. The comparisons are true and false; the OR is true and
-the final AND is true. If the API-change fact is false, this rule's final
-decision is false even if either risk comparison is true.
-
-Boolean `and` and `or` combine values after their configured upstream work.
-To skip model calls when the API did not change, guard the `ask` nodes
-themselves and explicitly handle their Optional outputs downstream. This
-makes cost control part of your execution policy.
-
-Use `not` for a Boolean exception, such as an application-owned exemption
-fact. For a heuristic reversal, use `complement`: support 0.65 becomes concern
-0.35. Those two operations have different input and output types.
-
-### Example 3: combine combinations
+### Combine combinations
 
 A larger rule can give its subrules different policies. In this synthetic
 requirement check, every role matters, any accepted pattern can support
@@ -784,7 +728,6 @@ overall      = min(pattern_fit, semantic_fit)                 = 0.6
 needs_review = overall < 0.75                                = true
 ```
 
-![Nested combinations: minimum for roles, maximum for pattern alternatives, weighted mean for semantic evidence, and a final minimum and threshold.](images/hierarchical-combinations.png)
 
 All inputs here are Degrees with application-defined meanings. Each `min`,
 `max` or `weighted_mean` is a `reduce` node over an identified degree list.
@@ -1066,12 +1009,6 @@ follow [CONTRIBUTING.md](../CONTRIBUTING.md) and the repository's development
 commands. The [AGPL license](../LICENSE), [CLA](../CLA.md) and
 [content rights](../CONTENT_RIGHTS.md) describe contribution terms.
 
-The diagrams are embedded as PNG images. For reuse at other sizes, the
-[flow](images/evaluation-flow.svg), [logic](images/logic-flow.svg) and
-[combination chart](images/degree-combiners.svg) also have SVG versions.
-The [requirements](images/multi-layer-requirements.svg),
-[code review](images/code-review-combinations.svg) and
-[nested-rule](images/hierarchical-combinations.svg) examples have the same
-formats. Transparent canvases and self-contained pastel labels keep all
-six images legible in light and dark mode. The
-[renderer](images/generate.py) recreates them using Matplotlib.
+The figures are light and dark SVGs generated by
+[`images/diagrams.py`](images/diagrams.py); their model values come from the
+recordings in [`examples/recordings/`](../examples/recordings/).

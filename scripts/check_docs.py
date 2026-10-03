@@ -47,7 +47,9 @@ def links():
     for path in paths:
         # Remove fenced code before inspecting Markdown links.
         content = re.sub(r"```[^\n]*\n.*?```", "", path.read_text(), flags=re.S)
-        for target in re.findall(r"!?\[[^\]]*\]\(([^\s)]+)(?:\s+[^)]*)?\)", content):
+        markdown = re.findall(r"!?\[[^\]]*\]\(([^\s)]+)(?:\s+[^)]*)?\)", content)
+        html = re.findall(r'\b(?:src|srcset)="([^"]+)"', content)
+        for target in markdown + html:
             target = target.strip("<>")
             parsed = urlsplit(target)
             if parsed.scheme or parsed.netloc:
@@ -89,6 +91,73 @@ def equal(actual, expected):
         assert actual == expected, (actual, expected)
 
 
+def recorded():
+    """The README, how-it-works and improve-a-rule numbers, replayed from the recorded Jev answers."""
+    review = ["--input", "examples/data/code-review-input.json", "--recording", "examples/recordings/code-review.json"]
+    for graph, needs_review in [("code-review", True), ("code-review-relaxed", False)]:
+        report = json.loads(invoke(["replay", f"examples/graphs/{graph}.yaml", *review]))
+        equal({k: plain(v["value"]) for k, v in report["outputs"].items()},
+              {"contract_risk": 0.79, "test_gap": 0.61, "needs_review": needs_review})
+    ask = next(n for n in report["trace"]["nodes"] if n["path"] == ["root", "ask"])
+    assert ask["model"]["response"]["usage"] == {"input_tokens": 424, "output_tokens": 39}
+    assert len(json.loads((ROOT / "examples/recordings/code-review.json").read_text())["exchanges"]) == 8
+    splits = [c["split"] for c in json.loads((ROOT / "examples/data/code-review-dataset.json").read_text())["cases"]]
+    assert (splits.count("development"), splits.count("held_out")) == (6, 2)
+    stages = json.loads(invoke(["inspect", "examples/graphs/code-review.yaml"]))["groups"][0]["stages"]
+    assert stages == [["context", "questions"], ["ask"], ["contract_risk", "test_gap"],
+                      ["risky_contract", "untested"], ["either"], ["needs_review"]], stages
+    dataset = ["--dataset", "examples/data/code-review-dataset.json", "--replay", "examples/recordings/code-review.json"]
+    for split, confusion in [("development", (3, 3)), ("held_out", (1, 1))]:
+        measured = json.loads(invoke(["measure", "examples/graphs/code-review.yaml", *dataset, "--split", split]))
+        metrics = measured["measurement"]["outputs"]["needs_review"]["metrics"]
+        assert metrics["agreement"] == 1.0, metrics
+        assert (metrics["confusion"]["true_positive"], metrics["confusion"]["true_negative"]) == confusion, metrics
+    held_out = {run["id"]: run["report"]["outputs"] for run in measured["runs"]}
+    equal({k: plain(v["value"]) for k, v in held_out["error-variant"].items()},
+          {"contract_risk": 0.48, "test_gap": 0.82, "needs_review": True})
+    tuned = json.loads(invoke(["tune", "--candidate", "examples/graphs/code-review.yaml",
+                               "--candidate", "examples/graphs/code-review-relaxed.yaml", *dataset,
+                               "--output-name", "needs_review", "--metric", "agreement"]))
+    assert [r["input_index"] for r in tuned["ranking"]] == [0, 1]
+    assert [round(r["score"], 2) for r in tuned["ranking"]] == [1.0, 0.67]
+    relaxed = json.loads(invoke(["measure", "examples/graphs/code-review-relaxed.yaml", *dataset, "--split", "development"]))
+    missed = sorted(p["case"] for p in relaxed["measurement"]["predictions"] if p["predicted"]["value"] != p["label"])
+    assert missed == ["csv-export", "default-timeout"], missed
+    csv = next(run["report"]["outputs"] for run in relaxed["runs"] if run["id"] == "csv-export")
+    assert plain(csv["test_gap"]["value"]) == 0.83
+    run_help = invoke(["run", "--help"])
+    assert re.search(r"--max-model-calls <MAX_MODEL_CALLS>\s+\[default: 128\]", run_help)
+    assert re.search(r"--timeout-secs <TIMEOUT_SECS>\s+\[default: 60\]", run_help)
+    requirements = ["--recording", "examples/recordings/requirement-check.json"]
+    expected = {
+        "report": ({"asked_expert": True, "first_answer": 0.78, "complete": 0.6, "conditional": 1.0,
+                    "testable": 0.48, "ok": False}, "completed"),
+        "brake-lamp": ({"asked_expert": False, "first_answer": 0.95, "complete": 0.95, "conditional": 1.0,
+                        "testable": 0.99, "ok": True}, "skipped"),
+        "cabin-light": ({"asked_expert": False, "first_answer": 0.96, "complete": 0.96, "conditional": 1.0,
+                         "testable": 0.99, "ok": True}, "skipped"),
+        "pump": ({"asked_expert": False, "first_answer": 0.84, "complete": 0.84, "conditional": 1.0,
+                  "testable": 0.98, "ok": True}, "skipped"),
+        "fast": ({"asked_expert": False, "first_answer": 0.16, "complete": 0.16, "conditional": 0.61,
+                  "testable": 0.36, "ok": False}, "skipped"),
+    }
+    for name, (outputs, expert) in expected.items():
+        report = json.loads(invoke(["replay", "examples/graphs/requirement-check.yaml",
+                                    "--input", f"examples/data/requirements/{name}.json", *requirements]))
+        equal({k: plain(v["value"]) for k, v in report["outputs"].items()}, outputs)
+        statuses = {node["path"][-1]: node["status"] for node in report["trace"]["nodes"]}
+        assert statuses["expert"] == expert, (name, statuses["expert"])
+        layer1 = next(n for n in report["trace"]["nodes"] if n["path"][-1] == "layer1")
+        answers = layer1["model"]["response"]["answers"]
+        if name == "report":
+            assert answers["kind"]["probabilities"]["event"] == 1.0
+        if name == "fast":
+            assert answers["kind"]["probabilities"] == {"event": 0.61, "state": 0.0, "ubiquitous": 0.39, "unwanted": 0.0}
+            assert (answers["kind"]["selected"], answers["kind"]["confidence"]) == ("event", 0.48)
+            assert answers["testable"]["probabilities"] == {"0": 0.01, "1": 0.63, "2": 0.36}
+            assert (answers["testable"]["expected"], answers["testable"]["confidence"]) == (1.35, 0.45)
+
+
 def recipes():
     cases = json.loads((ROOT / "examples/reference/cases.json").read_text())
     for case in cases:
@@ -108,12 +177,13 @@ def recipes():
     assert limited["error"]["code"] == "limit_exceeded"
     assert limited["trace"]["nodes"]
     selected = json.loads(invoke(["select", "files", "--root", "examples/graphs", "--include", "**/*.yaml", "--exclude", "**/review-conservative.yaml"]))
-    assert len(selected["items"]["value"]["value"]) == 4
+    assert len(selected["items"]["value"]["value"]) == 7
     file_run = json.loads(invoke(["run", "examples/graphs/files.yaml", "--typed-input"], data=json.dumps(selected)))
     assert file_run["outputs"]
     selected = json.loads(invoke(["select", "json", "--input", "examples/data/selection.json", "--pointer", "/records", "--schema", "examples/data/selection-schema.json"]))
     assert len(selected["items"]["value"]["value"]) == 2
     invoke(["select", "json", "--input", "examples/data/selection.json", "--pointer", "/missing", "--schema", "examples/data/selection-schema.json"], code=2)
+    recorded()
     with tempfile.TemporaryDirectory(prefix="sapho-docs-") as temp:
         directory = Path(temp)
         recording = directory / "recording.json"
