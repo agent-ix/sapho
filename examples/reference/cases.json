@@ -1,7 +1,7 @@
 [
   {
     "name": "facts",
-    "input": {},
+    "input": "facts-input.json",
     "expected": {
       "both": false,
       "either": true,
@@ -24,22 +24,7 @@
   },
   {
     "name": "strengths",
-    "input": {
-      "samples": [
-        {
-          "support": 0.8,
-          "weight": 2
-        },
-        {
-          "support": 0.4,
-          "weight": 1
-        },
-        {
-          "support": 0.6,
-          "weight": 1
-        }
-      ]
-    },
+    "input": "strengths-input.json",
     "expected": {
       "min": 0.4,
       "max": 0.8,
@@ -50,37 +35,7 @@
   },
   {
     "name": "collections",
-    "input": {
-      "left": [
-        {
-          "key": "lamp",
-          "score": 0.9
-        },
-        {
-          "key": "motor",
-          "score": 0.3
-        }
-      ],
-      "right": [
-        {
-          "key": "lamp",
-          "score": 1
-        },
-        {
-          "key": "other",
-          "score": 1
-        }
-      ],
-      "groups": [
-        [
-          "a",
-          "b"
-        ],
-        [
-          "c"
-        ]
-      ]
-    },
+    "input": "collections-input.json",
     "expected": {
       "mask": [
         true,
@@ -135,19 +90,19 @@
   },
   {
     "name": "guards",
-    "input": {
-      "enabled": false,
-      "flag": true
-    },
+    "input": "guards-input.json",
     "expected": {
       "optional": null,
       "decision": true
     },
+    "skipped": [
+      [
+        "root",
+        "conditional"
+      ]
+    ],
     "alternate": {
-      "input": {
-        "enabled": true,
-        "flag": true
-      },
+      "input": "guards-enabled-input.json",
       "expected": {
         "optional": false,
         "decision": false
@@ -156,9 +111,7 @@
   },
   {
     "name": "questions",
-    "input": {
-      "text": "The controller illuminates the warning lamp."
-    },
+    "input": "questions-input.json",
     "expected": {
       "observable": 0.8,
       "actor": 0.75,
@@ -169,16 +122,7 @@
   },
   {
     "name": "model-collection",
-    "input": {
-      "items": [
-        {
-          "text": "Lamp turns on"
-        },
-        {
-          "text": "Motor stops"
-        }
-      ]
-    },
+    "input": "model-collection-input.json",
     "expected": {
       "selected": [
         {
@@ -193,9 +137,7 @@
   },
   {
     "name": "native",
-    "input": {
-      "text": "lamp"
-    },
+    "input": "native-input.json",
     "expected": {
       "length": 4
     },
@@ -203,20 +145,20 @@
   },
   {
     "name": "guarded-model",
-    "input": {
-      "text": "Lamp turns on",
-      "enabled": false
-    },
+    "input": "guarded-model-input.json",
     "expected": {
       "support": 0.0,
       "model": "skipped"
     },
+    "skipped": [
+      [
+        "root",
+        "ask"
+      ]
+    ],
     "backend": true,
     "alternate": {
-      "input": {
-        "text": "Lamp turns on",
-        "enabled": true
-      },
+      "input": "guarded-model-enabled-input.json",
       "expected": {
         "support": 0.8,
         "model": "tutorial-1"

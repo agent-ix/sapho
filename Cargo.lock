@@ -1845,6 +1845,7 @@ dependencies = [
  "sapho-jev",
  "sapho-recording",
  "sapho-runtime",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

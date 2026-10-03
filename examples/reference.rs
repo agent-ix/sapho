@@ -3,9 +3,194 @@
 //! Run every graph reference example offline through real public APIs.
 //! `cargo run --example reference` checks both encodings and their expected results.
 use sapho::{core::*, graph::*, recording::*, runtime::*};
-use std::{collections::BTreeMap, error::Error, sync::Arc};
+use serde::Deserialize;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    path::Path,
+    sync::Arc,
+};
 
 type ExampleResult<T> = std::result::Result<T, Box<dyn Error>>;
+
+/// One entry of `examples/reference/cases.json`. Input files sit beside the graphs.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CaseEntry {
+    /// Graph file stem: `NAME.yaml` and `NAME.json`.
+    name: String,
+    /// Plain JSON input file.
+    input: String,
+    /// Plain JSON outputs.
+    expected: serde_json::Value,
+    /// Trace paths of guarded nodes that skip; every other node completes.
+    #[serde(default)]
+    skipped: Vec<Vec<String>>,
+    /// The graph asks a model, so the stock CLI needs a live binding to run it.
+    #[serde(default)]
+    backend: bool,
+    /// The graph calls registered Rust code, so the stock CLI cannot run it.
+    #[serde(default)]
+    native: bool,
+    /// A second input that takes the other guard branch.
+    alternate: Option<AlternateEntry>,
+}
+/// A further run of the same graph.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AlternateEntry {
+    input: String,
+    expected: serde_json::Value,
+    #[serde(default)]
+    skipped: Vec<Vec<String>>,
+}
+/// A reference case with its graph and inputs already read from disk.
+struct Case {
+    name: String,
+    spec: GraphSpec,
+    backend: bool,
+    /// The first run is the case's own input; it is also recorded and replayed.
+    runs: Vec<Run>,
+}
+struct Run {
+    input: serde_json::Value,
+    expected: serde_json::Value,
+    skipped: Vec<Vec<String>>,
+}
+
+/// The reference case that runs each operation, comparator and reducer. No arm
+/// is a wildcard, so a new variant does not compile until it names a case, and
+/// `check_coverage` confirms that case's graph uses it.
+fn operation_case(operation: &Operation) -> &'static str {
+    match operation {
+        Operation::Record {}
+        | Operation::List { .. }
+        | Operation::And
+        | Operation::Or
+        | Operation::Not => "facts",
+        Operation::Compare { comparator } => match comparator {
+            Comparator::Equal
+            | Comparator::Less
+            | Comparator::LessEqual
+            | Comparator::Greater
+            | Comparator::GreaterEqual => "facts",
+        },
+        Operation::Degree | Operation::Complement => "strengths",
+        Operation::Reduce { reducer, .. } => match reducer {
+            Reducer::Min | Reducer::Max | Reducer::WeightedMean => "strengths",
+        },
+        Operation::Map { .. }
+        | Operation::Filter
+        | Operation::Pairs
+        | Operation::Join { .. }
+        | Operation::Collect => "collections",
+        Operation::Coalesce => "guards",
+        Operation::Code { .. } => "native",
+        Operation::Questions { .. } | Operation::Ask { .. } | Operation::Probability { .. } => {
+            "questions"
+        }
+    }
+}
+/// The reference case that asks each question kind, exhaustive like `operation_case`.
+fn question_case(question: &Question) -> &'static str {
+    match question {
+        Question::Boolean { .. } | Question::Choice { .. } | Question::Score { .. } => "questions",
+    }
+}
+/// Serialized identity of a configured feature, such as `compare less` or `boolean`.
+fn wire_name(value: &impl serde::Serialize) -> ExampleResult<String> {
+    let wire = serde_json::to_value(value)?;
+    Ok(["kind", "comparator", "reducer"]
+        .iter()
+        .filter_map(|field| wire.get(field)?.as_str())
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+/// Root and reusable-definition nodes of a graph.
+fn nodes(spec: &GraphSpec) -> impl Iterator<Item = &NodeSpec> {
+    spec.nodes
+        .iter()
+        .chain(spec.subgraphs.values().flat_map(|body| &body.nodes))
+}
+/// Check that each feature a reference graph uses appears in the case named for it.
+fn check_coverage(cases: &[Case]) -> ExampleResult<()> {
+    let mut used = BTreeMap::<&str, BTreeSet<String>>::new();
+    let mut claims = BTreeSet::new();
+    for case in cases {
+        for node in nodes(&case.spec) {
+            let mut features = vec![(wire_name(&node.operation)?, operation_case(&node.operation))];
+            if let Operation::Questions { questions } = &node.operation {
+                for named in questions {
+                    features.push((
+                        format!("question {}", wire_name(&named.question)?),
+                        question_case(&named.question),
+                    ));
+                }
+            }
+            for (feature, claimed) in features {
+                used.entry(&case.name).or_default().insert(feature.clone());
+                claims.insert((feature, claimed));
+            }
+        }
+    }
+    for (feature, case) in claims {
+        if !used
+            .get(case)
+            .is_some_and(|features| features.contains(&feature))
+        {
+            return Err(
+                format!("`{feature}` names reference case {case}, which does not use it").into(),
+            );
+        }
+    }
+    Ok(())
+}
+/// Read every reference graph and input file before evaluation starts.
+fn load(directory: &Path) -> ExampleResult<Vec<Case>> {
+    let read = |file: &str| std::fs::read_to_string(directory.join(file));
+    let read_json = |file: &str| -> ExampleResult<serde_json::Value> {
+        Ok(serde_json::from_str(&read(file)?)?)
+    };
+    let entries: Vec<CaseEntry> = serde_json::from_str(&read("cases.json")?)?;
+    entries
+        .into_iter()
+        .map(|entry| {
+            let spec = GraphSpec::parse(&read(&format!("{}.yaml", entry.name))?)?;
+            let json = read(&format!("{}.json", entry.name))?;
+            assert_eq!(
+                spec,
+                GraphSpec::parse_with_format(&json, GraphFormat::Json)?
+            );
+            // The CLI recipe checker skips flagged cases, so the flags must match the graph.
+            assert_eq!(
+                entry.backend,
+                nodes(&spec).any(|n| matches!(n.operation, Operation::Ask { .. }))
+            );
+            assert_eq!(
+                entry.native,
+                nodes(&spec).any(|n| matches!(n.operation, Operation::Code { .. }))
+            );
+            let mut runs = vec![Run {
+                input: read_json(&entry.input)?,
+                expected: entry.expected,
+                skipped: entry.skipped,
+            }];
+            if let Some(alternate) = entry.alternate {
+                runs.push(Run {
+                    input: read_json(&alternate.input)?,
+                    expected: alternate.expected,
+                    skipped: alternate.skipped,
+                });
+            }
+            Ok(Case {
+                name: entry.name,
+                spec,
+                backend: entry.backend,
+                runs,
+            })
+        })
+        .collect()
+}
 
 /// A deterministic tutorial model, not a semantic classifier.
 struct TutorialBackend;
@@ -169,6 +354,22 @@ fn check_outputs(run: &RunResult, expected: &serde_json::Value) -> ExampleResult
     check_value(&serde_json::to_value(plain)?, expected);
     Ok(())
 }
+/// Every traced node completes except the listed guarded nodes, which skip.
+fn check_statuses(trace: &Trace, skipped: &[Vec<String>]) {
+    for node in &trace.nodes {
+        let expected = if skipped.contains(&node.path) {
+            NodeStatus::Skipped
+        } else {
+            NodeStatus::Completed
+        };
+        assert_eq!(node.status, expected, "{:?}", node.path);
+    }
+    assert!(
+        skipped
+            .iter()
+            .all(|path| trace.nodes.iter().any(|n| &n.path == path))
+    );
+}
 
 fn distributions() -> ExampleResult<()> {
     let questions = vec![NamedQuestion {
@@ -238,70 +439,45 @@ fn distributions() -> ExampleResult<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> ExampleResult<()> {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!("reference/cases.json"))?;
+/// Evaluate every case through the engine, recording and replaying its model calls.
+async fn evaluate(cases: &[Case]) -> ExampleResult<()> {
     let mut primitives = PrimitiveRegistry::default();
     primitives.register(PrimitiveId::new("text_length")?, Arc::new(TextLength))?;
-    distributions()?;
     for case in cases {
-        let name = case
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .ok_or("Missing example name")?;
-        // Acquisition is explicit; no filesystem I/O occurs inside model inference.
-        let yaml = std::fs::read_to_string(root.join(format!("examples/reference/{name}.yaml")))?;
-        let json = std::fs::read_to_string(root.join(format!("examples/reference/{name}.json")))?;
-        let spec = GraphSpec::parse(&yaml)?;
-        assert_eq!(
-            spec,
-            GraphSpec::parse_with_format(&json, GraphFormat::Json)?
-        );
+        let (name, spec) = (case.name.as_str(), &case.spec);
         let recorder = Arc::new(RecordingBackend::new(Arc::new(TutorialBackend), 4_000_000)?);
-        let engine = Engine::new(compile(&spec, &primitives)?, backends(recorder.clone())?)?;
-        let supplied = inputs(&spec, &case["input"])?;
-        let run = engine.run(&supplied, RunLimits::default()).await?;
-        check_outputs(&run, &case["expected"])?;
-        if name == "guarded-model" {
-            assert!(recorder.snapshot()?.exchanges.is_empty());
-        }
-        if let Some(alternate) = case.get("alternate") {
-            let run = engine
-                .run(&inputs(&spec, &alternate["input"])?, RunLimits::default())
+        let engine = Engine::new(compile(spec, &primitives)?, backends(recorder.clone())?)?;
+        let first = case.runs.first().ok_or("Case has no run")?;
+        let supplied = inputs(spec, &first.input)?;
+        let mut outputs = Vec::new();
+        for (index, run) in case.runs.iter().enumerate() {
+            let result = engine
+                .run(&inputs(spec, &run.input)?, RunLimits::default())
                 .await?;
-            check_outputs(&run, &alternate["expected"])?;
-            assert!(
-                run.trace
-                    .nodes
-                    .iter()
-                    .any(|n| n.status == NodeStatus::Completed)
-            );
+            check_outputs(&result, &run.expected)?;
+            check_statuses(&result.trace, &run.skipped);
+            if name == "guarded-model" && index == 0 {
+                // The disabled guard skips the ask, so no model call is made.
+                assert!(recorder.snapshot()?.exchanges.is_empty());
+            }
+            outputs.push(result.outputs);
         }
         let recording = recorder.snapshot()?;
         let bytes = recording.to_json(4_000_000)?;
         let loaded = Recording::from_json(&bytes, 4_000_000)?;
         let replay = Engine::new(
-            compile(&spec, &primitives)?,
+            compile(spec, &primitives)?,
             backends(Arc::new(ReplayBackend::new(&loaded, 4_000_000)?))?,
         )?;
         let replayed = replay.run(&supplied, RunLimits::default()).await?;
-        assert_eq!(replayed.outputs, run.outputs);
-        if case.get("backend").and_then(serde_json::Value::as_bool) == Some(true) {
+        assert_eq!(Some(&replayed.outputs), outputs.first());
+        if case.backend {
             assert!(!recording.exchanges.is_empty());
             let empty = ReplayBackend::new(&Recording::default(), 4_000_000)?;
             let failure = empty
                 .infer(&recording.exchanges.first().ok_or("No exchange")?.request)
                 .await;
             assert_eq!(failure.err().map(|e| e.code), Some(ErrorCode::ReplayMiss));
-        }
-        if name == "guards" {
-            assert!(
-                run.trace
-                    .nodes
-                    .iter()
-                    .any(|n| n.status == NodeStatus::Skipped)
-            );
         }
         if name == "collections" {
             let limited = RunLimits {
@@ -336,6 +512,19 @@ async fn main() -> ExampleResult<()> {
         }
         println!("{name}: expected outputs, YAML/JSON equivalence and replay verified");
     }
-    println!("distribution policies and structured failures verified");
+    Ok(())
+}
+
+fn main() -> ExampleResult<()> {
+    // Acquisition is explicit and synchronous: every file is read here, before
+    // the async runtime starts, so no blocking I/O runs on a Tokio worker.
+    let cases = load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/reference"))?;
+    check_coverage(&cases)?;
+    distributions()?;
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(evaluate(&cases))?;
+    println!("feature coverage, distribution policies and structured failures verified");
     Ok(())
 }

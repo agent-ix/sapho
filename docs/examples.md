@@ -13,11 +13,13 @@ every reference graph can also run with the deterministic Rust tutorial backend.
 cargo run --locked --example reference
 cargo run --locked -p sapho-select --example acquisition
 cargo run --locked -p sapho-evidence --example measurement
+cargo run --locked -p sapho-clm --example clm_configure
 ```
 
-The first command loads both encodings, checks expected outputs, records and
-replays each graph, and verifies distribution and failure behavior. Expected
-values live in [cases.json](../examples/reference/cases.json). The tutorial
+The first command loads both encodings, checks expected outputs and node
+statuses, records and replays each graph, and verifies distribution and failure
+behavior. [cases.json](../examples/reference/cases.json) names each case's input
+file and lists its expected outputs and skipped nodes. The tutorial
 backend always returns fixed synthetic answers; these examples demonstrate
 contracts and do not measure model quality.
 
@@ -35,12 +37,13 @@ contracts and do not measure model quality.
 | [acquisition.rs](../crates/sapho-select/examples/acquisition.rs) | file globs/exclusions, typed JSON and sources; optional Git modes | four selected YAML files, two JSON records; missing member refuses |
 | [measurement.rs](../crates/sapho-evidence/examples/measurement.rs) | dataset validation, agreement/Brier, ranking, coverage, held-out split, JSONL export | agreement 1.0, Brier 0.25, one held-out case, two export rows |
 | [Jev configuration](../crates/sapho-jev/examples/jev_configure.rs) | SDK client to backend registry | compiles without inference; running needs SDK configuration |
-| [CLM configuration](../crates/sapho-clm/examples/clm_configure.rs) | bounded backend construction and registry | prepares a loopback binding without inference |
+| [CLM configuration](../crates/sapho-clm/examples/clm_configure.rs) | bounded backend construction and registry | prepares a loopback binding offline, without inference |
 
-Every reference graph has a `NAME-input.json` in the same directory. Model
-results with a real provider vary; only the deterministic host promises the
-listed synthetic results. Native graphs need registered code and cannot run
-in the stock executable.
+Every reference graph reads its input from `NAME-input.json` in the same
+directory; the guard examples add `NAME-enabled-input.json` for the enabled
+branch. Model results with a real provider vary; only the deterministic host
+promises the listed synthetic results. Native graphs need registered code and
+cannot run in the stock executable.
 
 ## Supplied facts and strengths
 
@@ -102,8 +105,8 @@ filters the original items using their preserved IDs. Real selections depend
 on the provider's answers. `cargo run --example reference` runs this same graph
 with fixed P(true)=0.8 and selects both records offline.
 
-For files or Git patches, the existing file-context graph accepts selector
-records with `path`, `text` and `status`:
+For files or Git patches, the [file-context graph](../examples/graphs/files.yaml)
+accepts selector records with `path`, `text` and `status`:
 
 ```sh
 sapho select files --root examples/graphs --include '**/*.yaml' --exclude '**/review-conservative.yaml' |
@@ -148,9 +151,10 @@ sapho run examples/reference/guarded-model.yaml --input examples/reference/guard
 
 The guarded input has `enabled: false`; the ask is skipped, coalesce supplies
 fallback Answers with zero support and a model name `skipped`. Required backend
-bindings are still prepared before evaluation. Enable the input to perform one
-call. The offline runner verifies both paths and confirms the disabled path
-records no exchanges. Default Answers must retain the matching question space.
+bindings are still prepared before evaluation. `guarded-model-enabled-input.json`
+enables the ask, which performs one call. The offline runner verifies both
+paths and confirms the disabled path records no exchanges. Default Answers must
+retain the matching question space.
 
 ## Record, replay, measure and tune
 
@@ -207,8 +211,12 @@ make docs-check
 ```
 
 This builds warning-free API docs, runs default/all-feature doctests, compiles
-provider examples without invoking them, executes offline Rust and CLI recipes,
-checks YAML/JSON equivalence and checks local documentation links. Add an
-expected-output case to the reference manifest whenever adding an example. New
-operation, question, comparator, reducer, provider and command variants must
-appear in the [coverage inventory](feature-coverage.md).
+the Jev example without invoking it, runs the offline Rust examples (including
+CLM backend construction) and CLI recipes, checks YAML/JSON equivalence and
+checks local documentation links. Each reference graph needs an entry in the
+[reference manifest](../examples/reference/cases.json) and an input file. The
+reference runner maps every operation, comparator, reducer and question kind to
+the case that runs it; that mapping has no wildcard arm, so a new variant does
+not compile until it names a case whose graph uses it. List new operation,
+question, comparator, reducer, provider and command variants in the
+[coverage inventory](feature-coverage.md) as well.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Agent-IX
-"""Check local links, feature coverage and complete offline recipes."""
+"""Check local documentation links and run the offline CLI recipes."""
 import json
 import math
 import os
@@ -60,62 +60,6 @@ def links():
                     raise AssertionError(f"Broken heading in {path.relative_to(ROOT)}: {target}")
 
 
-def variants(file, enum):
-    source = (ROOT / file).read_text()
-    body = source.split(f"enum {enum} {{", 1)[1].split("\n}", 1)[0]
-    names = re.findall(r"^    ([A-Z][A-Za-z0-9]*)\b(?:\s*[{(,])", body, re.M)
-    return {re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower() for name in names}
-
-
-def coverage():
-    inventory = (ROOT / "docs/feature-coverage.md").read_text()
-    families = [("crates/sapho-graph/src/spec.rs", e) for e in ("Operation", "Comparator", "Reducer")]
-    families += [("crates/sapho-core/src/model.rs", "Question"),
-                 ("crates/sapho-core/src/distribution.rs", "DistributionPolicy"),
-                 ("crates/sapho-cli/src/bindings.rs", "Provider"),
-                 ("crates/sapho-cli/src/args.rs", "Command"),
-                 ("crates/sapho-cli/src/args.rs", "Selector"),
-                 ("crates/sapho-cli/src/args.rs", "GitComparison")]
-    for file, enum in families:
-        for variant in variants(file, enum):
-            spelling = variant.replace("_", "-") if enum == "Command" else variant
-            if f"`{spelling}`" not in inventory:
-                raise AssertionError(f"Missing coverage entry for {enum}::{variant}")
-    cases = json.loads((ROOT / "examples/reference/cases.json").read_text())
-    found = set()
-    reducers = set()
-    comparators = set()
-    questions = set()
-    def walk(value):
-        if isinstance(value, dict):
-            if "operation" in value:
-                op = value["operation"]
-                found.add(op["kind"])
-                if "reducer" in op:
-                    reducers.add(op["reducer"])
-                if "comparator" in op:
-                    comparators.add(op["comparator"])
-                for q in op.get("questions", []):
-                    questions.add(q["question"]["kind"])
-            for v in value.values():
-                walk(v)
-        elif isinstance(value, list):
-            for v in value:
-                walk(v)
-    for case in cases:
-        graph = ROOT / f"examples/reference/{case['name']}.json"
-        walk(json.loads(graph.read_text()))
-        if json.loads((graph.parent / f"{case['name']}-input.json").read_text()) != case["input"]:
-            raise AssertionError(f"Copied example input drift: {case['name']}")
-    for enum, found_variants, file in [("Operation", found, "crates/sapho-graph/src/spec.rs"),
-                                        ("Reducer", reducers, "crates/sapho-graph/src/spec.rs"),
-                                        ("Comparator", comparators, "crates/sapho-graph/src/spec.rs"),
-                                        ("Question", questions, "crates/sapho-core/src/model.rs")]:
-        missing = variants(file, enum) - found_variants
-        if missing:
-            raise AssertionError(f"Missing runnable {enum} examples: {sorted(missing)}")
-
-
 def plain(value):
     kind = value["kind"]
     payload = value.get("value")
@@ -155,7 +99,7 @@ def recipes():
             invoke(["validate", graph])
             inspection = json.loads(invoke(["inspect", graph]))
             assert set(inspection["signature"]["outputs"]) == set(case["expected"])
-            report = json.loads(invoke(["run", graph], data=json.dumps(case["input"])))
+            report = json.loads(invoke(["run", graph, "--input", f"examples/reference/{case['input']}"]))
             equal({k: plain(v["value"]) for k, v in report["outputs"].items()}, case["expected"])
     for support, expected_exit in [(0.7, 1), (0.8, 0), (0.9, 0)]:
         result = json.loads(invoke(["run", "examples/graphs/review.yaml", "--fail-on", "needs_review"], data=json.dumps({"support": support}), code=expected_exit))
@@ -217,11 +161,9 @@ def recipes():
 
 
 def main():
-    coverage()
     links()
     recipes()
-    print("Documentation links, feature coverage and offline recipes verified")
-
+    print("Documentation links and offline CLI recipes verified")
 
 if __name__ == "__main__":
     main()
