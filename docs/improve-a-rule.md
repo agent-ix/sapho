@@ -13,6 +13,16 @@ no model calls.
   <img alt="A graph and a labelled dataset of 8 cases, 6 for development and 2 held out. sapho record runs once per case against Jev and the 8 answers are saved in one recording. Tune and measure then run offline: tuning on development cases scores the 0.7 / 0.8 rule 1.00 and the 0.9 / 0.9 rule 0.67. The chosen rule is measured once on held-out cases, and development cases can be exported for a trainer outside Sapho." src="images/evidence-loop-light.svg">
 </picture>
 
+<details>
+<summary>Show the whole diagram</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/evidence-loop-still-dark.svg">
+  <img alt="A graph and a labelled dataset of 8 cases, 6 for development and 2 held out. sapho record runs once per case against Jev and the 8 answers are saved in one recording. Tune and measure then run offline: tuning on development cases scores the 0.7 / 0.8 rule 1.00 and the 0.9 / 0.9 rule 0.67. The chosen rule is measured once on held-out cases, and development cases can be exported for a trainer outside Sapho." src="images/evidence-loop-still-light.svg">
+</picture>
+
+</details>
+
 Every command below runs from the checkout with the files in `examples/`. The
 eight cases are small code changes written for this guide, and their labels
 are synthetic tutorial labels: they show the workflow, not Jev's accuracy.

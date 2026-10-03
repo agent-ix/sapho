@@ -72,6 +72,41 @@ against labelled examples cheaply. [How Sapho works](docs/how-it-works.md)
 covers answer types, combining strengths, layered questions, guards and
 collections.
 
+## Build decisions in layers
+
+A later question can use an earlier answer, and an expensive check can run
+only when it is needed. This [requirement check](examples/graphs/requirement-check.yaml)
+makes up to three model calls for each statement:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/multi-stage-dark.svg">
+  <img alt="Three model layers for one requirement. Layer 1 asks Jev for its pattern: event 1.00, so has_condition is 1.00. Layer 2 sees that answer next to the statement and asks whether the condition and response are stated: 0.78. That is in the unsure band from 0.2 to 0.8, so layer 3 asks the expert, which answers 0.60, below the 0.8 needed to pass. 4 of 5 recorded statements never reach layer 3. The animation then replays a statement layer 2 is sure about (0.95), which skips the expert." src="docs/images/multi-stage-light.svg">
+</picture>
+
+<details>
+<summary>Show the whole diagram</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/multi-stage-still-dark.svg">
+  <img alt="Three model layers for one requirement. Layer 1 asks Jev for its pattern: event 1.00, so has_condition is 1.00. Layer 2 sees that answer next to the statement and asks whether the condition and response are stated: 0.78. That is in the unsure band from 0.2 to 0.8, so layer 3 asks the expert, which answers 0.60, below the 0.8 needed to pass. 4 of 5 recorded statements never reach layer 3." src="docs/images/multi-stage-still-light.svg">
+</picture>
+
+</details>
+
+1. **Layer 1** asks Jev which pattern the requirement follows. For "When the
+   operator requests a report, the system shall produce it promptly." Jev
+   answers *event* with probability 1.00, so the statement has a condition.
+2. **Layer 2** sees that answer next to the statement and asks whether the
+   condition and the response are both stated. Jev answers 0.78: likely, but
+   not certain.
+3. **Layer 3** runs because 0.78 falls in the unsure band, 0.2 to 0.8. The
+   expert, here Jev with a more detailed question, answers 0.60, so the
+   requirement does not pass.
+
+Four of the five recorded statements were settled at layer 2 and never
+reached the expert. [Ask in layers](docs/how-it-works.md#ask-in-layers)
+explains the nodes that connect the layers.
+
 ## Install the CLI
 
 You need Rust 1.98 or later and access to this repository. The checkout pins
@@ -114,6 +149,18 @@ sapho replay examples/graphs/code-review-relaxed.yaml \
 `needs_review` is now false. The questions did not change, so the same
 recorded answers were reused. Only your rule changed.
 
+The layered requirement check replays the same way:
+
+```sh
+sapho replay examples/graphs/requirement-check.yaml \
+  --input examples/data/requirements/report.json \
+  --recording examples/recordings/requirement-check.json
+```
+
+It reports `asked_expert` true and `complete` 0.6. With
+`examples/data/requirements/brake-lamp.json` instead, `asked_expert` is false
+and the trace shows the `expert` node as `skipped`.
+
 To use a decision in CI, add `--fail-on needs_review`. The command exits 1
 when review is needed and 0 when it is not. Configuration or execution
 failures exit 2. Reports go to stdout and diagnostics to stderr.
@@ -148,6 +195,41 @@ Each run makes one request to Jev. To save the answers for replay, use
 `sapho record` with the same arguments plus `--recording saved.json`. [Improve a rule](docs/improve-a-rule.md) shows how to
 measure a rule against labelled cases and compare candidates offline. To use
 an existing CLM service instead of Jev, see [CLM setup](docs/cli-guide.md#bind-clm-explicitly).
+
+## Measure and tune a rule
+
+Record a model's answers for cases you have labelled, then compare rules
+against them offline. A threshold or combination change reuses the recorded
+answers, so trying a rule costs no model calls:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/evidence-loop-dark.svg">
+  <img alt="A graph and a labelled dataset of 8 cases, 6 for development and 2 held out. sapho record runs once per case against Jev and the 8 answers are saved in one recording. Tune and measure then run offline: tuning on development cases scores the 0.7 / 0.8 rule 1.00 and the 0.9 / 0.9 rule 0.67. The chosen rule is measured once on held-out cases, and development cases can be exported for a trainer outside Sapho." src="docs/images/evidence-loop-light.svg">
+</picture>
+
+<details>
+<summary>Show the whole diagram</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/evidence-loop-still-dark.svg">
+  <img alt="A graph and a labelled dataset of 8 cases, 6 for development and 2 held out. sapho record runs once per case against Jev and the 8 answers are saved in one recording. Tune and measure then run offline: tuning on development cases scores the 0.7 / 0.8 rule 1.00 and the 0.9 / 0.9 rule 0.67. The chosen rule is measured once on held-out cases, and development cases can be exported for a trainer outside Sapho." src="docs/images/evidence-loop-still-light.svg">
+</picture>
+
+</details>
+
+```sh
+sapho tune \
+  --candidate examples/graphs/code-review.yaml \
+  --candidate examples/graphs/code-review-relaxed.yaml \
+  --dataset examples/data/code-review-dataset.json \
+  --output-name needs_review --metric agreement \
+  --replay examples/recordings/code-review.json
+```
+
+On the six development cases, the original rule agrees with every label
+(1.00) and the relaxed rule with four of six (0.67).
+[Improve a rule](docs/improve-a-rule.md) covers the held-out check and
+training export.
 
 ## What Sapho gives you
 
