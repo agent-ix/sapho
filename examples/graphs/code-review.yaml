@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+# Does this code change need closer review?
+#   needs_review = public_api_changed AND (contract_risk >= 0.7 OR test_gap >= 0.8)
+inputs:
+  change: {kind: text}         # the diff, or a summary of it
+  public_api_changed: {kind: boolean}  # a fact your own tooling computes
+nodes:
+  - id: context
+    operation: {kind: record}
+    inputs: {change: {kind: input, name: change}}
+  - id: questions
+    operation:
+      kind: questions
+      questions:
+        - id: contract_risk
+          question:
+            kind: boolean
+            instructions: Could this change break code that already calls it?
+            yes: An existing caller could break or behave differently.
+            no: Existing callers keep working as before.
+        - id: test_gap
+          question:
+            kind: boolean
+            instructions: Does the change add behavior that its tests do not exercise?
+            yes: Some new behavior has no test.
+            no: The tests exercise the new behavior.
+  - id: ask
+    operation: {kind: ask, backend: judge}
+    inputs:
+      state: {kind: node, node: context, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: contract_risk
+    operation: {kind: probability, question: contract_risk, labels: ["true"]}
+    inputs: {answers: {kind: node, node: ask, port: answers}}
+  - id: test_gap
+    operation: {kind: probability, question: test_gap, labels: ["true"]}
+    inputs: {answers: {kind: node, node: ask, port: answers}}
+  - id: risky_contract
+    operation: {kind: compare, comparator: greater_equal}
+    inputs:
+      a: {kind: node, node: contract_risk, port: result}
+      b:
+        kind: literal
+        value: {id: contract_cutoff, value: {kind: probability, value: 0.7}}
+        value_type: {kind: probability}
+  - id: untested
+    operation: {kind: compare, comparator: greater_equal}
+    inputs:
+      a: {kind: node, node: test_gap, port: result}
+      b:
+        kind: literal
+        value: {id: test_cutoff, value: {kind: probability, value: 0.8}}
+        value_type: {kind: probability}
+  - id: either
+    operation: {kind: or}
+    inputs:
+      a: {kind: node, node: risky_contract, port: result}
+      b: {kind: node, node: untested, port: result}
+  - id: needs_review
+    operation: {kind: and}
+    inputs:
+      a: {kind: input, name: public_api_changed}
+      b: {kind: node, node: either, port: result}
+outputs:
+  needs_review: {kind: node, node: needs_review, port: result}
+  contract_risk: {kind: node, node: contract_risk, port: result}
+  test_gap: {kind: node, node: test_gap, port: result}

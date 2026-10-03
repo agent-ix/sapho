@@ -34,7 +34,7 @@ contracts and do not measure model quality.
 | [guarded-model.yaml](../examples/reference/guarded-model.yaml) / [JSON](../examples/reference/guarded-model.json) | skip an ask, default Answers, recover model name | disabled: zero calls, support 0, model `skipped`; enabled: support 0.8 |
 | [native.yaml](../examples/reference/native.yaml) / [JSON](../examples/reference/native.json) | registered Primitive with params | `lamp` has byte length 4 |
 | [reference.rs](../examples/reference.rs) | Complete Rust host, custom backend/primitive, limits, trace, capture/replay, strict/approximate/partial/unavailable distributions | all expected outputs and failure codes verified |
-| [acquisition.rs](../crates/sapho-select/examples/acquisition.rs) | file globs/exclusions, typed JSON and sources; optional Git modes | four selected YAML files, two JSON records; missing member refuses |
+| [acquisition.rs](../crates/sapho-select/examples/acquisition.rs) | file globs/exclusions, typed JSON and sources; optional Git modes | seven selected YAML files, two JSON records; missing member refuses |
 | [measurement.rs](../crates/sapho-evidence/examples/measurement.rs) | dataset validation, agreement/Brier, ranking, coverage, held-out split, JSONL export | agreement 1.0, Brier 0.25, one held-out case, two export rows |
 | [Jev configuration](../crates/sapho-jev/examples/jev_configure.rs) | SDK client to backend registry | compiles without inference; running needs SDK configuration |
 | [CLM configuration](../crates/sapho-clm/examples/clm_configure.rs) | bounded backend construction and registry | prepares a loopback binding offline, without inference |
@@ -116,7 +116,7 @@ sapho select git --root . --mode staged
 sapho select git --root . --mode revisions --base HEAD --head HEAD
 ```
 
-The file command selects four files. Git results depend on tracked changes;
+The file command selects seven files. Git results depend on tracked changes;
 comparing HEAD with itself yields an empty collection. Git needs Unix and
 Git 2.34+. To exercise all modes through the Rust API, run
 `cargo run -p sapho-select --example acquisition -- --git`.
