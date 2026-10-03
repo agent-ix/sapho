@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="sapho-1.png" alt="Sapho logo" width="240" />
+  <img src="sapho-1.png" alt="Sapho logo" title="Sharpens the mind and focuses thought." width="240" />
 </div>
 
 # Sapho
