@@ -33,4 +33,3 @@ Gitleaks 8.30.1, with redacted output, found zero secrets across all forty fetch
 The sole Git dependency is ix-cli-kit revision cc69a934f887966f955440bff8c356e3da449bee. At inspection its repository was private, so a public Sapho checkout would not build anonymously. Peter explicitly authorized coordinating its public release; that repository's owner is auditing and publishing it separately. Sapho must verify anonymous access to the pinned dependency before public delivery. No source is copied, consumer pin changed or shared checkout modified to bypass this condition.
 
 The cross-repository Discord rollout is assigned by Peter to another session. This change updates Sapho only. No retro repository or global skill was modified: the authorized scope prohibits copying private project artifacts across repositories, and the audit found no new application-specification gap to formalize.
-

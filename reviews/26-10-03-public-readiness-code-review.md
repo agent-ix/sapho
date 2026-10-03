@@ -32,3 +32,6 @@ The Discord API resolves k8DVhuYBR2 to Agent IX with expires_at null. README lic
 
 The first `make ci` exited 0 on draco: formatting, Clippy with warnings denied in both feature lanes, 84 tests and one doctest per lane, dependency/advisory/license audit, unsafe audit, rustdoc and spec/review validation. `git diff --check` passed. No tests were added for link and prose edits; the live invite, native repository settings and canonical documents were inspected directly. Pending uncommitted documentation in the primary checkout is outside this reviewed revision and was preserved.
 
+## Delivery verification
+
+The second full `make ci` also exited 0 before handoff, with the same 84 tests and one doctest in each feature lane. PR #11 passes the required CLA gate and verified internal-contribution exemption. Only review execution evidence and trailing whitespace changed after the reviewed documentation revision. Public visibility remains held for the separately owned sanitized ix-cli-kit release and consumer pin transition.
