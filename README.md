@@ -17,10 +17,10 @@ Sapho splits a decision into many simple questions, asks the model each one, and
 combines the answers using rules you write. Rules use logic operators such as
 and, or, min and max, and you can build larger rules out of smaller ones.
 
-Write your questions and rules in YAML or JSON. Run them from the command line,
-or use Sapho in a Rust application. Keep the answers and intermediate results
-so you can see how a decision was made, measure it against labelled examples,
-and improve the rule.
+Write your questions and rules as a decision graph in YAML or JSON. Run them
+from the command line, or use Sapho in a Rust application. Keep the answers and
+intermediate results so you can see how a decision was made, measure it against
+labelled examples, and improve the rule.
 
 [CLI setup](#install-the-cli) · [Rust integration](#use-sapho-in-a-rust-project) ·
 [Claude Code](#use-the-skills-in-claude-code) · [Documentation](docs/index.md)
