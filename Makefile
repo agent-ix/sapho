@@ -30,6 +30,7 @@ docs-examples:
 	$(CARGO) run --locked --example reference
 	$(CARGO) run --locked -p sapho-select --example acquisition
 	$(CARGO) run --locked -p sapho-evidence --example measurement
+	$(CARGO) run --locked -p sapho-clm --example clm_configure
 	$(CARGO) build --locked -p sapho-cli --no-default-features
 	python3 scripts/check_docs.py
 docs-check: docs
