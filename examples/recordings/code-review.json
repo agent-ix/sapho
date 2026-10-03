@@ -1,0 +1,452 @@
+{
+  "exchanges": [
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "change": {
+              "kind": "text",
+              "value": "--- a/src/parse.rs\n+++ b/src/parse.rs\n-// Retruns the first token, or None when the input is emtpy.\n+// Returns the first token, or None when the input is empty.\n fn first_token(input: &str) -> Option<&str> {"
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "contract_risk",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Could this change break code that already calls it?",
+              "yes": "An existing caller could break or behave differently.",
+              "no": "Existing callers keep working as before."
+            }
+          },
+          {
+            "id": "test_gap",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the change add behavior that its tests do not exercise?",
+              "yes": "Some new behavior has no test.",
+              "no": "The tests exercise the new behavior."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "contract_risk": {
+            "kind": "boolean",
+            "probability": 0.01
+          },
+          "test_gap": {
+            "kind": "boolean",
+            "probability": 0.04
+          }
+        },
+        "usage": {
+          "input_tokens": 424,
+          "output_tokens": 39
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "change": {
+              "kind": "text",
+              "value": "--- a/src/report.rs\n+++ b/src/report.rs\n+/// Write the report rows as CSV.\n+pub fn export_csv(rows: &[Row], out: &mut impl Write) -> io::Result<()> {\n+    writeln!(out, \"id,name,total\")?;\n+    for row in rows {\n+        let name = row.name.replace(',', \" \");\n+        writeln!(out, \"{},{},{:.2}\", row.id, name, row.total)?;\n+    }\n+    Ok(())\n+}"
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "contract_risk",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Could this change break code that already calls it?",
+              "yes": "An existing caller could break or behave differently.",
+              "no": "Existing callers keep working as before."
+            }
+          },
+          {
+            "id": "test_gap",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the change add behavior that its tests do not exercise?",
+              "yes": "Some new behavior has no test.",
+              "no": "The tests exercise the new behavior."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "contract_risk": {
+            "kind": "boolean",
+            "probability": 0.13
+          },
+          "test_gap": {
+            "kind": "boolean",
+            "probability": 0.83
+          }
+        },
+        "usage": {
+          "input_tokens": 471,
+          "output_tokens": 39
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "change": {
+              "kind": "text",
+              "value": "--- a/src/config.rs\n+++ b/src/config.rs\n impl Default for Config {\n     fn default() -> Self {\n         Config {\n-            timeout: Duration::from_secs(30),\n+            timeout: Duration::from_secs(5),\n             retries: 0,\n         }\n     }\n }"
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "contract_risk",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Could this change break code that already calls it?",
+              "yes": "An existing caller could break or behave differently.",
+              "no": "Existing callers keep working as before."
+            }
+          },
+          {
+            "id": "test_gap",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the change add behavior that its tests do not exercise?",
+              "yes": "Some new behavior has no test.",
+              "no": "The tests exercise the new behavior."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "contract_risk": {
+            "kind": "boolean",
+            "probability": 0.79
+          },
+          "test_gap": {
+            "kind": "boolean",
+            "probability": 0.61
+          }
+        },
+        "usage": {
+          "input_tokens": 424,
+          "output_tokens": 39
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "change": {
+              "kind": "text",
+              "value": "--- a/src/client.rs\n+++ b/src/client.rs\n /// Connect to a server.\n+///\n+/// ```\n+/// let client = connect(\"https://example.com\", Duration::from_secs(5))?;\n+/// ```\n pub fn connect(url: &str, timeout: Duration) -> Result<Client, Error> {"
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "contract_risk",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Could this change break code that already calls it?",
+              "yes": "An existing caller could break or behave differently.",
+              "no": "Existing callers keep working as before."
+            }
+          },
+          {
+            "id": "test_gap",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the change add behavior that its tests do not exercise?",
+              "yes": "Some new behavior has no test.",
+              "no": "The tests exercise the new behavior."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "contract_risk": {
+            "kind": "boolean",
+            "probability": 0.03
+          },
+          "test_gap": {
+            "kind": "boolean",
+            "probability": 0.18
+          }
+        },
+        "usage": {
+          "input_tokens": 429,
+          "output_tokens": 39
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "change": {
+              "kind": "text",
+              "value": "--- a/src/error.rs\n+++ b/src/error.rs\n pub enum Error {\n     NotFound,\n     Timeout,\n+    RateLimited { retry_after: Duration },\n }"
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "contract_risk",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Could this change break code that already calls it?",
+              "yes": "An existing caller could break or behave differently.",
+              "no": "Existing callers keep working as before."
+            }
+          },
+          {
+            "id": "test_gap",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the change add behavior that its tests do not exercise?",
+              "yes": "Some new behavior has no test.",
+              "no": "The tests exercise the new behavior."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "contract_risk": {
+            "kind": "boolean",
+            "probability": 0.48
+          },
+          "test_gap": {
+            "kind": "boolean",
+            "probability": 0.82
+          }
+        },
+        "usage": {
+          "input_tokens": 400,
+          "output_tokens": 39
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "change": {
+              "kind": "text",
+              "value": "--- a/src/parse.rs\n+++ b/src/parse.rs\n-fn is_separator(c: char) -> bool {\n-    c == ',' || c == ';' || c == '\\t'\n-}\n+fn is_separator(c: char) -> bool {\n+    matches!(c, ',' | ';' | '\\t')\n+}"
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "contract_risk",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Could this change break code that already calls it?",
+              "yes": "An existing caller could break or behave differently.",
+              "no": "Existing callers keep working as before."
+            }
+          },
+          {
+            "id": "test_gap",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the change add behavior that its tests do not exercise?",
+              "yes": "Some new behavior has no test.",
+              "no": "The tests exercise the new behavior."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "contract_risk": {
+            "kind": "boolean",
+            "probability": 0.03
+          },
+          "test_gap": {
+            "kind": "boolean",
+            "probability": 0.08
+          }
+        },
+        "usage": {
+          "input_tokens": 433,
+          "output_tokens": 39
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "change": {
+              "kind": "text",
+              "value": "--- a/src/client.rs\n+++ b/src/client.rs\n+    /// Retry failed requests up to `n` times.\n+    pub fn with_retries(mut self, n: u32) -> Self {\n+        self.retries = n;\n+        self\n+    }\n--- a/tests/client.rs\n+++ b/tests/client.rs\n+#[test]\n+fn with_retries_sets_the_retry_count() {\n+    assert_eq!(Client::new().with_retries(3).retries(), 3);\n+}"
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "contract_risk",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Could this change break code that already calls it?",
+              "yes": "An existing caller could break or behave differently.",
+              "no": "Existing callers keep working as before."
+            }
+          },
+          {
+            "id": "test_gap",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the change add behavior that its tests do not exercise?",
+              "yes": "Some new behavior has no test.",
+              "no": "The tests exercise the new behavior."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "contract_risk": {
+            "kind": "boolean",
+            "probability": 0.08
+          },
+          "test_gap": {
+            "kind": "boolean",
+            "probability": 0.22
+          }
+        },
+        "usage": {
+          "input_tokens": 472,
+          "output_tokens": 39
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "change": {
+              "kind": "text",
+              "value": "--- a/src/client.rs\n+++ b/src/client.rs\n-pub fn connect(url: &str, timeout_ms: u64) -> Result<Client, Error> {\n+pub fn connect(url: &str, timeout: Duration) -> Result<Client, Error> {\n     let client = Client::builder()\n-        .timeout(Duration::from_millis(timeout_ms))\n+        .timeout(timeout)\n         .build()?;"
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "contract_risk",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Could this change break code that already calls it?",
+              "yes": "An existing caller could break or behave differently.",
+              "no": "Existing callers keep working as before."
+            }
+          },
+          {
+            "id": "test_gap",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the change add behavior that its tests do not exercise?",
+              "yes": "Some new behavior has no test.",
+              "no": "The tests exercise the new behavior."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "contract_risk": {
+            "kind": "boolean",
+            "probability": 0.95
+          },
+          "test_gap": {
+            "kind": "boolean",
+            "probability": 0.48
+          }
+        },
+        "usage": {
+          "input_tokens": 449,
+          "output_tokens": 39
+        }
+      }
+    }
+  ]
+}

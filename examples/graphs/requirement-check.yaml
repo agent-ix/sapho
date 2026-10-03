@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+# Check a requirement in layers. Layer 1 classifies the statement; its answer
+# becomes context for layer 2. An expert is asked only when layer 2 is unsure.
+inputs:
+  statement: {kind: text}
+nodes:
+  # Layer 1: what kind of statement is this, and could a test check it?
+  - id: context
+    operation: {kind: record}
+    inputs: {statement: {kind: input, name: statement}}
+  - id: layer1_questions
+    operation:
+      kind: questions
+      questions:
+        - id: kind
+          question:
+            kind: choice
+            instructions: Which pattern does the requirement follow?
+            options:
+              - {label: ubiquitous, description: "Always applies; no condition."}
+              - {label: event, description: "Applies when a trigger occurs (When ...)."}
+              - {label: state, description: "Applies while a state lasts (While ...)."}
+              - {label: unwanted, description: "Responds to an unwanted condition (If ... then ...)."}
+        - id: testable
+          question:
+            kind: score
+            instructions: How directly could a test check the requirement?
+            levels: [No observable outcome, Partly observable, A test can check it directly]
+  - id: layer1
+    operation: {kind: ask, backend: judge}
+    inputs:
+      state: {kind: node, node: context, port: result}
+      questions: {kind: node, node: layer1_questions, port: result}
+  - id: conditional
+    operation: {kind: probability, question: kind, labels: [event, state, unwanted]}
+    inputs: {answers: {kind: node, node: layer1, port: answers}}
+  - id: testable
+    operation: {kind: probability, question: testable, labels: ["2"]}
+    inputs: {answers: {kind: node, node: layer1, port: answers}}
+
+  # Layer 2: the layer-1 answer is part of the context for the next question.
+  - id: context2
+    operation: {kind: record}
+    inputs:
+      statement: {kind: input, name: statement}
+      has_condition: {kind: node, node: conditional, port: result}
+  - id: layer2_questions
+    operation:
+      kind: questions
+      questions:
+        - id: complete
+          question:
+            kind: boolean
+            instructions: Does the requirement name its condition, when it has one, and an observable system response?
+            yes: The condition and the response are both stated.
+            no: The condition or the response is missing or vague.
+  - id: layer2
+    operation: {kind: ask, backend: judge}
+    inputs:
+      state: {kind: node, node: context2, port: result}
+      questions: {kind: node, node: layer2_questions, port: result}
+  - id: first_answer
+    operation: {kind: probability, question: complete, labels: ["true"]}
+    inputs: {answers: {kind: node, node: layer2, port: answers}}
+
+  # Ask the expert only when layer 2 is unsure: 0.2 <= first_answer < 0.8.
+  - id: above_low
+    operation: {kind: compare, comparator: greater_equal}
+    inputs:
+      a: {kind: node, node: first_answer, port: result}
+      b:
+        kind: literal
+        value: {id: low, value: {kind: probability, value: 0.2}}
+        value_type: {kind: probability}
+  - id: below_high
+    operation: {kind: compare, comparator: less}
+    inputs:
+      a: {kind: node, node: first_answer, port: result}
+      b:
+        kind: literal
+        value: {id: high, value: {kind: probability, value: 0.8}}
+        value_type: {kind: probability}
+  - id: unsure
+    operation: {kind: and}
+    inputs:
+      a: {kind: node, node: above_low, port: result}
+      b: {kind: node, node: below_high, port: result}
+  - id: expert_questions
+    operation:
+      kind: questions
+      questions:
+        - id: complete
+          question:
+            kind: boolean
+            instructions: >-
+              Read the requirement as a test engineer. Does it name the condition
+              that triggers it, if any, and a system response a test could observe
+              and check?
+            yes: A test engineer could write a check from this statement.
+            no: The statement leaves the condition or the response open.
+  - id: expert
+    guard: {kind: node, node: unsure, port: result}
+    operation: {kind: ask, backend: expert}
+    inputs:
+      state: {kind: node, node: context2, port: result}
+      questions: {kind: node, node: expert_questions, port: result}
+  - id: answers
+    operation: {kind: coalesce}
+    inputs:
+      value: {kind: node, node: expert, port: answers}
+      default: {kind: node, node: layer2, port: answers}
+  - id: complete
+    operation: {kind: probability, question: complete, labels: ["true"]}
+    inputs: {answers: {kind: node, node: answers, port: result}}
+  - id: ok
+    operation: {kind: compare, comparator: greater_equal}
+    inputs:
+      a: {kind: node, node: complete, port: result}
+      b:
+        kind: literal
+        value: {id: cutoff, value: {kind: probability, value: 0.8}}
+        value_type: {kind: probability}
+outputs:
+  conditional: {kind: node, node: conditional, port: result}
+  testable: {kind: node, node: testable, port: result}
+  first_answer: {kind: node, node: first_answer, port: result}
+  asked_expert: {kind: node, node: unsure, port: result}
+  complete: {kind: node, node: complete, port: result}
+  ok: {kind: node, node: ok, port: result}

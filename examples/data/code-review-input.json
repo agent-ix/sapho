@@ -1,0 +1,4 @@
+{
+  "change": "--- a/src/config.rs\n+++ b/src/config.rs\n impl Default for Config {\n     fn default() -> Self {\n         Config {\n-            timeout: Duration::from_secs(30),\n+            timeout: Duration::from_secs(5),\n             retries: 0,\n         }\n     }\n }",
+  "public_api_changed": true
+}

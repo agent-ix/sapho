@@ -1,0 +1,726 @@
+{
+  "exchanges": [
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "statement": {
+              "kind": "text",
+              "value": "When the brake pedal is pressed, the controller shall turn on the brake lamp within 100 ms."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "kind",
+            "question": {
+              "kind": "choice",
+              "instructions": "Which pattern does the requirement follow?",
+              "options": [
+                {
+                  "label": "ubiquitous",
+                  "description": "Always applies; no condition."
+                },
+                {
+                  "label": "event",
+                  "description": "Applies when a trigger occurs (When ...)."
+                },
+                {
+                  "label": "state",
+                  "description": "Applies while a state lasts (While ...)."
+                },
+                {
+                  "label": "unwanted",
+                  "description": "Responds to an unwanted condition (If ... then ...)."
+                }
+              ]
+            }
+          },
+          {
+            "id": "testable",
+            "question": {
+              "kind": "score",
+              "instructions": "How directly could a test check the requirement?",
+              "levels": [
+                "No observable outcome",
+                "Partly observable",
+                "A test can check it directly"
+              ]
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "kind": {
+            "kind": "choice",
+            "selected": "event",
+            "confidence": 1.0,
+            "probabilities": {
+              "event": 1.0,
+              "state": 0.0,
+              "ubiquitous": 0.0,
+              "unwanted": 0.0
+            }
+          },
+          "testable": {
+            "kind": "score",
+            "expected": 1.98,
+            "confidence": 0.98,
+            "probabilities": {
+              "0": 0.0,
+              "1": 0.01,
+              "2": 0.99
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 450,
+          "output_tokens": 65
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "has_condition": {
+              "kind": "probability",
+              "value": 1.0
+            },
+            "statement": {
+              "kind": "text",
+              "value": "When the brake pedal is pressed, the controller shall turn on the brake lamp within 100 ms."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "complete",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the requirement name its condition, when it has one, and an observable system response?",
+              "yes": "The condition and the response are both stated.",
+              "no": "The condition or the response is missing or vague."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "complete": {
+            "kind": "boolean",
+            "probability": 0.95
+          }
+        },
+        "usage": {
+          "input_tokens": 356,
+          "output_tokens": 20
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "statement": {
+              "kind": "text",
+              "value": "While a door is open, the cabin light shall stay on."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "kind",
+            "question": {
+              "kind": "choice",
+              "instructions": "Which pattern does the requirement follow?",
+              "options": [
+                {
+                  "label": "ubiquitous",
+                  "description": "Always applies; no condition."
+                },
+                {
+                  "label": "event",
+                  "description": "Applies when a trigger occurs (When ...)."
+                },
+                {
+                  "label": "state",
+                  "description": "Applies while a state lasts (While ...)."
+                },
+                {
+                  "label": "unwanted",
+                  "description": "Responds to an unwanted condition (If ... then ...)."
+                }
+              ]
+            }
+          },
+          {
+            "id": "testable",
+            "question": {
+              "kind": "score",
+              "instructions": "How directly could a test check the requirement?",
+              "levels": [
+                "No observable outcome",
+                "Partly observable",
+                "A test can check it directly"
+              ]
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "kind": {
+            "kind": "choice",
+            "selected": "state",
+            "confidence": 1.0,
+            "probabilities": {
+              "event": 0.0,
+              "state": 1.0,
+              "ubiquitous": 0.0,
+              "unwanted": 0.0
+            }
+          },
+          "testable": {
+            "kind": "score",
+            "expected": 1.99,
+            "confidence": 0.98,
+            "probabilities": {
+              "0": 0.0,
+              "1": 0.01,
+              "2": 0.99
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 441,
+          "output_tokens": 65
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "has_condition": {
+              "kind": "probability",
+              "value": 1.0
+            },
+            "statement": {
+              "kind": "text",
+              "value": "While a door is open, the cabin light shall stay on."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "complete",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the requirement name its condition, when it has one, and an observable system response?",
+              "yes": "The condition and the response are both stated.",
+              "no": "The condition or the response is missing or vague."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "complete": {
+            "kind": "boolean",
+            "probability": 0.96
+          }
+        },
+        "usage": {
+          "input_tokens": 347,
+          "output_tokens": 20
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "statement": {
+              "kind": "text",
+              "value": "The system shall respond quickly to user requests."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "kind",
+            "question": {
+              "kind": "choice",
+              "instructions": "Which pattern does the requirement follow?",
+              "options": [
+                {
+                  "label": "ubiquitous",
+                  "description": "Always applies; no condition."
+                },
+                {
+                  "label": "event",
+                  "description": "Applies when a trigger occurs (When ...)."
+                },
+                {
+                  "label": "state",
+                  "description": "Applies while a state lasts (While ...)."
+                },
+                {
+                  "label": "unwanted",
+                  "description": "Responds to an unwanted condition (If ... then ...)."
+                }
+              ]
+            }
+          },
+          {
+            "id": "testable",
+            "question": {
+              "kind": "score",
+              "instructions": "How directly could a test check the requirement?",
+              "levels": [
+                "No observable outcome",
+                "Partly observable",
+                "A test can check it directly"
+              ]
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "kind": {
+            "kind": "choice",
+            "selected": "event",
+            "confidence": 0.48,
+            "probabilities": {
+              "event": 0.61,
+              "state": 0.0,
+              "ubiquitous": 0.39,
+              "unwanted": 0.0
+            }
+          },
+          "testable": {
+            "kind": "score",
+            "expected": 1.35,
+            "confidence": 0.45,
+            "probabilities": {
+              "0": 0.01,
+              "1": 0.63,
+              "2": 0.36
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 437,
+          "output_tokens": 65
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "has_condition": {
+              "kind": "probability",
+              "value": 0.61
+            },
+            "statement": {
+              "kind": "text",
+              "value": "The system shall respond quickly to user requests."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "complete",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the requirement name its condition, when it has one, and an observable system response?",
+              "yes": "The condition and the response are both stated.",
+              "no": "The condition or the response is missing or vague."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "complete": {
+            "kind": "boolean",
+            "probability": 0.16
+          }
+        },
+        "usage": {
+          "input_tokens": 344,
+          "output_tokens": 20
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "statement": {
+              "kind": "text",
+              "value": "The pump shall stop if the pressure gets too high."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "kind",
+            "question": {
+              "kind": "choice",
+              "instructions": "Which pattern does the requirement follow?",
+              "options": [
+                {
+                  "label": "ubiquitous",
+                  "description": "Always applies; no condition."
+                },
+                {
+                  "label": "event",
+                  "description": "Applies when a trigger occurs (When ...)."
+                },
+                {
+                  "label": "state",
+                  "description": "Applies while a state lasts (While ...)."
+                },
+                {
+                  "label": "unwanted",
+                  "description": "Responds to an unwanted condition (If ... then ...)."
+                }
+              ]
+            }
+          },
+          {
+            "id": "testable",
+            "question": {
+              "kind": "score",
+              "instructions": "How directly could a test check the requirement?",
+              "levels": [
+                "No observable outcome",
+                "Partly observable",
+                "A test can check it directly"
+              ]
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "kind": {
+            "kind": "choice",
+            "selected": "unwanted",
+            "confidence": 0.95,
+            "probabilities": {
+              "event": 0.03,
+              "state": 0.0,
+              "ubiquitous": 0.0,
+              "unwanted": 0.97
+            }
+          },
+          "testable": {
+            "kind": "score",
+            "expected": 1.98,
+            "confidence": 0.97,
+            "probabilities": {
+              "0": 0.0,
+              "1": 0.02,
+              "2": 0.98
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 439,
+          "output_tokens": 67
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "has_condition": {
+              "kind": "probability",
+              "value": 1.0
+            },
+            "statement": {
+              "kind": "text",
+              "value": "The pump shall stop if the pressure gets too high."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "complete",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the requirement name its condition, when it has one, and an observable system response?",
+              "yes": "The condition and the response are both stated.",
+              "no": "The condition or the response is missing or vague."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "complete": {
+            "kind": "boolean",
+            "probability": 0.84
+          }
+        },
+        "usage": {
+          "input_tokens": 345,
+          "output_tokens": 20
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "expert",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "has_condition": {
+              "kind": "probability",
+              "value": 1.0
+            },
+            "statement": {
+              "kind": "text",
+              "value": "When the operator requests a report, the system shall produce it promptly."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "complete",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Read the requirement as a test engineer. Does it name the condition that triggers it, if any, and a system response a test could observe and check?",
+              "yes": "A test engineer could write a check from this statement.",
+              "no": "The statement leaves the condition or the response open."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "complete": {
+            "kind": "boolean",
+            "probability": 0.6
+          }
+        },
+        "usage": {
+          "input_tokens": 363,
+          "output_tokens": 20
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "statement": {
+              "kind": "text",
+              "value": "When the operator requests a report, the system shall produce it promptly."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "kind",
+            "question": {
+              "kind": "choice",
+              "instructions": "Which pattern does the requirement follow?",
+              "options": [
+                {
+                  "label": "ubiquitous",
+                  "description": "Always applies; no condition."
+                },
+                {
+                  "label": "event",
+                  "description": "Applies when a trigger occurs (When ...)."
+                },
+                {
+                  "label": "state",
+                  "description": "Applies while a state lasts (While ...)."
+                },
+                {
+                  "label": "unwanted",
+                  "description": "Responds to an unwanted condition (If ... then ...)."
+                }
+              ]
+            }
+          },
+          {
+            "id": "testable",
+            "question": {
+              "kind": "score",
+              "instructions": "How directly could a test check the requirement?",
+              "levels": [
+                "No observable outcome",
+                "Partly observable",
+                "A test can check it directly"
+              ]
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "kind": {
+            "kind": "choice",
+            "selected": "event",
+            "confidence": 1.0,
+            "probabilities": {
+              "event": 1.0,
+              "state": 0.0,
+              "ubiquitous": 0.0,
+              "unwanted": 0.0
+            }
+          },
+          "testable": {
+            "kind": "score",
+            "expected": 1.48,
+            "confidence": 0.27,
+            "probabilities": {
+              "0": 0.0,
+              "1": 0.52,
+              "2": 0.48
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 442,
+          "output_tokens": 65
+        }
+      }
+    },
+    {
+      "request": {
+        "distribution_policy": {
+          "kind": "strict"
+        },
+        "backend": "judge",
+        "model": "jev-1.13.0",
+        "expected_model": "jev-1.13.0",
+        "state": {
+          "kind": "record",
+          "value": {
+            "has_condition": {
+              "kind": "probability",
+              "value": 1.0
+            },
+            "statement": {
+              "kind": "text",
+              "value": "When the operator requests a report, the system shall produce it promptly."
+            }
+          }
+        },
+        "questions": [
+          {
+            "id": "complete",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the requirement name its condition, when it has one, and an observable system response?",
+              "yes": "The condition and the response are both stated.",
+              "no": "The condition or the response is missing or vague."
+            }
+          }
+        ]
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "complete": {
+            "kind": "boolean",
+            "probability": 0.78
+          }
+        },
+        "usage": {
+          "input_tokens": 348,
+          "output_tokens": 20
+        }
+      }
+    }
+  ]
+}
