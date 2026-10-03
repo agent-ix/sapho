@@ -4,7 +4,8 @@
 
 # Sapho
 
-[![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/6qsdhSPE)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/k8DVhuYBR2)
 
 **Make compound decisions with System One models and rules you write.**
 
@@ -395,6 +396,6 @@ Add `--features jev` to include the Jev adapter.
 
 Sapho is licensed under [AGPL-3.0-or-later](LICENSE). Read
 [CONTRIBUTING.md](CONTRIBUTING.md), [content rights](CONTENT_RIGHTS.md) and the
-[CLA](CLA.md) before contributing. Join us on [Discord](https://discord.gg/6qsdhSPE).
+[CLA](CLA.md) before contributing. Join us on [Discord](https://discord.gg/k8DVhuYBR2).
 
 The name comes from the juice Mentats drink to aid their mental calculations.

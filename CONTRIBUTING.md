@@ -29,7 +29,9 @@ when the shared workflow verifies both the opener and every commit author.
 The maintainers team owns all paths. Pull requests to `main` require one
 approving code-owner review; new commits dismiss stale approvals. Force pushes
 and branch deletion are disabled. Administrators retain the org's merge bypass.
+The CLA gate and signature check are required before merging; wholly internal
+pull requests use the verified exemption described above.
 
 ## Questions
 
-Open an issue, or find us on [Discord](https://discord.gg/6qsdhSPE).
+Open an issue, or find us on [Discord](https://discord.gg/k8DVhuYBR2).
