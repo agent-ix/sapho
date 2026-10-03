@@ -208,13 +208,7 @@ make docs-check
 
 This builds warning-free API docs, runs default/all-feature doctests, compiles
 provider examples without invoking them, executes offline Rust and CLI recipes,
-checks YAML/JSON equivalence, checks local documentation links and compares the
-[generated command help](cli-help.md) with the executable. Add an expected-output
-case to the reference manifest whenever adding an example. New operation,
-question, comparator, reducer, provider and command variants must appear in the
-[coverage inventory](feature-coverage.md). To intentionally refresh CLI help:
-
-```sh
-cargo build --locked -p sapho-cli
-python3 scripts/check_docs.py --update-cli-help
-```
+checks YAML/JSON equivalence and checks local documentation links. Add an
+expected-output case to the reference manifest whenever adding an example. New
+operation, question, comparator, reducer, provider and command variants must
+appear in the [coverage inventory](feature-coverage.md).

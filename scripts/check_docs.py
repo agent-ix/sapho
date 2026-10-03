@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Agent-IX
-"""Check local links, feature coverage, CLI help and complete offline recipes."""
-import argparse
+"""Check local links, feature coverage and complete offline recipes."""
 import json
 import math
 import os
@@ -14,9 +13,6 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / "target" / "debug" / ("sapho.exe" if os.name == "nt" else "sapho")
-COMMANDS = [[], ["validate"], ["inspect"], ["run"], ["record"], ["replay"],
-            ["measure"], ["tune"], ["export-training"], ["select"],
-            ["select", "files"], ["select", "git"], ["select", "json"]]
 
 
 def invoke(args, *, data=None, code=0):
@@ -26,18 +22,6 @@ def invoke(args, *, data=None, code=0):
         raise AssertionError(f"sapho {' '.join(map(str, args))}: expected exit {code}, "
                              f"got {completed.returncode}\n{completed.stdout}\n{completed.stderr}")
     return completed.stdout
-
-
-def help_document():
-    parts = ["# Generated CLI help\n\n[Documentation index](index.md) · "
-             "[Explained command reference](cli-reference.md)\n\n"
-             "Generated from the default executable by `scripts/check_docs.py`. "
-             "Refresh deliberately with `--update-cli-help`. "
-             "Commands and flags are identical with optional provider features.\n"]
-    for command in COMMANDS:
-        title = "sapho" + (" " + " ".join(command) if command else "")
-        parts.append(f"\n## `{title}`\n\n```text\n{invoke([*command, '--help']).rstrip()}\n```\n")
-    return "".join(parts)
 
 
 def anchors(path):
@@ -97,10 +81,6 @@ def coverage():
             spelling = variant.replace("_", "-") if enum == "Command" else variant
             if f"`{spelling}`" not in inventory:
                 raise AssertionError(f"Missing coverage entry for {enum}::{variant}")
-    documented_commands = {command[0].replace("-", "_") for command in COMMANDS if len(command) == 1}
-    assert documented_commands == variants("crates/sapho-cli/src/args.rs", "Command"), "CLI help command inventory drift"
-    documented_selectors = {command[1] for command in COMMANDS if len(command) == 2}
-    assert documented_selectors == variants("crates/sapho-cli/src/args.rs", "Selector"), "CLI help selector inventory drift"
     cases = json.loads((ROOT / "examples/reference/cases.json").read_text())
     found = set()
     reducers = set()
@@ -237,20 +217,10 @@ def recipes():
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--update-cli-help", action="store_true")
-    args = parser.parse_args()
-    document = help_document()
-    help_path = ROOT / "docs/cli-help.md"
-    if args.update_cli_help:
-        help_path.write_text(document)
-        print("Updated docs/cli-help.md")
-        return
-    assert help_path.read_text() == document, "CLI help drift; rebuild and run --update-cli-help"
     coverage()
     links()
     recipes()
-    print("Documentation links, feature coverage, CLI help and offline recipes verified")
+    print("Documentation links, feature coverage and offline recipes verified")
 
 
 if __name__ == "__main__":

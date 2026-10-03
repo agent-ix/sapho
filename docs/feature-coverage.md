@@ -4,7 +4,7 @@
 
 This inventory follows the exported Rust API families, graph vocabulary and
 CLI command surface. Each row has a user reference and an executable example.
-`make docs-check` validates examples and command help; source-variant checks
+`make docs-check` validates examples; source-variant checks
 require new graph/model/CLI variants to be explicitly added to this inventory.
 Individual public symbols have generated rustdoc, and each leaf crate has a
 compiled crate-level usage example.
@@ -30,8 +30,8 @@ compiled crate-level usage example.
 | Provider `clm`, ClmBackend, Limits, Transport, endpoint/auth, confidence/usage | [Adapters](api-reference.md#model-adapters) | [CLM configure](../crates/sapho-clm/examples/clm_configure.rs), compiled only; [live CLI setup](cli-guide.md#bind-clm-explicitly) |
 | System One codec, Boolean/choice/score conversion, source-free state | [Codec](api-reference.md#model-adapters) | systemone doctest; real adapter tests |
 | CLI host Runner/Inspection/RunReport/ExitStatus, format/I/O/artifacts, bindings and credential resolution | [Embedding](api-reference.md#cli-embedding-apis) | CLI host doctest; process recipes; existing host credential tests |
-| Commands `validate`, `inspect`, `run`, `record`, `replay`, `measure`, `tune`, `export-training`, `select`; selectors `files`, `git`, `json` | [CLI reference](cli-reference.md) | [recipes](examples.md); every command exercised by check_docs.py; [help snapshot](cli-help.md) |
-| All CLI options/defaults, plain/typed input, limits, artifacts and exits | [CLI reference](cli-reference.md) | help snapshot comparison; CLI recipe checks |
+| Commands `validate`, `inspect`, `run`, `record`, `replay`, `measure`, `tune`, `export-training`, `select`; selectors `files`, `git`, `json` | [CLI reference](cli-reference.md) | [recipes](examples.md); every command exercised by check_docs.py; `sapho COMMAND --help` |
+| All CLI options/defaults, plain/typed input, limits, artifacts and exits | [CLI reference](cli-reference.md) | CLI recipe checks; `sapho COMMAND --help` |
 | Plugin create/tune/record workflows | [Plugin usage](../README.md#use-the-skills-in-claude-code) | [create skill](../plugins/sapho/skills/create/SKILL.md), [tune skill](../plugins/sapho/skills/tune/SKILL.md), [record skill](../plugins/sapho/skills/record/SKILL.md); underlying CLI recipes |
 
 Live provider inference and loading the Claude plugin require external services
