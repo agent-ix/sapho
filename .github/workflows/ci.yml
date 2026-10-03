@@ -20,6 +20,7 @@ jobs:
       - run: cargo test --workspace --no-default-features
       - run: bash scripts/check_unsafe_comments.sh
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+      - run: make docs-examples
       - run: cargo build --workspace --release --all-features
   supply-chain:
     runs-on: ubuntu-24.04

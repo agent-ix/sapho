@@ -3,6 +3,9 @@
 
 # Sapho user guide
 
+[Documentation index](index.md) · [API reference](api-reference.md) ·
+[Graph reference](graph-reference.md) · [Runnable examples](examples.md)
+
 Sapho evaluates a configured graph of Rust functions, model questions and logic.
 You supply the domain: what counts as an item, what to ask, how answers combine
 and what the final decision means. This guide takes you from an offline graph
@@ -854,7 +857,7 @@ can grow as left-count × right-count; filter candidates before pairing when
 your domain allows it. Limits apply across nested maps. Counts are checked
 before collection expansion; a failed limit returns structured evidence.
 
-Graph loading also caps TOML at 1 MiB, graph definitions at 4096 nodes,
+Graph loading also caps YAML/JSON configuration at 1 MiB, graph definitions at 4096 nodes,
 map nesting at 16 and value/type nesting at 32. Execution limits account for
 work and data; they are not a process-memory sandbox. Host-native functions
 must bound their own allocations and cooperate with cancellation. Pending
@@ -1020,8 +1023,10 @@ has `answers` and `model`, and `code`, whose ports come from its signature.
 Port names and types must match exactly. Value types include Boolean, Number,
 Text, Probability, Degree, List, Record, Questions, Answers and Optional.
 
-| TOML `kind` | Parameters | Input ports | Output |
+| YAML/JSON `kind` | Parameters | Input ports | Output |
 |---|---|---|---|
+| `record` | None | Named typed operands | Exact Record |
+| `list` | `item_type`, `order` | Homogeneous named operands | Ordered List |
 | `code` | `primitive`, optional typed `params` | Registered signature | Registered signature |
 | `questions` | Ordered `questions` | None | Questions |
 | `ask` | `backend` | `state: Record`, `questions: Questions` | Answers and actual model Text |
@@ -1040,7 +1045,7 @@ Text, Probability, Degree, List, Record, Questions, Answers and Optional.
 | `coalesce` | None | `value: Optional(T)`, `default: T` | T |
 
 `min`, `max` and `weighted_mean` are reducer parameters, not operation kinds.
-Similarly, comparisons use `kind = "compare"` plus a `comparator` parameter.
+Similarly, comparisons use `kind: compare` plus a `comparator` parameter.
 Record schemas declare exact fields; list and optional schemas declare their
 inner type. Literals include a datum and an explicit `value_type`, including
 for empty collections. Unknown configuration fields are rejected.
@@ -1053,8 +1058,10 @@ particular, consult [core](../spec/modules/core/spec.md) for value and answer
 validation, [logic](../spec/modules/logic/spec.md) for combination semantics,
 and [recording](../spec/modules/recording/spec.md) for replay identity.
 
-For public Rust API documentation, run `cargo doc --no-deps --open` in a
-checkout, adding `--features jev` when needed. To contribute to Sapho itself,
+For the complete public Rust API documentation, run `make docs` and open
+`target/doc/sapho/index.html`; this includes both adapters and every leaf crate.
+The [API reference](api-reference.md) explains the public API families and
+[graph reference](graph-reference.md) provides operation examples. To contribute to Sapho itself,
 follow [CONTRIBUTING.md](../CONTRIBUTING.md) and the repository's development
 commands. The [AGPL license](../LICENSE), [CLA](../CLA.md) and
 [content rights](../CONTENT_RIGHTS.md) describe contribution terms.

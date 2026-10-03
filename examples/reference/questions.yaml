@@ -1,0 +1,140 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+inputs:
+  text:
+    kind: text
+nodes:
+- id: questions
+  operation:
+    kind: questions
+    questions:
+    - id: observable
+      question:
+        kind: boolean
+        instructions: Does the text name an observable action?
+        'yes': Observable action
+        'no': No observable action
+    - id: role
+      question:
+        kind: choice
+        instructions: Which role is present?
+        options:
+        - label: actor
+          description: An actor
+        - label: other
+          description: Another role
+    - id: quality
+      question:
+        kind: score
+        instructions: How explicit is the action?
+        levels:
+        - Absent
+        - Implied
+        - Explicit
+  inputs: {}
+- id: context
+  operation:
+    kind: record
+  inputs:
+    text:
+      kind: input
+      name: text
+- id: judge
+  operation:
+    kind: ask
+    backend: judge
+  inputs:
+    state:
+      kind: node
+      node: context
+      port: result
+    questions:
+      kind: node
+      node: questions
+      port: result
+- id: observable
+  operation:
+    kind: probability
+    question: observable
+    labels:
+    - 'true'
+  inputs:
+    answers:
+      kind: node
+      node: judge
+      port: answers
+- id: actor
+  operation:
+    kind: probability
+    question: role
+    labels:
+    - actor
+  inputs:
+    answers:
+      kind: node
+      node: judge
+      port: answers
+- id: explicit
+  operation:
+    kind: probability
+    question: quality
+    labels:
+    - '2'
+  inputs:
+    answers:
+      kind: node
+      node: judge
+      port: answers
+- id: second_context
+  operation:
+    kind: record
+  inputs:
+    text:
+      kind: input
+      name: text
+    support:
+      kind: node
+      node: observable
+      port: result
+- id: second_judge
+  operation:
+    kind: ask
+    backend: judge
+  inputs:
+    state:
+      kind: node
+      node: second_context
+      port: result
+    questions:
+      kind: node
+      node: questions
+      port: result
+- id: second_support
+  operation:
+    kind: probability
+    question: observable
+    labels:
+    - 'true'
+  inputs:
+    answers:
+      kind: node
+      node: second_judge
+      port: answers
+outputs:
+  observable:
+    kind: node
+    node: observable
+    port: result
+  actor:
+    kind: node
+    node: actor
+    port: result
+  explicit:
+    kind: node
+    node: explicit
+    port: result
+  second_support:
+    kind: node
+    node: second_support
+    port: result
+subgraphs: {}

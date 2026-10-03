@@ -1,6 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! One source-free request translator for verified System One compatible providers.
+//!
+//! # Translate without making a request
+//!
+//! ```
+//! use sapho_core::{BackendId, DistributionPolicy, ModelRequest, Value};
+//! let request = ModelRequest {
+//!     backend: BackendId::new("judge")?, model: "clm-latest".into(), expected_model: None,
+//!     distribution_policy: DistributionPolicy::Strict {},
+//!     state: Value::Record(Default::default()), questions: vec![],
+//! };
+//! let _sdk_request = sapho_systemone::build_request(&request)?;
+//! # Ok::<(), sapho_core::SaphoError>(())
+//! ```
+//!
+//! State is plain JSON without Datum IDs or source sidecars. Boolean questions
+//! become Noul criteria, choice options retain ordered labels and score levels
+//! retain ordered rubric positions. Transport, credentials and response decoding
+//! belong to provider adapters, not this codec.
 use sapho_core::{ModelRequest, Question, Result};
 use typesafe_sdk_client::SystemOneRequest;
 use typesafe_sdk_questions::{Entry, NoulCriteria, Question as SdkQuestion, Questions};

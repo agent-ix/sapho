@@ -1,0 +1,226 @@
+[
+  {
+    "name": "facts",
+    "input": {},
+    "expected": {
+      "both": false,
+      "either": true,
+      "reverse": false,
+      "equal": false,
+      "less": true,
+      "less_equal": true,
+      "greater": false,
+      "greater_equal": false,
+      "context": {
+        "flag": true,
+        "label": "review"
+      },
+      "projected": false,
+      "ordered": [
+        "A",
+        "B"
+      ]
+    }
+  },
+  {
+    "name": "strengths",
+    "input": {
+      "samples": [
+        {
+          "support": 0.8,
+          "weight": 2
+        },
+        {
+          "support": 0.4,
+          "weight": 1
+        },
+        {
+          "support": 0.6,
+          "weight": 1
+        }
+      ]
+    },
+    "expected": {
+      "min": 0.4,
+      "max": 0.8,
+      "weighted_mean": 0.65,
+      "concern": 0.35,
+      "empty": 0.2
+    }
+  },
+  {
+    "name": "collections",
+    "input": {
+      "left": [
+        {
+          "key": "lamp",
+          "score": 0.9
+        },
+        {
+          "key": "motor",
+          "score": 0.3
+        }
+      ],
+      "right": [
+        {
+          "key": "lamp",
+          "score": 1
+        },
+        {
+          "key": "other",
+          "score": 1
+        }
+      ],
+      "groups": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c"
+        ]
+      ]
+    },
+    "expected": {
+      "mask": [
+        true,
+        false
+      ],
+      "selected": [
+        {
+          "key": "lamp",
+          "score": 0.9
+        }
+      ],
+      "candidates": [
+        {
+          "left": {
+            "key": "lamp",
+            "score": 0.9
+          },
+          "right": {
+            "key": "lamp",
+            "score": 1
+          }
+        },
+        {
+          "left": {
+            "key": "lamp",
+            "score": 0.9
+          },
+          "right": {
+            "key": "other",
+            "score": 1
+          }
+        }
+      ],
+      "related": [
+        {
+          "left": {
+            "key": "lamp",
+            "score": 0.9
+          },
+          "right": {
+            "key": "lamp",
+            "score": 1
+          }
+        }
+      ],
+      "flat": [
+        "a",
+        "b",
+        "c"
+      ]
+    }
+  },
+  {
+    "name": "guards",
+    "input": {
+      "enabled": false,
+      "flag": true
+    },
+    "expected": {
+      "optional": null,
+      "decision": true
+    },
+    "alternate": {
+      "input": {
+        "enabled": true,
+        "flag": true
+      },
+      "expected": {
+        "optional": false,
+        "decision": false
+      }
+    }
+  },
+  {
+    "name": "questions",
+    "input": {
+      "text": "The controller illuminates the warning lamp."
+    },
+    "expected": {
+      "observable": 0.8,
+      "actor": 0.75,
+      "explicit": 0.75,
+      "second_support": 0.8
+    },
+    "backend": true
+  },
+  {
+    "name": "model-collection",
+    "input": {
+      "items": [
+        {
+          "text": "Lamp turns on"
+        },
+        {
+          "text": "Motor stops"
+        }
+      ]
+    },
+    "expected": {
+      "selected": [
+        {
+          "text": "Lamp turns on"
+        },
+        {
+          "text": "Motor stops"
+        }
+      ]
+    },
+    "backend": true
+  },
+  {
+    "name": "native",
+    "input": {
+      "text": "lamp"
+    },
+    "expected": {
+      "length": 4
+    },
+    "native": true
+  },
+  {
+    "name": "guarded-model",
+    "input": {
+      "text": "Lamp turns on",
+      "enabled": false
+    },
+    "expected": {
+      "support": 0.0,
+      "model": "skipped"
+    },
+    "backend": true,
+    "alternate": {
+      "input": {
+        "text": "Lamp turns on",
+        "enabled": true
+      },
+      "expected": {
+        "support": 0.8,
+        "model": "tutorial-1"
+      }
+    }
+  }
+]

@@ -1,6 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Explicit bounded host acquisition; never graph execution or inference.
+//!
+//! # Project JSON under an explicit schema
+//!
+//! ```
+//! use sapho_core::{Value, ValueType};
+//! use sapho_select::select_json;
+//! let inputs = select_json(br#"{"records":["lamp","motor"]}"#, "/records",
+//!     &ValueType::list(ValueType::Text), "requirements", "items", "tutorial.json", 1024)?;
+//! assert!(matches!(inputs.get("items").map(|d| &d.value), Some(Value::List(items)) if items.len() == 2));
+//! assert!(inputs.get("items").is_some_and(|d| !d.sources.is_empty()));
+//! # Ok::<(), sapho_select::SelectionError>(())
+//! ```
+//!
+//! [`select_files`] acquires sorted regular text files; [`select_git`] acquires
+//! complete tracked patches with explicit [`GitMode`]. Call acquisition outside
+//! Tokio workers, using finite [`SelectionLimits`]. No selector runs a model.
 mod files;
 mod git;
 mod json;

@@ -23,7 +23,7 @@ so you can see how a decision was made, measure it against labelled examples,
 and improve the rule.
 
 [CLI setup](#install-the-cli) · [Rust integration](#use-sapho-in-a-rust-project) ·
-[Claude Code](#use-the-skills-in-claude-code) · [User guide](docs/user-guide.md)
+[Claude Code](#use-the-skills-in-claude-code) · [Documentation](docs/index.md)
 
 ## How it works
 
@@ -381,6 +381,9 @@ the backend configuration described above.
 
 ## Guides and reference
 
+- [Documentation index](docs/index.md): quickstarts, API and graph references,
+  command options, runnable examples and feature coverage.
+
 - [CLI guide](docs/cli-guide.md): commands, input gathering, model bindings,
   recording, replay, measurement, tuning and training export.
 - [Rust user guide](docs/user-guide.md): complete examples, question types,
@@ -389,8 +392,9 @@ the backend configuration described above.
   execution, logic, evidence and extensions. Use these when implementing an
   adapter or checking a boundary condition.
 
-Generate local API documentation with `cargo doc --no-deps --open`.
-Add `--features jev` to include the Jev adapter.
+Generate the complete local API documentation with `make docs`, then open
+`target/doc/sapho/index.html`. Run `make docs-check` to verify the examples.
+See the [Rust API reference](docs/api-reference.md) for crate choices and API workflows.
 
 ## License and contributions
 

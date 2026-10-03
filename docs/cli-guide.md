@@ -1,5 +1,8 @@
 # Use Sapho from the command line
 
+[Documentation index](index.md) · [Command reference](cli-reference.md) ·
+[Runnable examples](examples.md)
+
 Sapho connects model questions, typed data and explicit logic in a configurable graph. Use YAML to author a graph and JSON for generated programs and data. The CLI invokes the same compiler and engine as Rust embedding, so a graph has the same behavior in either host.
 
 The [embedding guide](user-guide.md) explains questions, combiners, collections, guards and custom Rust extensions. Start here when your inputs and operations are data-only.

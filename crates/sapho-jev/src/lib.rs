@@ -1,6 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Hosted System One adapter over the authoritative SDK (FR-025/026).
+//!
+//! # Supply an SDK client
+//!
+//! ```no_run
+//! use std::sync::Arc;
+//! use typesafe_sdk_client::Client;
+//! use typesafe_sdk_config::Builder;
+//! use typesafe_sdk_env::Process;
+//! use typesafe_sdk_http::Reqwest;
+//! let config = Builder::new().build(&Process)?;
+//! let client = Client::with_transport(config, Arc::new(Reqwest::new()?));
+//! let _backend = sapho_jev::JevBackend::new(client);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! Resolve credentials and endpoint configuration in the synchronous host.
+//! Register this backend with a core BackendBinding that chooses the model and
+//! distribution policy. Inference disables SDK retries and returns raw typed
+//! responses for core validation; provider error bodies are omitted from diagnostics.
 use async_trait::async_trait;
 use sapho_core::{
     Answer, ErrorCode, ModelBackend, ModelRequest, ModelResponse, Probability, Result, SaphoError,

@@ -1,0 +1,394 @@
+{
+  "inputs": {},
+  "nodes": [
+    {
+      "id": "both",
+      "operation": {
+        "kind": "and"
+      },
+      "inputs": {
+        "a": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "boolean",
+              "value": true
+            }
+          },
+          "value_type": {
+            "kind": "boolean"
+          }
+        },
+        "b": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "boolean",
+              "value": false
+            }
+          },
+          "value_type": {
+            "kind": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "id": "either",
+      "operation": {
+        "kind": "or"
+      },
+      "inputs": {
+        "a": {
+          "kind": "node",
+          "node": "both",
+          "port": "result"
+        },
+        "b": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "boolean",
+              "value": true
+            }
+          },
+          "value_type": {
+            "kind": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "id": "reverse",
+      "operation": {
+        "kind": "not"
+      },
+      "inputs": {
+        "value": {
+          "kind": "node",
+          "node": "either",
+          "port": "result"
+        }
+      }
+    },
+    {
+      "id": "equal",
+      "operation": {
+        "kind": "compare",
+        "comparator": "equal"
+      },
+      "inputs": {
+        "a": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 2
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        },
+        "b": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 3
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    {
+      "id": "less",
+      "operation": {
+        "kind": "compare",
+        "comparator": "less"
+      },
+      "inputs": {
+        "a": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 2
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        },
+        "b": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 3
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    {
+      "id": "less_equal",
+      "operation": {
+        "kind": "compare",
+        "comparator": "less_equal"
+      },
+      "inputs": {
+        "a": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 2
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        },
+        "b": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 3
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    {
+      "id": "greater",
+      "operation": {
+        "kind": "compare",
+        "comparator": "greater"
+      },
+      "inputs": {
+        "a": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 2
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        },
+        "b": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 3
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    {
+      "id": "greater_equal",
+      "operation": {
+        "kind": "compare",
+        "comparator": "greater_equal"
+      },
+      "inputs": {
+        "a": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 2
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        },
+        "b": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 3
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    {
+      "id": "context",
+      "operation": {
+        "kind": "record"
+      },
+      "inputs": {
+        "flag": {
+          "kind": "node",
+          "node": "either",
+          "port": "result"
+        },
+        "label": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "text",
+              "value": "review"
+            }
+          },
+          "value_type": {
+            "kind": "text"
+          }
+        }
+      }
+    },
+    {
+      "id": "projected",
+      "operation": {
+        "kind": "not"
+      },
+      "inputs": {
+        "value": {
+          "kind": "node",
+          "node": "context",
+          "port": "result",
+          "path": [
+            "flag"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ordered",
+      "operation": {
+        "kind": "list",
+        "item_type": {
+          "kind": "text"
+        },
+        "order": [
+          "first",
+          "second"
+        ]
+      },
+      "inputs": {
+        "second": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "text",
+              "value": "B"
+            }
+          },
+          "value_type": {
+            "kind": "text"
+          }
+        },
+        "first": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "text",
+              "value": "A"
+            }
+          },
+          "value_type": {
+            "kind": "text"
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "both": {
+      "kind": "node",
+      "node": "both",
+      "port": "result"
+    },
+    "either": {
+      "kind": "node",
+      "node": "either",
+      "port": "result"
+    },
+    "reverse": {
+      "kind": "node",
+      "node": "reverse",
+      "port": "result"
+    },
+    "equal": {
+      "kind": "node",
+      "node": "equal",
+      "port": "result"
+    },
+    "less": {
+      "kind": "node",
+      "node": "less",
+      "port": "result"
+    },
+    "less_equal": {
+      "kind": "node",
+      "node": "less_equal",
+      "port": "result"
+    },
+    "greater": {
+      "kind": "node",
+      "node": "greater",
+      "port": "result"
+    },
+    "greater_equal": {
+      "kind": "node",
+      "node": "greater_equal",
+      "port": "result"
+    },
+    "context": {
+      "kind": "node",
+      "node": "context",
+      "port": "result"
+    },
+    "projected": {
+      "kind": "node",
+      "node": "projected",
+      "port": "result"
+    },
+    "ordered": {
+      "kind": "node",
+      "node": "ordered",
+      "port": "result"
+    }
+  },
+  "subgraphs": {}
+}

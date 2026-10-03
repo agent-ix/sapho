@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+inputs:
+  enabled:
+    kind: boolean
+  flag:
+    kind: boolean
+nodes:
+- id: conditional
+  operation:
+    kind: not
+  inputs:
+    value:
+      kind: input
+      name: flag
+  guard:
+    kind: input
+    name: enabled
+- id: fallback
+  operation:
+    kind: coalesce
+  inputs:
+    value:
+      kind: node
+      node: conditional
+      port: result
+    default:
+      kind: literal
+      value:
+        id: constant
+        value:
+          kind: boolean
+          value: true
+      value_type:
+        kind: boolean
+outputs:
+  optional:
+    kind: node
+    node: conditional
+    port: result
+  decision:
+    kind: node
+    node: fallback
+    port: result
+subgraphs: {}

@@ -1,0 +1,210 @@
+{
+  "inputs": {
+    "left": {
+      "kind": "list",
+      "item": {
+        "kind": "record",
+        "fields": {
+          "key": {
+            "kind": "text"
+          },
+          "score": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    "right": {
+      "kind": "list",
+      "item": {
+        "kind": "record",
+        "fields": {
+          "key": {
+            "kind": "text"
+          },
+          "score": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    "groups": {
+      "kind": "list",
+      "item": {
+        "kind": "list",
+        "item": {
+          "kind": "text"
+        }
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "mask",
+      "operation": {
+        "kind": "map",
+        "graph": "keep"
+      },
+      "inputs": {
+        "items": {
+          "kind": "input",
+          "name": "left"
+        },
+        "cutoff": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "number",
+              "value": 0.7
+            }
+          },
+          "value_type": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    {
+      "id": "selected",
+      "operation": {
+        "kind": "filter"
+      },
+      "inputs": {
+        "items": {
+          "kind": "input",
+          "name": "left"
+        },
+        "mask": {
+          "kind": "node",
+          "node": "mask",
+          "port": "result"
+        }
+      }
+    },
+    {
+      "id": "candidates",
+      "operation": {
+        "kind": "pairs"
+      },
+      "inputs": {
+        "left": {
+          "kind": "node",
+          "node": "selected",
+          "port": "result"
+        },
+        "right": {
+          "kind": "input",
+          "name": "right"
+        }
+      }
+    },
+    {
+      "id": "related",
+      "operation": {
+        "kind": "join",
+        "left_key": "key",
+        "right_key": "key"
+      },
+      "inputs": {
+        "left": {
+          "kind": "node",
+          "node": "selected",
+          "port": "result"
+        },
+        "right": {
+          "kind": "input",
+          "name": "right"
+        }
+      }
+    },
+    {
+      "id": "flat",
+      "operation": {
+        "kind": "collect"
+      },
+      "inputs": {
+        "items": {
+          "kind": "input",
+          "name": "groups"
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "mask": {
+      "kind": "node",
+      "node": "mask",
+      "port": "result"
+    },
+    "selected": {
+      "kind": "node",
+      "node": "selected",
+      "port": "result"
+    },
+    "candidates": {
+      "kind": "node",
+      "node": "candidates",
+      "port": "result"
+    },
+    "related": {
+      "kind": "node",
+      "node": "related",
+      "port": "result"
+    },
+    "flat": {
+      "kind": "node",
+      "node": "flat",
+      "port": "result"
+    }
+  },
+  "subgraphs": {
+    "keep": {
+      "inputs": {
+        "item": {
+          "kind": "record",
+          "fields": {
+            "key": {
+              "kind": "text"
+            },
+            "score": {
+              "kind": "number"
+            }
+          }
+        },
+        "cutoff": {
+          "kind": "number"
+        }
+      },
+      "nodes": [
+        {
+          "id": "test",
+          "operation": {
+            "kind": "compare",
+            "comparator": "greater_equal"
+          },
+          "inputs": {
+            "a": {
+              "kind": "input",
+              "name": "item",
+              "path": [
+                "score"
+              ]
+            },
+            "b": {
+              "kind": "input",
+              "name": "cutoff"
+            }
+          }
+        }
+      ],
+      "outputs": {
+        "result": {
+          "kind": "node",
+          "node": "test",
+          "port": "result"
+        }
+      }
+    }
+  }
+}

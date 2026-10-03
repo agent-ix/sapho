@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+inputs:
+  samples:
+    kind: list
+    item:
+      kind: record
+      fields:
+        support:
+          kind: probability
+        weight:
+          kind: number
+nodes:
+- id: degrees
+  operation:
+    kind: map
+    graph: degrees
+  inputs:
+    items:
+      kind: input
+      name: samples
+- id: weights
+  operation:
+    kind: map
+    graph: weights
+  inputs:
+    items:
+      kind: input
+      name: samples
+- id: min
+  operation:
+    kind: reduce
+    reducer: min
+    empty: 0.2
+  inputs:
+    values:
+      kind: node
+      node: degrees
+      port: result
+- id: max
+  operation:
+    kind: reduce
+    reducer: max
+    empty: 0.2
+  inputs:
+    values:
+      kind: node
+      node: degrees
+      port: result
+- id: weighted_mean
+  operation:
+    kind: reduce
+    reducer: weighted_mean
+    empty: 0.2
+  inputs:
+    values:
+      kind: node
+      node: degrees
+      port: result
+    weights:
+      kind: node
+      node: weights
+      port: result
+- id: concern
+  operation:
+    kind: complement
+  inputs:
+    value:
+      kind: node
+      node: weighted_mean
+      port: result
+- id: empty
+  operation:
+    kind: reduce
+    reducer: min
+    empty: 0.2
+  inputs:
+    values:
+      kind: literal
+      value:
+        id: constant
+        value:
+          kind: list
+          value: []
+      value_type:
+        kind: list
+        item:
+          kind: degree
+outputs:
+  min:
+    kind: node
+    node: min
+    port: result
+  max:
+    kind: node
+    node: max
+    port: result
+  weighted_mean:
+    kind: node
+    node: weighted_mean
+    port: result
+  concern:
+    kind: node
+    node: concern
+    port: result
+  empty:
+    kind: node
+    node: empty
+    port: result
+subgraphs:
+  degrees:
+    inputs:
+      item:
+        kind: record
+        fields:
+          support:
+            kind: probability
+          weight:
+            kind: number
+    nodes:
+    - id: convert
+      operation:
+        kind: degree
+      inputs:
+        value:
+          kind: input
+          name: item
+          path:
+          - support
+    outputs:
+      result:
+        kind: node
+        node: convert
+        port: result
+  weights:
+    inputs:
+      item:
+        kind: record
+        fields:
+          support:
+            kind: probability
+          weight:
+            kind: number
+    nodes: []
+    outputs:
+      result:
+        kind: input
+        name: item
+        path:
+        - weight

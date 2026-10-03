@@ -1,0 +1,11 @@
+{
+  "kind": "list",
+  "item": {
+    "kind": "record",
+    "fields": {
+      "text": {
+        "kind": "text"
+      }
+    }
+  }
+}
