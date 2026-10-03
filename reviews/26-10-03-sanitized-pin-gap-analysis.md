@@ -29,3 +29,7 @@ The existing FR-046 shared-foundation allocation and the CLI credential/offline 
 The producer's rewritten commit is a new source identity even though runtime blobs match. Both Cargo references must change together and the revision must be fetched before consumer handoff. These conditions were verified without changing the producer checkout or copying producer source into Sapho. The remaining host-level constraint is explicit: authenticated fetching from a private repository does not prove anonymous public usability. Sapho stays private until the producer resolves retained GitHub pages, publishes and supplies visibility evidence; Sapho must then verify access independently.
 
 No retro repository or global skill was modified. The authorized scope prohibits cross-repository copies of private artifacts; this bounded transition has no application-specification gap to archive elsewhere.
+
+## Publication condition resolved
+
+After review, the dependency owner reported Peter's explicit approval to publish with GitHub-retained historical pages accepted. Independent anonymous API, Git fetch and pinned-manifest checks confirmed the dependency is public and the approved revision is available. This resolves the earlier external release condition; it does not replace Sapho's own final visibility and repository-setting verification.
