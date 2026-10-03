@@ -11,6 +11,9 @@ show the same lettering without loading fonts. Markdown embeds each pair with
     python3 docs/images/diagrams.py
 
 The Plex fonts (SIL Open Font License) download once into docs/images/.fonts/.
+Animated figures play with CSS (no script, so they run inside GitHub's <img>)
+and also get a NAME-still pair, their resting state, for "Show the whole
+diagram" toggles. Readers who prefer reduced motion see that resting state.
 Model answers in the figures are read from the recordings in examples/recordings/.
 """
 
@@ -113,60 +116,93 @@ def esc(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-class Figure:
-    """A fixed-size drawing whose colours resolve per theme at render time."""
+FADE = 0.2  # seconds an animated element takes to light up or fade
 
-    def __init__(self, name, width, height, label):
+
+class Figure:
+    """A fixed-size drawing whose colours resolve per theme at render time.
+
+    With a `cycle` (seconds), elements can carry animation windows: "lit"
+    elements are dimmed outside their windows, "appear" elements are hidden
+    outside theirs, and tokens travel along an edge. Without animation every
+    element shows its static state, which is also what readers who prefer
+    reduced motion see.
+    """
+
+    def __init__(self, name, width, height, label, cycle=None, still_label=None):
         self.name = name
         self.width = width
         self.height = height
         self.label = label
+        self.still_label = still_label or label
+        self.cycle = cycle
         self.items = []
+        self.anim = {}
+
+    def _add(self, item, anim=None):
+        self.items.append(item)
+        if anim:
+            if self.cycle is None:
+                raise ValueError(f"{self.name}: animation needs a cycle")
+            self.anim[len(self.items) - 1] = anim
 
     # ---- primitives -------------------------------------------------------
-    def text(self, x, y, s, role="ink", font="mono", size=LABEL, anchor="start"):
+    def text(self, x, y, s, role="ink", font="mono", size=LABEL, anchor="start", anim=None):
         w = FONTS[font].width(s, size)
         x0 = {"start": x, "middle": x - w / 2, "end": x - w}[anchor]
         if x0 < -MARGIN or x0 + w > self.width + MARGIN or y - size < -MARGIN or y > self.height + MARGIN:
             raise ValueError(f"{self.name}: text {s!r} leaves the canvas")
-        self.items.append(("text", x0, y, s, role, font, size))
+        self._add(("text", x0, y, s, role, font, size), anim)
         return w
 
-    def rect(self, x, y, w, h, role, dashed=False, fill=True, stroke=True, weight=None, opacity=None, rx=4):
-        self.items.append(("rect", x, y, w, h, role, dashed, fill, stroke, weight, opacity, rx))
+    def rect(self, x, y, w, h, role, dashed=False, fill=True, stroke=True, weight=None, opacity=None, rx=4, anim=None):
+        self._add(("rect", x, y, w, h, role, dashed, fill, stroke, weight, opacity, rx), anim)
 
-    def line(self, points, role="ink", weight=1.5, dashed=False, arrow=True):
-        self.items.append(("line", points, role, weight, dashed, arrow))
+    def line(self, points, role="ink", weight=1.5, dashed=False, arrow=True, anim=None):
+        self._add(("line", points, role, weight, dashed, arrow), anim)
 
     def dot(self, cx, cy, r, role, filled=True):
-        self.items.append(("dot", cx, cy, r, role, filled))
+        self._add(("dot", cx, cy, r, role, filled))
 
     def bar(self, x, y, w, h, role):
         """A horizontal bar anchored at x with a rounded data end."""
         if w <= 0:
             return
-        self.items.append(("bar", x, y, w, h, role))
+        self._add(("bar", x, y, w, h, role))
+
+    def token(self, points, role, start, end):
+        """A dot that travels along `points` between `start` and `end` seconds."""
+        self._add(("token", points, role), ("token", points, start, end))
 
     # ---- composites ------------------------------------------------------
-    def box(self, x, y, w, h, role, title, *subs, dashed=False, sub_role="muted"):
-        """A node: tinted box, title in the role colour, muted sub-lines."""
-        self.rect(x, y, w, h, role, dashed=dashed, fill=role != "ink")
+    def box(self, x, y, w, h, role, title, *subs, dashed=False, sub_role="muted", lit=None):
+        """A node: tinted box, title in the role colour, muted sub-lines.
+
+        A title or sub-line may be a list of (text, windows, static) variants
+        that appear only during their windows; `lit` dims the rest outside
+        its windows.
+        """
+        glow = ("lit", lit) if lit else None
+        self.rect(x, y, w, h, role, dashed=dashed, fill=role != "ink", anim=glow)
         lines = [(title, "title", TITLE, role)] + [(s, "mono", SMALL, sub_role) for s in subs]
         heights = [19 if f == "title" else 17 for _, f, _, _ in lines]
         if sum(heights) + 8 > h:
-            raise ValueError(f"{self.name}: box {title!r} is too short")
+            raise ValueError(f"{self.name}: box {lines[0][0]!r} is too short")
         top = y + (h - sum(heights)) / 2
         for (s, f, size, r), lh in zip(lines, heights):
-            need = FONTS[f].width(s, size) + 16
-            if need > w:
-                raise ValueError(f"{self.name}: {s!r} needs {need:.0f}px, box is {w}px")
-            self.text(x + w / 2, top + lh * 0.74, s, r, f, size, "middle")
+            variants = s if isinstance(s, list) else [(s, None, True)]
+            for text, windows, static in variants:
+                need = FONTS[f].width(text, size) + 16
+                if need > w:
+                    raise ValueError(f"{self.name}: {text!r} needs {need:.0f}px, box is {w}px")
+                anim = ("appear", windows, static) if windows else glow
+                self.text(x + w / 2, top + lh * 0.74, text, r, f, size, "middle", anim)
             top += lh
 
-    def note(self, x, y, s, role, sub=None, anchor="start"):
-        self.text(x, y, s, role, "mono", LABEL, anchor)
+    def note(self, x, y, s, role, sub=None, anchor="start", anim=None):
+        self.text(x, y, s, role, "mono", LABEL, anchor, anim)
         if sub:
-            self.text(x, y + 16, sub, "muted", "mono", SMALL, anchor)
+            self.text(x, y + 16, sub, "muted", "mono", SMALL, anchor, anim)
 
     def legend(self, x, y, entries):
         for role, s, kind in entries:
@@ -180,14 +216,52 @@ class Figure:
             w = self.text(x + 17, y, s, "muted", "mono", SMALL)
             x += 17 + w + 24
 
+    # ---- animation -------------------------------------------------------
+    def _pct(self, t):
+        return f"{100 * min(max(t, 0), self.cycle) / self.cycle:.3f}".rstrip("0").rstrip(".")
+
+    def _keyframes(self, idx, spec):
+        if spec[0] == "token":
+            _, points, start, end = spec
+            lengths = [abs(bx - ax) + abs(by - ay) for (ax, ay), (bx, by) in zip(points, points[1:])]
+            total = sum(lengths)
+            frames = [(0, points[0], 0), (start - 0.01, points[0], 0), (start, points[0], 1)]
+            done = 0
+            for length, point in zip(lengths, points[1:]):
+                done += length
+                frames.append((start + (end - start) * done / total, point, 1))
+            frames += [(end + 0.15, points[-1], 0), (self.cycle, points[-1], 0)]
+            body = " ".join(
+                f"{self._pct(t)}%{{transform:translate({num(px)}px,{num(py)}px);opacity:{o}}}"
+                for t, (px, py), o in frames
+            )
+        else:
+            mode, windows = spec[0], spec[1]
+            off = 0.22 if mode == "lit" else 0
+            frames = [(0, off)]
+            for start, end in windows:
+                frames += [(start - FADE, off), (start, 1), (end, 1), (end + FADE, off)]
+            frames.append((self.cycle, off))
+            body = " ".join(f"{self._pct(t)}%{{opacity:{o}}}" for t, o in frames)
+        return f"@keyframes k{idx}{{{body}}}.a{idx}{{animation:k{idx} {num(self.cycle)}s linear infinite}}"
+
+    def _cls(self, idx):
+        spec = self.anim.get(idx)
+        if spec is None:
+            return ""
+        hidden = spec[0] == "token" or (spec[0] == "appear" and not spec[2])
+        return f' class="a{idx}"' + (' opacity="0"' if hidden else "")
+
     # ---- rendering -------------------------------------------------------
-    def render(self, theme):
+    def render(self, theme, still=False):
+        """SVG text; `still` drops the animation, leaving its resting state."""
         pal = THEMES[theme]
         used = {}
         body = []
         markers = set()
-        for item in self.items:
+        for idx, item in enumerate(self.items):
             kind = item[0]
+            cls = self._cls(idx)
             if kind == "rect":
                 _, x, y, w, h, role, dashed, fill, stroke, weight, opacity, rx = item
                 c = pal[role]
@@ -200,7 +274,7 @@ class Figure:
                     attrs.append('fill="none"')
                 if dashed:
                     attrs.append('stroke-dasharray="5 4"')
-                body.append(f"<rect {' '.join(attrs)}/>")
+                body.append(f"<rect{cls} {' '.join(attrs)}/>")
             elif kind == "line":
                 _, points, role, weight, dashed, arrow = item
                 d = "M" + " L".join(f"{num(px)},{num(py)}" for px, py in points)
@@ -210,7 +284,10 @@ class Figure:
                 if arrow:
                     markers.add(role)
                     attrs.append(f'marker-end="url(#ah-{role})"')
-                body.append(f"<path {' '.join(attrs)}/>")
+                body.append(f"<path{cls} {' '.join(attrs)}/>")
+            elif kind == "token":
+                _, points, role = item
+                body.append(f'<circle{cls} r="5" fill="{pal[role]}" stroke="{pal[role]}" stroke-opacity="0.35" stroke-width="5"/>')
             elif kind == "dot":
                 _, cx, cy, r, role, filled = item
                 c = pal[role]
@@ -238,7 +315,7 @@ class Figure:
                         uses.append(f'<use href="#{gid}" x="{adv}"/>')
                     adv += f.advance(ch)
                 body.append(
-                    f'<g fill="{pal[role]}" transform="translate({num(x)},{num(y)}) '
+                    f'<g{cls} fill="{pal[role]}" transform="translate({num(x)},{num(y)}) '
                     f'scale({k:.5f},{-k:.5f})">{"".join(uses)}</g>'
                 )
         defs = [f'<path id="{gid}" d="{d}"/>' for gid, d in sorted(used.items())]
@@ -248,16 +325,26 @@ class Figure:
                 f'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
                 f'<path d="M0,0 L10,5 L0,10 z" fill="{pal[role]}"/></marker>'
             )
+        style = ""
+        if self.anim and not still:
+            rules = "".join(self._keyframes(idx, spec) for idx, spec in sorted(self.anim.items()))
+            style = (
+                f"<style>{rules}"
+                "@media (prefers-reduced-motion: reduce){*{animation:none!important}}</style>\n"
+            )
+        label = esc(self.still_label if still else self.label)
         w, h = self.width + 2 * MARGIN, self.height + 2 * MARGIN
         return (
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-            f'viewBox="{-MARGIN} {-MARGIN} {w} {h}" role="img" aria-label="{esc(self.label)}">\n'
-            f"<title>{esc(self.label)}</title>\n<defs>{''.join(defs)}</defs>\n" + "\n".join(body) + "\n</svg>\n"
+            f'viewBox="{-MARGIN} {-MARGIN} {w} {h}" role="img" aria-label="{label}">\n'
+            f"<title>{label}</title>\n{style}<defs>{''.join(defs)}</defs>\n" + "\n".join(body) + "\n</svg>\n"
         )
 
     def save(self):
         for theme in THEMES:
             (OUT / f"{self.name}-{theme}.svg").write_text(self.render(theme), encoding="utf-8")
+            if self.anim:
+                (OUT / f"{self.name}-still-{theme}.svg").write_text(self.render(theme, still=True), encoding="utf-8")
 
 
 ROLES = [
@@ -652,12 +739,19 @@ def collections():
 
 
 def evidence_loop():
-    """Record once, then measure and tune offline against labelled cases."""
+    """Record once, then measure and tune offline against labelled cases.
+
+    The animation follows one round: record the cases, replay both candidate
+    rules from the recording, check the winner on held-out cases and export
+    the development cases. Without motion every step shows at once.
+    """
     cases = example("data/code-review-dataset.json")["cases"]
     development = sum(c["split"] == "development" for c in cases)
     held_out = sum(c["split"] == "held_out" for c in cases)
     saved = len(example("recordings/code-review.json")["exchanges"])
     (best, best_score), (other, other_score) = TUNED
+    go = {"start": 0.2, "graph": 0.4, "cases": 0.4, "answers": 1.5, "replay": 3.4, "pick": 5.2,
+          "export": 6.3, "trainer": 7.2, "end": 9.8}
     f = Figure(
         "evidence-loop",
         980,
@@ -668,32 +762,168 @@ def evidence_loop():
         f"tuning on development cases scores the {best} {best_score:.2f} and the {other} "
         f"{other_score:.2f}. The chosen rule is measured once on held-out cases, and "
         "development cases can be exported for a trainer outside Sapho.",
+        cycle=go["end"] + 0.5,
     )
-    f.box(0, 20, 160, 56, "logic", "graph", "code-review.yaml")
-    f.box(0, 150, 160, 70, "evidence", "labelled cases", f"{development} development", f"{held_out} held out")
-    f.box(212, 20, 160, 56, "model", "sapho record", "Jev · once per case")
-    f.box(424, 20, 160, 56, "evidence", "recording", f"{saved} saved answers")
-    f.box(660, 14, 190, 68, "logic", "sapho tune", f"{best}  {best_score:.2f}", f"{other}  {other_score:.2f}")
-    f.box(660, 150, 190, 70, "logic", "sapho measure", "held out · once", f"agreement {HELD_OUT_AGREEMENT:.2f}")
-    f.box(424, 150, 160, 70, "evidence", "export-training", "development only", "JSONL")
-    f.box(424, 248, 160, 52, "ink", "your trainer", "outside Sapho", dashed=True)
+    end = go["end"]
 
-    f.line([(160, 48), (209, 48)], "logic")
-    f.line([(160, 185), (186, 185), (186, 60), (209, 60)], "evidence")
-    f.line([(372, 48), (421, 48)], "model")
+    def lit(t):
+        return [(t, end)]
+
+    def shown(text, t):
+        return [(text, [(t, end)], True)]
+
+    stream = [go["answers"] + 0.16 * i for i in range(saved)]
+    f.box(0, 20, 160, 56, "logic", "graph", "code-review.yaml", lit=lit(go["start"]))
+    f.box(0, 150, 160, 70, "evidence", "labelled cases", f"{development} development", f"{held_out} held out",
+          lit=lit(go["start"]))
+    f.box(212, 20, 160, 56, "model", "sapho record", "Jev · once per case", lit=lit(go["graph"] + 0.8))
+    f.box(424, 20, 160, 56, "evidence", "recording", shown(f"{saved} saved answers", stream[-1] + 0.5),
+          lit=lit(stream[0] + 0.5))
+    f.box(660, 14, 190, 68, "logic", "sapho tune", shown(f"{best}  {best_score:.2f}", go["replay"] + 0.6),
+          shown(f"{other}  {other_score:.2f}", go["replay"] + 1.2), lit=lit(go["replay"] + 0.6))
+    f.box(660, 150, 190, 70, "logic", "sapho measure", "held out · once",
+          shown(f"agreement {HELD_OUT_AGREEMENT:.2f}", go["pick"] + 0.6), lit=lit(go["pick"] + 0.5))
+    f.box(424, 150, 160, 70, "evidence", "export-training", "development only", "JSONL",
+          lit=lit(go["export"] + 0.8))
+    f.box(424, 248, 160, 52, "ink", "your trainer", "outside Sapho", dashed=True, lit=lit(go["trainer"] + 0.3))
+
+    edges = [  # points, role, weight, dashed, token start times, travel
+        ([(160, 48), (209, 48)], "logic", 1.5, False, [go["graph"]], 0.4),
+        ([(160, 185), (186, 185), (186, 60), (209, 60)], "evidence", 1.5, False, [go["cases"]], 0.8),
+        ([(372, 48), (421, 48)], "model", 1.5, False, stream, 0.5),
+        ([(584, 48), (657, 48)], "evidence", 2.4, False, [go["replay"], go["replay"] + 0.6], 0.6),
+        ([(755, 82), (755, 147)], "logic", 1.5, False, [go["pick"]], 0.5),
+        ([(160, 200), (421, 200)], "evidence", 1.5, False, [go["export"] + 0.2 * i for i in range(development)], 0.6),
+        ([(504, 220), (504, 245)], "evidence", 1.5, True, [go["trainer"]], 0.3),
+    ]
+    for points, role, weight, dashed, starts, travel in edges:
+        f.line(points, role, weight, dashed, anim=("lit", [(starts[0], end)]))
+        for t in starts:
+            f.token(points, role, t, t + travel)
     f.note(380, 40, "live", "model")
-    f.line([(584, 48), (657, 48)], "evidence", weight=2.4)
     f.note(592, 40, "offline", "evidence")
-    f.line([(755, 82), (755, 147)], "logic")
     f.note(764, 120, "pick the winner", "logic")
-    f.line([(160, 200), (421, 200)], "evidence")
-    f.line([(504, 220), (504, 245)], "evidence", dashed=True)
+    f.save()
+
+
+def multi_stage():
+    """README: three model layers for one statement, the last only when unsure.
+
+    The animation plays two recorded statements in a loop: one that layer 2 is
+    unsure about, so the expert is asked, and one it is sure about, which skips
+    the expert. Without motion it shows the first statement.
+    """
+    runs, t = [], 0.2
+    for name, quote in (("report", "“…it promptly.”"), ("brake-lamp", "“…within 100 ms.”")):
+        v = requirement(name)
+        v["quote"] = quote
+        v["unsure"] = 0.2 <= v["first"] < 0.8
+        v["final"] = v["expert"] if v["unsure"] else v["first"]
+        v["ok"] = v["final"] >= 0.8
+        go = {"statement": t, "ask1": t + 0.3, "kind": t + 1.1, "ctx": t + 1.8, "same": t + 1.8,
+              "ask2": t + 3.1, "first": t + 3.8, "unsure": t + 4.5}
+        if v["unsure"]:
+            go.update(expert=t + 5.2, answer=t + 6.5, ok=t + 7.2, end=t + 9.6)
+        else:
+            go.update(sure=t + 5.2, end=t + 7.8)
+        v["go"] = go
+        runs.append(v)
+        t = go["end"] + 0.5
+    v = runs[0]
+    rest = [requirement(name) for name, _ in STATEMENTS]
+    skipped = sum(r["expert"] is None for r in rest)
+    still = (
+        f"Three model layers for one requirement. Layer 1 asks Jev for its pattern: event "
+        f"{v['kind']['probabilities']['event']:.2f}, so has_condition is {v['conditional']:.2f}. "
+        f"Layer 2 sees that answer next to the statement and asks whether the condition and "
+        f"response are stated: {v['first']:.2f}. That is in the unsure band from 0.2 to 0.8, so "
+        f"layer 3 asks the expert, which answers {v['expert']:.2f}, below the 0.8 needed to pass. "
+        f"{skipped} of {len(rest)} recorded statements never reach layer 3."
+    )
+    f = Figure(
+        "multi-stage",
+        980,
+        392,
+        f"{still} The animation then replays a statement layer 2 is sure about "
+        f"({runs[1]['first']:.2f}), which skips the expert.",
+        cycle=t,
+        still_label=still,
+    )
+    r1, r2, r3 = 50, 170, 296
+    edges = {  # key: (points, role, weight, dashed, travel seconds)
+        "ask1": ([(150, r1), (193, r1)], "ink", 1.5, False, 0.4),
+        "kind": ([(346, r1), (389, r1)], "model", 1.5, False, 0.4),
+        "ctx": ([(497, r1 + 31), (497, 108), (301, 108), (301, r2 - 37)], "model", 2.4, False, 1.0),
+        "same": ([(104, r1 + 28), (104, r2), (193, r2)], "ink", 1.5, False, 1.0),
+        "ask2": ([(406, r2), (449, r2)], "logic", 1.5, False, 0.4),
+        "first": ([(602, r2), (645, r2)], "model", 1.5, False, 0.4),
+        "unsure": ([(798, r2), (835, r2)], "model", 1.5, False, 0.4),
+        "expert": ([(909, r2 + 28), (909, 236), (527, 236), (527, r3 - 31)], "logic", 1.5, True, 1.0),
+        "answer": ([(602, r3), (645, r3)], "model", 1.5, True, 0.4),
+        "ok": ([(798, r3), (835, r3)], "model", 2.4, False, 0.4),
+        "sure": ([(960, r2 + 28), (960, r3 - 31)], "logic", 1.5, False, 0.6),
+    }
+    # Which box each edge delivers to, so the box lights up on arrival.
+    target = {"ask1": "ask1", "kind": "kind", "ctx": "ctx", "same": "ctx", "ask2": "ask2", "first": "first",
+              "unsure": "unsure", "expert": "expert", "answer": "answer", "ok": "ok", "sure": "ok"}
+
+    def arrive(r, box):
+        if box == "statement":
+            return r["go"]["statement"]
+        times = [r["go"][e] + edges[e][4] for e, b in target.items() if b == box and e in r["go"]]
+        return min(times) if times else None
+
+    def lit(box):
+        return [(arrive(r, box), r["go"]["end"]) for r in runs if arrive(r, box) is not None]
+
+    def value(box, fmt):
+        """One variant per run that reaches the box, shown from arrival to the run's end."""
+        return [(fmt(r), [(arrive(r, box), r["go"]["end"])], i == 0)
+                for i, r in enumerate(runs) if arrive(r, box) is not None]
+
+    f.text(0, 12, "LAYER 1 · Jev", "muted", "mono", SMALL)
+    f.text(0, 132, "LAYER 2 · Jev", "muted", "mono", SMALL)
+    f.text(0, 258, "LAYER 3 · expert, only when unsure", "muted", "mono", SMALL)
+    f.box(0, r1 - 28, 150, 56, "ink", "statement", value("statement", lambda r: r["quote"]), lit=lit("statement"))
+    f.box(196, r1 - 28, 150, 56, "model", "ask Jev", "kind? · testable?", lit=lit("ask1"))
+    f.box(392, r1 - 31, 210, 62, "model", "kind",
+          value("kind", lambda r: f"event {r['kind']['probabilities']['event']:.2f}"),
+          value("kind", lambda r: f"has_condition = {r['conditional']:.2f}"), lit=lit("kind"))
+    f.box(196, r2 - 34, 210, 68, "logic", "context for layer 2", "statement",
+          value("ctx", lambda r: f"has_condition: {r['conditional']:.2f}"), lit=lit("ctx"))
+    f.box(452, r2 - 28, 150, 56, "model", "ask Jev", "complete?", lit=lit("ask2"))
+    f.box(648, r2 - 28, 150, 56, "model", "first answer", value("first", lambda r: f"P(yes) = {r['first']:.2f}"),
+          lit=lit("first"))
+    f.box(838, r2 - 28, 142, 56, "logic", "unsure?", value("unsure", lambda r: f"0.2 ≤ {r['first']:.2f} < 0.8"),
+          lit=lit("unsure"))
+    f.box(452, r3 - 28, 150, 56, "model", "ask the expert", "guarded", dashed=True, lit=lit("expert"))
+    f.box(648, r3 - 28, 150, 56, "model", "expert answer", value("answer", lambda r: f"P(yes) = {r['expert']:.2f}"),
+          lit=lit("answer"))
+    f.box(838, r3 - 28, 142, 56, "ink", value("ok", lambda r: f"ok = {tf(r['ok'])}"),
+          value("ok", lambda r: f"{r['final']:.2f} {'≥' if r['ok'] else '<'} 0.8"), lit=lit("ok"))
+
+    for key, (points, role, weight, dashed, travel) in edges.items():
+        windows = [(r["go"][key], r["go"]["end"]) for r in runs if key in r["go"]]
+        f.line(points, role, weight, dashed, anim=("lit", windows))
+        for r in runs:
+            if key in r["go"]:
+                f.token(points, role, r["go"][key], r["go"][key] + travel)
+    f.note(510, 104, "the layer-1 answer", "model", "becomes context")
+    f.note(110, r2 - 8, "same text", "muted")
+
+    def branch(taken):
+        return ("appear", [(arrive(r, "unsure"), r["go"]["end"]) for r in runs if r["unsure"] == taken], True)
+
+    f.note(535, 254, "true", "logic", anim=branch(True))
+    f.note(952, 252, "false", "logic", anchor="end", anim=branch(False))
+    f.legend(0, 388, ROLES[1:] + [("model", f"skipped for {skipped} of {len(rest)} statements", "dash")])
     f.save()
 
 
 def main():
     load_fonts()
     how_it_works()
+    multi_stage()
     model_answers()
     combine_strengths()
     layers()
