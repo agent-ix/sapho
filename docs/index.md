@@ -15,7 +15,7 @@ policy. Start with an offline rule, then add model calls when you need them.
 | Run a complete example for a feature | [Examples and recipes](examples.md) |
 | Check whether a feature has reference and examples | [Feature coverage](feature-coverage.md) |
 
-The guides explain choices and workflows. Reference pages describe the current
+The guides explain choices and workflows. Reference pages describe the
 contracts. Runnable files supply complete programs and expected results;
 `make docs-check` verifies them offline. Jev and CLM setup is documented
 separately from the deterministic tutorial backend.
