@@ -12,7 +12,7 @@ require the corresponding Cargo feature.
 
 | Command | Required arguments | Optional command-specific arguments | Result |
 |---|---|---|---|
-| `validate GRAPH` | Graph path | `--format yaml\|json` | Compile confirmation; no evaluation |
+| `validate GRAPH` | Graph path | `--format yaml\|json` | The same Inspection JSON as `inspect`; exit 2 if the graph does not compile; no evaluation |
 | `inspect GRAPH` | Graph path | `--format yaml\|json` | JSON signature, stages, primitives and backend names |
 | `run GRAPH` | Graph path | Run options below | JSON outputs and trace, or failure with partial trace |
 | `record GRAPH` | Graph path, `--recording PATH` | Same run options | Run report and successful model exchanges |
@@ -64,11 +64,11 @@ limits apply per case evaluation and are shared across nested maps.
 | `--max-nodes` | 4096 | Executed node instances |
 | `--max-items` | 16384 | Cumulatively expanded collection items |
 | `--max-model-calls` | 128 | Explicit model requests |
-| `--concurrency` | 4 | Concurrent scheduled work |
+| `--concurrency` | 4 | Model calls in flight at once; other work runs one node at a time |
 | `--max-data-bytes` | 8388608 | Cumulatively accounted serialized inputs/outputs |
 | `--timeout-secs` | 60 | Monotonic evaluation duration |
-| `--max-input-bytes` | 1048576 | Input/dataset reads |
-| `--max-artifact-bytes` | 8388608 | Report/recording/export artifacts |
+| `--max-input-bytes` | 1048576 | The `--input` document of run/record/replay |
+| `--max-artifact-bytes` | 8388608 | Datasets, `--recording`/`--replay` files read, and report, trace and recording artifacts written |
 
 The CLI refuses over-budget work and does not crop input. Validate/inspect
 use graph loader/compiler limits and do not accept these evaluation flags.
@@ -147,9 +147,14 @@ fallback or credential lookup.
 ## Reports, persistence and exit status
 
 Reports and selectors emit JSON to stdout; diagnostics go to stderr. A run
-report has an `outputs` map of typed Datums, a `trace`, and an optional error
-on refusal. Use `value.to_plain_json()` in Rust or inspect Datum `value` fields
-when consuming typed results. Trace/model evidence can retain your input text.
+report has four fields: `outputs`, a map of typed Datums; `trace`, the execution
+evidence; `error`, a structured refusal or `null`; and `exit`, which is
+`completed`, `finding` or `refused`. When evaluation refuses, `outputs` is
+`null`, `trace` holds the work done before the refusal and `exit` is `refused`.
+A `--fail-on` output that cannot be selected keeps `outputs` and reports its
+error with `exit: refused`. Use `value.to_plain_json()` in Rust or inspect Datum
+`value` fields when consuming typed results. Trace/model evidence can retain
+your input text.
 
 Named output, trace, recording and export files are exclusively created and
 never overwritten. Choose fresh paths. Preparation can leave newly claimed
