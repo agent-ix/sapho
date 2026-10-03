@@ -2,6 +2,26 @@
 // Copyright (C) 2026 Agent-IX
 //! Caller-controlled recording and exact replay (FR-027/028/029).
 //! Synchronous file methods are explicit host actions, never invoked by infer.
+//!
+//! # Bounded serialization and offline replay
+//!
+//! Wrap a host backend in [`RecordingBackend`], retain its handle and call
+//! [`RecordingBackend::snapshot`] after evaluation. Only successful validated
+//! exchanges become recordings; raw invalid responses remain in runtime traces.
+//!
+//! ```
+//! use sapho_recording::{Recording, ReplayBackend};
+//! let recording = Recording::default(); // A graph with no model calls.
+//! let bytes = recording.to_json(1024)?;
+//! let loaded = Recording::from_json(&bytes, 1024)?;
+//! assert_eq!(loaded, recording);
+//! let _backend = ReplayBackend::new(&loaded, 1024)?;
+//! # Ok::<(), sapho_core::SaphoError>(())
+//! ```
+//!
+//! Replay matches exact model, binding, policy, state and ordered questions.
+//! It has no live fallback. Threshold-only changes can reuse unchanged requests.
+//! File helpers are synchronous host actions and refuse overwriting existing files.
 use async_trait::async_trait;
 use sapho_core::{
     ErrorCode, ModelBackend, ModelRequest, ModelResponse, Result, SaphoError, bounded_json,

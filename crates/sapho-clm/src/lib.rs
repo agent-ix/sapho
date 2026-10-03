@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Host-configured CLM System One adapter; wire and HTTP belong here, policy to core/runtime.
+//!
+//! # Prepare a host-managed provider
+//!
+//! ```no_run
+//! use sapho_clm::{ClmBackend, DEFAULT_BASE_URL, Limits};
+//! let _backend = ClmBackend::new(DEFAULT_BASE_URL, None, Limits::default())?;
+//! # Ok::<(), sapho_clm::ConfigurationError>(())
+//! ```
+//!
+//! Construction makes no inference call. The host supplies an optional secret
+//! before entering async evaluation. Remote endpoints require HTTPS; only loopback
+//! permits cleartext. Limits cover queue time, request/response bytes and concurrency.
+//! [`Transport`] replaces the native HTTP seam while retaining real codec/validation.
 mod wire;
 use async_trait::async_trait;
 use ix_cli_kit::secrets::SecretValue;

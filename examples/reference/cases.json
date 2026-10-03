@@ -1,0 +1,168 @@
+[
+  {
+    "name": "facts",
+    "input": "facts-input.json",
+    "expected": {
+      "both": false,
+      "either": true,
+      "reverse": false,
+      "equal": false,
+      "less": true,
+      "less_equal": true,
+      "greater": false,
+      "greater_equal": false,
+      "context": {
+        "flag": true,
+        "label": "review"
+      },
+      "projected": false,
+      "ordered": [
+        "A",
+        "B"
+      ]
+    }
+  },
+  {
+    "name": "strengths",
+    "input": "strengths-input.json",
+    "expected": {
+      "min": 0.4,
+      "max": 0.8,
+      "weighted_mean": 0.65,
+      "concern": 0.35,
+      "empty": 0.2
+    }
+  },
+  {
+    "name": "collections",
+    "input": "collections-input.json",
+    "expected": {
+      "mask": [
+        true,
+        false
+      ],
+      "selected": [
+        {
+          "key": "lamp",
+          "score": 0.9
+        }
+      ],
+      "candidates": [
+        {
+          "left": {
+            "key": "lamp",
+            "score": 0.9
+          },
+          "right": {
+            "key": "lamp",
+            "score": 1
+          }
+        },
+        {
+          "left": {
+            "key": "lamp",
+            "score": 0.9
+          },
+          "right": {
+            "key": "other",
+            "score": 1
+          }
+        }
+      ],
+      "related": [
+        {
+          "left": {
+            "key": "lamp",
+            "score": 0.9
+          },
+          "right": {
+            "key": "lamp",
+            "score": 1
+          }
+        }
+      ],
+      "flat": [
+        "a",
+        "b",
+        "c"
+      ]
+    }
+  },
+  {
+    "name": "guards",
+    "input": "guards-input.json",
+    "expected": {
+      "optional": null,
+      "decision": true
+    },
+    "skipped": [
+      [
+        "root",
+        "conditional"
+      ]
+    ],
+    "alternate": {
+      "input": "guards-enabled-input.json",
+      "expected": {
+        "optional": false,
+        "decision": false
+      }
+    }
+  },
+  {
+    "name": "questions",
+    "input": "questions-input.json",
+    "expected": {
+      "observable": 0.8,
+      "actor": 0.75,
+      "explicit": 0.75,
+      "second_support": 0.8
+    },
+    "backend": true
+  },
+  {
+    "name": "model-collection",
+    "input": "model-collection-input.json",
+    "expected": {
+      "selected": [
+        {
+          "text": "Lamp turns on"
+        },
+        {
+          "text": "Motor stops"
+        }
+      ]
+    },
+    "backend": true
+  },
+  {
+    "name": "native",
+    "input": "native-input.json",
+    "expected": {
+      "length": 4
+    },
+    "native": true
+  },
+  {
+    "name": "guarded-model",
+    "input": "guarded-model-input.json",
+    "expected": {
+      "support": 0.0,
+      "model": "skipped"
+    },
+    "skipped": [
+      [
+        "root",
+        "ask"
+      ]
+    ],
+    "backend": true,
+    "alternate": {
+      "input": "guarded-model-enabled-input.json",
+      "expected": {
+        "support": 0.8,
+        "model": "tutorial-1"
+      }
+    }
+  }
+]

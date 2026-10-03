@@ -1,0 +1,31 @@
+{
+  "left": [
+    {
+      "key": "lamp",
+      "score": 0.9
+    },
+    {
+      "key": "motor",
+      "score": 0.3
+    }
+  ],
+  "right": [
+    {
+      "key": "lamp",
+      "score": 1
+    },
+    {
+      "key": "other",
+      "score": 1
+    }
+  ],
+  "groups": [
+    [
+      "a",
+      "b"
+    ],
+    [
+      "c"
+    ]
+  ]
+}

@@ -1,0 +1,168 @@
+{
+  "inputs": {
+    "text": {
+      "kind": "text"
+    },
+    "enabled": {
+      "kind": "boolean"
+    }
+  },
+  "nodes": [
+    {
+      "id": "q",
+      "operation": {
+        "kind": "questions",
+        "questions": [
+          {
+            "id": "observable",
+            "question": {
+              "kind": "boolean",
+              "instructions": "Does the text name an observable action?",
+              "yes": "Observable action",
+              "no": "No observable action"
+            }
+          }
+        ]
+      },
+      "inputs": {}
+    },
+    {
+      "id": "context",
+      "operation": {
+        "kind": "record"
+      },
+      "inputs": {
+        "text": {
+          "kind": "input",
+          "name": "text"
+        }
+      }
+    },
+    {
+      "id": "ask",
+      "operation": {
+        "kind": "ask",
+        "backend": "judge"
+      },
+      "inputs": {
+        "state": {
+          "kind": "node",
+          "node": "context",
+          "port": "result"
+        },
+        "questions": {
+          "kind": "node",
+          "node": "q",
+          "port": "result"
+        }
+      },
+      "guard": {
+        "kind": "input",
+        "name": "enabled"
+      }
+    },
+    {
+      "id": "answers",
+      "operation": {
+        "kind": "coalesce"
+      },
+      "inputs": {
+        "value": {
+          "kind": "node",
+          "node": "ask",
+          "port": "answers"
+        },
+        "default": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "answers",
+              "value": {
+                "distribution_policy": {
+                  "kind": "strict"
+                },
+                "questions": [
+                  {
+                    "id": "observable",
+                    "question": {
+                      "kind": "boolean",
+                      "instructions": "Does the text name an observable action?",
+                      "yes": "Observable action",
+                      "no": "No observable action"
+                    }
+                  }
+                ],
+                "values": {
+                  "observable": {
+                    "kind": "boolean",
+                    "probability": 0.0
+                  }
+                }
+              }
+            }
+          },
+          "value_type": {
+            "kind": "answers"
+          }
+        }
+      }
+    },
+    {
+      "id": "support",
+      "operation": {
+        "kind": "probability",
+        "question": "observable",
+        "labels": [
+          "true"
+        ]
+      },
+      "inputs": {
+        "answers": {
+          "kind": "node",
+          "node": "answers",
+          "port": "result"
+        }
+      }
+    },
+    {
+      "id": "model",
+      "operation": {
+        "kind": "coalesce"
+      },
+      "inputs": {
+        "value": {
+          "kind": "node",
+          "node": "ask",
+          "port": "model"
+        },
+        "default": {
+          "kind": "literal",
+          "value": {
+            "id": "constant",
+            "value": {
+              "kind": "text",
+              "value": "skipped"
+            }
+          },
+          "value_type": {
+            "kind": "text"
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "support": {
+      "kind": "node",
+      "node": "support",
+      "port": "result"
+    },
+    "model": {
+      "kind": "node",
+      "node": "model",
+      "port": "result"
+    }
+  },
+  "subgraphs": {}
+}

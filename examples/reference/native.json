@@ -1,0 +1,36 @@
+{
+  "inputs": {
+    "text": {
+      "kind": "text"
+    }
+  },
+  "nodes": [
+    {
+      "id": "length",
+      "operation": {
+        "kind": "code",
+        "primitive": "text_length",
+        "params": {
+          "unit": {
+            "kind": "text",
+            "value": "bytes"
+          }
+        }
+      },
+      "inputs": {
+        "text": {
+          "kind": "input",
+          "name": "text"
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "length": {
+      "kind": "node",
+      "node": "length",
+      "port": "result"
+    }
+  },
+  "subgraphs": {}
+}

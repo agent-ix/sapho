@@ -1,6 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Pure evidence contracts, scoring and ranking; no execution, filesystem or models.
+//!
+//! # Export supplied development supervision
+//!
+//! ```
+//! use sapho_core::decode_json;
+//! use sapho_evidence::{Dataset, Split, export_training};
+//! let dataset: Dataset = decode_json(include_bytes!("../../../examples/data/review-dataset.json"), 1_048_576)?;
+//! dataset.validate(100)?;
+//! assert_eq!(dataset.selected(Split::Development).count(), 2);
+//! let rows = String::from_utf8(export_training(&dataset, 100, 1_048_576)?)?;
+//! assert_eq!(rows.lines().count(), 2);
+//! assert!(!rows.contains("reserved"));
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! Supply actual per-case [`CaseOutcome`] values to [`measure`]. Boolean outputs
+//! use agreement; Probability outputs use Brier. Missing, unsupported and failed
+//! predictions retain explicit coverage. [`rank`] compares complete development
+//! candidates for one output; held-out evaluation remains a separate request.
 use sapho_core::{
     ErrorCode, Inputs, ItemId, SaphoError, SourceId, Value, ValueType, bounded_json, validate_name,
 };

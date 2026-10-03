@@ -2,9 +2,9 @@
 CARGO ?= cargo
 export CARGO_TARGET_DIR := target
 
-.PHONY: help fmt fmt-check lint test build clean deny audit-unsafe docs spec coverage ci
+.PHONY: help fmt fmt-check lint test build clean deny audit-unsafe docs docs-check docs-examples spec coverage ci
 help:
-	@echo "Targets: fmt fmt-check lint test build clean deny audit-unsafe docs spec coverage ci"
+	@echo "Targets: fmt fmt-check lint test build clean deny audit-unsafe docs docs-check docs-examples spec coverage ci"
 fmt:
 	$(CARGO) fmt --all
 fmt-check:
@@ -25,9 +25,21 @@ audit-unsafe:
 	bash scripts/check_unsafe_comments.sh
 docs:
 	RUSTDOCFLAGS="-D warnings" $(CARGO) doc --workspace --no-deps --all-features
+docs-examples:
+	$(CARGO) check --locked --workspace --examples --all-features
+	$(CARGO) run --locked --example reference
+	$(CARGO) run --locked -p sapho-select --example acquisition
+	$(CARGO) run --locked -p sapho-evidence --example measurement
+	$(CARGO) run --locked -p sapho-clm --example clm_configure
+	$(CARGO) build --locked -p sapho-cli --no-default-features
+	python3 scripts/check_docs.py
+docs-check: docs
+	$(CARGO) test --locked --workspace --doc --all-features
+	$(CARGO) test --locked --workspace --doc --no-default-features
+	$(MAKE) docs-examples
 spec:
 	quire validate --scope . "spec/**/*.md"
 	quire validate --scope . "reviews/**/*.md"
 coverage:
 	quire coverage --scope .
-ci: fmt-check lint test deny audit-unsafe docs spec
+ci: fmt-check lint test deny audit-unsafe docs docs-examples spec

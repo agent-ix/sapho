@@ -34,6 +34,17 @@
 //! # }
 //! # tokio::runtime::Runtime::new().unwrap().block_on(evaluate()).unwrap();
 //! ```
+//!
+//! # Choosing modules
+//!
+//! Start with [`graph::GraphSpec`], [`graph::compile`] and [`runtime::Engine`].
+//! [`core`] owns values, host primitives and model backend registration;
+//! [`recording`] wraps any backend for capture and exact offline replay.
+//! Enable `jev` or `clm` for the included adapters. Input gathering and dataset
+//! scoring are available as separate `sapho-select` and `sapho-evidence` crates.
+//!
+//! Run `cargo run --example reference` for complete offline examples of every
+//! graph operation, all question types, distributions, native code and replay.
 pub use sapho_core as core;
 pub use sapho_graph as graph;
 #[cfg(feature = "jev")]

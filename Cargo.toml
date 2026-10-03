@@ -69,5 +69,6 @@ sapho-clm = { workspace = true, optional = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 async-trait.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tempfile = "3"
