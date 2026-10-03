@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &schema,
         "requirements",
         "items",
-        "tutorial.json",
+        "examples/data/selection.json",
         1_048_576,
     )?;
     assert_eq!(count(&json, "items"), 2);
@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &schema,
         "requirements",
         "items",
-        "tutorial.json",
+        "inline",
         1024,
     );
     assert!(matches!(refused, Err(SelectionError::MissingKey(_))));
