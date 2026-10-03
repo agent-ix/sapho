@@ -31,7 +31,7 @@ sapho-runtime = { path = "crates/sapho-runtime", version = "0.1.0" }
 sapho-recording = { path = "crates/sapho-recording", version = "0.1.0" }
 sapho-select = { path = "crates/sapho-select", version = "0.1.0" }
 sapho-evidence = { path = "crates/sapho-evidence", version = "0.1.0" }
-ix-cli-kit = { git = "https://github.com/agent-ix/ix-cli-kit", rev = "cc69a934f887966f955440bff8c356e3da449bee", features = ["secrets"] }
+ix-cli-kit = { git = "https://github.com/agent-ix/ix-cli-kit", rev = "8e6781eb39072bbdb43c8e7d19ea3ed216959897", features = ["secrets"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 sapho-systemone = { path = "crates/sapho-systemone", version = "0.1.0" }
 sapho-clm = { path = "crates/sapho-clm", version = "0.1.0" }
