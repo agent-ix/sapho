@@ -29,21 +29,22 @@ make docs
 cargo doc --locked --workspace --no-deps --all-features --open
 ```
 
-These links work after the build, from this checkout:
+`make docs` writes each package's generated reference under `target/doc` in
+the checkout; open the page listed for a package in a browser:
 
-| Package | Generated reference | Main contracts |
+| Package | Generated reference after `make docs` | Main contracts |
 |---|---|---|
-| `sapho` | [Facade](../target/doc/sapho/index.html) | Convenient embedding imports |
-| `sapho-core` | [Core](../target/doc/sapho_core/index.html) | Values, IDs, models, ports, registries, errors |
-| `sapho-graph` | [Graph](../target/doc/sapho_graph/index.html) | Config schema, parser and compiler |
-| `sapho-runtime` | [Runtime](../target/doc/sapho_runtime/index.html) | Engine, budgets and traces |
-| `sapho-recording` | [Recording](../target/doc/sapho_recording/index.html) | Explicit capture and exact replay |
-| `sapho-select` | [Selection](../target/doc/sapho_select/index.html) | Bounded synchronous host acquisition |
-| `sapho-evidence` | [Evidence](../target/doc/sapho_evidence/index.html) | Pure scoring, ranking and training export |
-| `sapho-systemone` | [Codec](../target/doc/sapho_systemone/index.html) | Source-free SDK request translation |
-| `sapho-jev` | [Jev](../target/doc/sapho_jev/index.html) | Hosted SDK adapter |
-| `sapho-clm` | [CLM](../target/doc/sapho_clm/index.html) | Bounded HTTP adapter and transport seam |
-| `sapho-cli` | [CLI host](../target/doc/sapho_cli/index.html) | Inspection, invocation, bindings and artifacts |
+| `sapho` | `target/doc/sapho/index.html` | Convenient embedding imports |
+| `sapho-core` | `target/doc/sapho_core/index.html` | Values, IDs, models, ports, registries, errors |
+| `sapho-graph` | `target/doc/sapho_graph/index.html` | Config schema, parser and compiler |
+| `sapho-runtime` | `target/doc/sapho_runtime/index.html` | Engine, budgets and traces |
+| `sapho-recording` | `target/doc/sapho_recording/index.html` | Explicit capture and exact replay |
+| `sapho-select` | `target/doc/sapho_select/index.html` | Bounded synchronous host acquisition |
+| `sapho-evidence` | `target/doc/sapho_evidence/index.html` | Pure scoring, ranking and training export |
+| `sapho-systemone` | `target/doc/sapho_systemone/index.html` | Source-free SDK request translation |
+| `sapho-jev` | `target/doc/sapho_jev/index.html` | Hosted SDK adapter |
+| `sapho-clm` | `target/doc/sapho_clm/index.html` | Bounded HTTP adapter and transport seam |
+| `sapho-cli` | `target/doc/sapho_cli/index.html` | Inspection, invocation, bindings and artifacts |
 
 The tables below explain how to use the APIs together. Generated rustdoc
 provides exact signatures, fields and variants for individual symbols.
@@ -61,7 +62,7 @@ provides exact signatures, fields and variants for individual symbols.
 | `Inputs`, `Signature` | `BTreeMap<String, Datum>` and exact named input/output schema maps. |
 | `validate_name`, `check_ports` | Validate names and exact named port membership/types; extra ports are errors too. |
 | `decode_json<T>` | Strict bounded JSON decode; rejects duplicate keys and malformed/deep input. Call the decoded object's validation method where needed. |
-| `decode_plain` | Decode ordinary JSON against a ValueType with an ID prefix and source references; gives list occurrences stable derived IDs. |
+| `decode_plain` | Decode ordinary JSON against a ValueType into a Datum with the given ID and source references. List occurrences get stable IDs derived from that ID and their index. |
 | `bounded_json`, `measured_json_bytes` | Serialize or count bytes under a ceiling; return `LimitExceeded` when exceeded. |
 
 A typed input preserves identity:
@@ -166,8 +167,10 @@ can evaluate multiple input sets. Evaluation does not persist evidence.
 maps, including intermediate data and expansion. They bound work and serialized
 data, not process memory. Model futures are dropped on deadline/failure;
 native work must cooperate and cannot be forcibly preempted after starting.
-No implicit retry occurs. Independent ready work can run concurrently, while
-output/trace ordering remains deterministic.
+No implicit retry occurs. Only model calls run concurrently: the ready `ask`
+requests of a dependency stage are sent in chunks of at most `concurrency`.
+Native code, logic and collection operations run one node at a time, and a map
+evaluates its items in order. Output and trace ordering are deterministic.
 
 `Trace.nodes` contains `NodeTrace`: scoped path, dependency paths, guard,
 operation, inputs, outputs, `NodeStatus` (Completed/Skipped/Failed), optional
