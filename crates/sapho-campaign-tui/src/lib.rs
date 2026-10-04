@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Attached terminal UI. Rendering never performs inference or derives domain counts.
+mod inspection;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
+pub use inspection::Panel;
 use ratatui::{
     layout::{Constraint, Layout},
     widgets::{Block, Paragraph, Wrap},
@@ -36,6 +38,16 @@ where
     R: FnMut() -> Result<View>,
     C: FnMut(&Control) -> Result<String>,
 {
+    attach_with_inspection(&mut read, &mut submit, |_, _| Ok(Vec::new()))
+}
+/// Attach with domain-owned, bounded read-only panels for the selected attempt.
+/// The inspector runs before drawing; it may acquire snapshot evidence synchronously.
+pub fn attach_with_inspection<R, C, I>(mut read: R, mut submit: C, mut inspect: I) -> Result<()>
+where
+    R: FnMut() -> Result<View>,
+    C: FnMut(&Control) -> Result<String>,
+    I: FnMut(&View, Option<&Attempt>) -> Result<Vec<Panel>>,
+{
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Err(sapho_campaign::Error::new(
             sapho_campaign::ErrorCode::Refused,
@@ -48,6 +60,7 @@ where
     let mut scroll = 0u16;
     let mut detail_scroll = 0u16;
     let mut inspect_focus = false;
+    let mut panel_index = 0usize;
     let mut reason: Option<(
         sapho_campaign::lifecycle::AttemptId,
         sapho_campaign::lifecycle::AttemptState,
@@ -57,6 +70,9 @@ where
     loop {
         let view = read()?;
         selected = selected.min(view.attempts.len().saturating_sub(1));
+        let panels = inspect(&view, view.attempts.get(selected))?;
+        inspection::validate(&panels)?;
+        panel_index = panel_index.min(panels.len());
         terminal.draw(|frame| {
             let areas = Layout::vertical([
                 Constraint::Length(3),
@@ -97,15 +113,23 @@ where
                 .block(Block::bordered().title("Observed counts / domain evidence")),
                 areas[1],
             );
-            let detail = view.attempts.get(selected)
-                .map(|attempt| attempt_detail(attempt,selected,view.attempts.len()))
+            let detail = view
+                .attempts
+                .get(selected)
+                .map(|attempt| attempt_detail(attempt, selected, view.attempts.len()))
                 .unwrap_or_else(|| "No attempts".into());
-            render_inspection(frame,areas[2],&detail,detail_scroll,inspect_focus);
+            if let Some(panel) = panel_index.checked_sub(1).and_then(|i| panels.get(i)) {
+                let heading = format!("{} [{}/{}]", panel.title, panel_index + 1, panels.len() + 1);
+                render_panel(frame, areas[2], &heading, &panel.body, detail_scroll);
+            } else {
+                render_inspection(frame, areas[2], &detail, detail_scroll, inspect_focus);
+            }
             let footer = reason
                 .as_ref()
                 .map(|(_, _, r)| format!("Retry reason: {r}\nEnter submit | Esc cancel"))
                 .unwrap_or_else(|| {
-                    let help = "q detach | p pause | arrows inspect | Tab focus | PgUp/Dn scroll | r retry";
+                    let help =
+                        "q detach | p pause | arrows select | Tab focus | PgUp/Dn scroll | r retry";
                     if notice.is_empty() {
                         help.into()
                     } else {
@@ -163,6 +187,14 @@ where
                 selected = selected
                     .saturating_add(1)
                     .min(view.attempts.len().saturating_sub(1));
+                detail_scroll = 0;
+            }
+            KeyCode::Left => {
+                panel_index = panel_index.saturating_sub(1);
+                detail_scroll = 0;
+            }
+            KeyCode::Right => {
+                panel_index = panel_index.saturating_add(1).min(panels.len());
                 detail_scroll = 0;
             }
             KeyCode::Tab => inspect_focus = !inspect_focus,
@@ -250,11 +282,50 @@ fn render_inspection(
     );
 }
 
+fn render_panel(
+    frame: &mut ratatui::Frame<'_>,
+    area: ratatui::layout::Rect,
+    title: &str,
+    body: &str,
+    scroll: u16,
+) {
+    frame.render_widget(
+        Paragraph::new(body)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0))
+            .block(Block::bordered().title(title)),
+        area,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use sapho_campaign::lifecycle::{AttemptId, AttemptState, JobId, StageId};
 
+    #[test]
+    fn host_panel_wrapping_and_scrolling_reach_full_context_at_narrow_width() {
+        // Trace: FR-052-AC-5
+        let body = format!(
+            "owner-start café\n{}\ncontext-end-marker",
+            "nested actor → response actor\n".repeat(30)
+        );
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(32, 7)).unwrap();
+        let mut observed = String::new();
+        for scroll in 0..40 {
+            terminal
+                .draw(|f| render_panel(f, f.area(), "Domain evidence [2/3]", &body, scroll))
+                .unwrap();
+            for cell in &terminal.backend().buffer().content {
+                observed.push_str(cell.symbol());
+            }
+        }
+        assert!(observed.contains("owner-start café"));
+        assert!(observed.contains("nested actor → response actor"));
+        assert!(observed.contains("context-end-marker"));
+        assert!(observed.contains("Domain evidence [2/3]"));
+    }
     #[test]
     fn narrow_inspection_preserves_actual_identity_lineage_and_reachable_long_reason() {
         let attempt = Attempt {
