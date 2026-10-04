@@ -59,3 +59,7 @@ pub use sapho_clm as clm;
 /// Explicit local Ollama provider with self-reported confidence.
 #[cfg(feature = "ollama")]
 pub use sapho_ollama as ollama;
+
+/// Optional durable campaign host.
+#[cfg(feature = "campaign")]
+pub use sapho_campaign as campaign;

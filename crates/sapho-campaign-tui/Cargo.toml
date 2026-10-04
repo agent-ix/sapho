@@ -1,0 +1,14 @@
+[package]
+name = "sapho-campaign-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Attached Ratatui dashboard over Sapho campaign services."
+[lints]
+workspace = true
+[dependencies]
+sapho-campaign = { path = "../sapho-campaign" }
+ratatui = "0.30"
+crossterm = "0.29"

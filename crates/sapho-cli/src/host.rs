@@ -19,6 +19,8 @@ pub enum ExitStatus {
     Completed,
     /// The selected Boolean finding output was true.
     Finding,
+    /// Complete campaign report contains unfinished or failed work.
+    Partial,
     /// Configuration, execution or coverage was refused.
     Refused,
 }
@@ -27,7 +29,7 @@ impl ExitStatus {
     pub const fn code(self) -> u8 {
         match self {
             Self::Completed => ix_cli_kit::Outcome::Ok.code(),
-            Self::Finding => ix_cli_kit::Outcome::Partial.code(),
+            Self::Finding | Self::Partial => ix_cli_kit::Outcome::Partial.code(),
             Self::Refused => ix_cli_kit::Outcome::Refused.code(),
         }
     }

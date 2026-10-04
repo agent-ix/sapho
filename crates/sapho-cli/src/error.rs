@@ -10,6 +10,10 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error, Serialize)]
 #[serde(tag = "kind", content = "detail", rename_all = "snake_case")]
 pub enum CliError {
+    /// Structured durable campaign failure.
+    #[cfg(feature = "campaign")]
+    #[error(transparent)]
+    Campaign(#[from] sapho_campaign::Error),
     /// Shared engine/configuration refusal.
     #[error(transparent)]
     Engine(#[from] SaphoError),

@@ -527,6 +527,8 @@ fn selection(selector: Selector) -> Result<Response, CliError> {
 }
 pub(crate) fn execute(cli: Cli) -> Result<Response, CliError> {
     match cli.command {
+        #[cfg(feature = "campaign")]
+        Command::Campaign(args) => crate::campaign_command::execute(args),
         Command::Validate(args) | Command::Inspect(args) => {
             let graph = load_graph(&args.graph, args.format.map(GraphFormat::from))?;
             respond(

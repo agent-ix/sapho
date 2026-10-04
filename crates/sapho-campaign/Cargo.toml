@@ -1,0 +1,29 @@
+[package]
+name = "sapho-campaign"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Durable domain-independent Sapho campaign host."
+
+[lints]
+workspace = true
+
+[dependencies]
+sapho-core.workspace = true
+sapho-graph.workspace = true
+sapho-runtime.workspace = true
+sapho-recording.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+sha2.workspace = true
+rustix.workspace = true
+rusqlite = { version = "0.38", features = ["bundled"] }
+fs2 = "0.4"
+
+[dev-dependencies]
+tokio.workspace = true
+tempfile = "3"

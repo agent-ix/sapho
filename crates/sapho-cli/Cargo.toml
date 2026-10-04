@@ -17,11 +17,16 @@ path = "src/main.rs"
 doc = false
 
 [features]
-default = []
+default = ["campaign", "ollama"]
+campaign = ["dep:sapho-campaign", "dep:sapho-campaign-tui"]
+ollama = ["dep:sapho-ollama"]
 clm = ["dep:sapho-clm"]
 jev = ["dep:sapho-jev", "dep:typesafe-sdk-client", "dep:typesafe-sdk-config", "dep:typesafe-sdk-env", "dep:typesafe-sdk-http", "dep:typesafe-sdk-log"]
 
 [dependencies]
+sapho-campaign = { path = "../sapho-campaign", optional = true }
+sapho-campaign-tui = { path = "../sapho-campaign-tui", optional = true }
+sapho-ollama = { path = "../sapho-ollama", optional = true }
 ix-cli-kit.workspace = true
 sapho-systemone.workspace = true
 sapho-clm = { workspace = true, optional = true }

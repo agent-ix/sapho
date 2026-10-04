@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Agent-IX
 //! Sapho command process: synchronous acquisition/persistence around bounded async evaluation.
 mod args;
+#[cfg(feature = "campaign")]
+mod campaign_command;
 mod command;
 use clap::Parser;
 use ix_cli_kit::{

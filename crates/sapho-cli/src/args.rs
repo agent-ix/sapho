@@ -18,6 +18,9 @@ pub(crate) struct Cli {
 }
 #[derive(Subcommand)]
 pub(crate) enum Command {
+    /// Run and monitor durable graph campaigns.
+    #[cfg(feature = "campaign")]
+    Campaign(crate::campaign_command::Args),
     /// Load and compile a graph without executing it.
     Validate(GraphArgs),
     /// Show signatures, dependency stages and required host implementations.

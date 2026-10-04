@@ -1,0 +1,3 @@
+# Rust pre-design review: campaign extraction
+
+Typed identities and exhaustive outcomes, structured errors, owned immutable artifacts and borrowed adapter inputs. Storage and transaction closures remain on the synchronous host thread; async evaluation receives only owned execution data and backend registries. No SQLite or mutex guard crosses await. RAII holds writer locks and restores terminals. Trusted domain extensions are explicitly not sandboxed. Graph runtime is reused, not forked. Modules split responsibilities; separate crates enforce TUI and consumer dependency direction. Formal implementation review remains required.

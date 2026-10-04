@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli", "crates/sapho-ollama"]
+members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli", "crates/sapho-ollama", "crates/sapho-campaign", "crates/sapho-campaign-tui"]
 resolver = "3"
 
 [workspace.package]
@@ -58,6 +58,7 @@ default = []
 jev = ["dep:sapho-jev"]
 clm = ["dep:sapho-clm"]
 ollama = ["dep:sapho-ollama"]
+campaign = ["dep:sapho-campaign"]
 
 [dependencies]
 sapho-core.workspace = true
@@ -67,6 +68,7 @@ sapho-recording.workspace = true
 sapho-jev = { workspace = true, optional = true }
 sapho-clm = { workspace = true, optional = true }
 sapho-ollama = { path = "crates/sapho-ollama", optional = true }
+sapho-campaign = { path = "crates/sapho-campaign", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
