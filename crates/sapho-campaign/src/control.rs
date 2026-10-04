@@ -29,6 +29,23 @@ pub enum Control {
         reason: String,
     },
 }
+impl Control {
+    /// Reject structurally invalid controls before writing an inbox or evidence blob.
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::Pause { revision, .. } if *revision < 0 => {
+                Err(Error::new(ErrorCode::Invalid, "negative control revision"))
+            }
+            Self::Retry {
+                reason, expected, ..
+            } if reason.trim().is_empty() || !expected.retryable() => Err(Error::new(
+                ErrorCode::Invalid,
+                "retry needs nonempty reason and non-success state",
+            )),
+            _ => Ok(()),
+        }
+    }
+}
 /// Receipt separates accepted control submission from actual application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +60,7 @@ pub enum ControlOutcome {
 impl Campaign {
     /// Apply one exact control identity and retain an immutable receipt in the same transaction.
     pub fn apply_control(&mut self, control: &Control) -> Result<ControlOutcome> {
+        control.validate()?;
         let bytes = sapho_core::bounded_json(control, 4096)
             .map_err(|e| Error::new(ErrorCode::Invalid, e.to_string()))?;
         let hash = self.ledger().blob(&bytes)?;
@@ -145,6 +163,7 @@ impl Campaign {
 
 /// Queue a control without acquiring writer ownership. Submission is not application.
 pub fn submit(root: &std::path::Path, control: &Control) -> Result<String> {
+    control.validate()?;
     use std::{
         fs::{File, OpenOptions},
         io::Write,

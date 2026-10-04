@@ -153,7 +153,8 @@ pub struct CampaignSnapshot {
     pub attempts: BTreeMap<AttemptState, u64>,
 }
 /// Generic stage attempt with immutable request/result references.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Attempt {
     /// Attempt identity.
     pub id: AttemptId,
@@ -161,6 +162,10 @@ pub struct Attempt {
     pub job: JobId,
     /// Stage identity.
     pub stage: StageId,
+    /// Explicit retry parent; original attempts remain in the ledger.
+    pub parent: Option<AttemptId>,
+    /// Operator's retained justification for that retry.
+    pub reason: Option<String>,
     /// Exact persisted state.
     pub state: AttemptState,
     /// Immutable request hash.
@@ -414,21 +419,19 @@ impl Campaign {
     }
     /// Inspect one retained attempt.
     pub fn attempt(&self, id: AttemptId) -> Result<Attempt> {
-        let (job, stage, state, request, response): (
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
+        let (job, stage, parent, reason, state, request, response): (
+            String, String, Option<i64>, Option<String>, String, String, Option<String>,
         ) = self.ledger.connection().query_row(
-            "SELECT job,stage,state,request,response FROM campaign_attempts WHERE id=?",
+            "SELECT job,stage,parent,reason,state,request,response FROM campaign_attempts WHERE id=?",
             [id.get()],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)),
         )?;
         Ok(Attempt {
             id,
             job: JobId::new(job)?,
             stage: StageId::new(stage)?,
+            parent: parent.map(AttemptId::new).transpose()?,
+            reason,
             state: AttemptState::parse(&state)?,
             request,
             response,

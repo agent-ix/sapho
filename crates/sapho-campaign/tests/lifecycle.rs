@@ -318,3 +318,32 @@ fn migration_copies_only_snapshot_declared_domain_artifacts_and_prevalidates_has
     );
     assert!(!failed.exists());
 }
+
+#[test]
+fn invalid_control_submission_does_not_create_an_inbox() {
+    // Trace: FR-052-AC-2
+    use sapho_campaign::control::{Control, submit};
+    let (dir, _, _, _) = fixture();
+    assert!(
+        submit(
+            dir.path(),
+            &Control::Pause {
+                paused: true,
+                revision: -1
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        submit(
+            dir.path(),
+            &Control::Retry {
+                attempt: sapho_campaign::lifecycle::AttemptId::new(1).unwrap(),
+                expected: AttemptState::Failed,
+                reason: " ".into()
+            }
+        )
+        .is_err()
+    );
+    assert!(!dir.path().join("campaign-controls").exists());
+}
