@@ -9,7 +9,14 @@ use sapho_core::{
     Answer, ErrorCode, ModelBackend, ModelRequest, ModelResponse, Result, SaphoError,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, sync::Mutex, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 use tokio::sync::Semaphore;
 /// Explicit finite generation and capture bounds.
 #[derive(Debug, Clone, Copy)]
@@ -101,6 +108,17 @@ impl Drop for Captured<'_> {
         let _ = self.save();
     }
 }
+/// Source-free live progress; dispatch attempt does not imply HTTP200 or correctness.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Progress {
+    /// Native HTTP send attempts, including failures and indeterminate outcomes.
+    pub dispatch_attempts: usize,
+    /// Finished or cancelled bounded wire receipts.
+    pub receipts: usize,
+    /// A serialized inference invocation holds the gate.
+    pub in_flight: bool,
+}
 /// Host-managed local backend; never installs or starts a service.
 pub struct OllamaBackend {
     client: Client,
@@ -108,6 +126,7 @@ pub struct OllamaBackend {
     limits: Limits,
     gate: Semaphore,
     capture: Mutex<Capture>,
+    started: AtomicUsize,
 }
 fn error(code: ErrorCode, message: &str) -> SaphoError {
     SaphoError::new(code, message)
@@ -154,6 +173,19 @@ impl OllamaBackend {
             limits,
             gate: Semaphore::new(1),
             capture: Mutex::new(Capture::default()),
+            started: AtomicUsize::new(0),
+        })
+    }
+    /// Source-free counters for a live monitoring host; no raw capture cloning.
+    pub fn progress(&self) -> Result<Progress> {
+        let capture = self
+            .capture
+            .lock()
+            .map_err(|_| error(ErrorCode::BackendFailed, "Capture lock poisoned"))?;
+        Ok(Progress {
+            dispatch_attempts: self.started.load(Ordering::Relaxed),
+            receipts: capture.receipts.len(),
+            in_flight: self.gate.available_permits() == 0,
         })
     }
     /// Snapshot bounded raw exchanges outside async execution.
@@ -219,6 +251,7 @@ impl OllamaBackend {
             capture: &self.capture,
             saved: false,
         };
+        self.started.fetch_add(1, Ordering::Relaxed);
         let response = match self
             .client
             .post(self.url.clone())
