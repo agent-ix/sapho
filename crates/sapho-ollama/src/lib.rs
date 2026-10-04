@@ -361,7 +361,12 @@ impl OllamaBackend {
             return Err(error(
                 ErrorCode::LimitExceeded,
                 "Complete input exceeds conservative context bound; no truncation",
-            ));
+            )
+            .with_context("prompt_bytes", prompt.len().to_string())
+            .with_context("output_tokens", self.limits.output_tokens.to_string())
+            .with_context("template_reserve", "1024")
+            .with_context("context_tokens", self.limits.context_tokens.to_string())
+            .with_context("token_upper_bound", "one_utf8_byte_per_token"));
         }
         let body=serde_json::to_vec(&serde_json::json!({"model":request.model,"prompt":prompt,"stream":false,"format":answer_schema(request),"think":self.limits.think,"options":{"temperature":0,"num_ctx":self.limits.context_tokens,"num_predict":self.limits.output_tokens}})).map_err(|_|error(ErrorCode::Config,"Cannot encode local request"))?;
         if body.len() > self.limits.request_bytes {
@@ -583,10 +588,34 @@ mod tests {
             },
         )
         .unwrap();
+        let failure = backend.infer(&request()).await.unwrap_err();
+        assert_eq!(failure.code, ErrorCode::LimitExceeded);
         assert_eq!(
-            backend.infer(&request()).await.unwrap_err().code,
-            ErrorCode::LimitExceeded
+            failure.context.get("output_tokens").map(String::as_str),
+            Some("1")
         );
+        assert_eq!(
+            failure.context.get("template_reserve").map(String::as_str),
+            Some("1024")
+        );
+        assert_eq!(
+            failure.context.get("context_tokens").map(String::as_str),
+            Some("1025")
+        );
+        assert_eq!(
+            failure.context.get("token_upper_bound").map(String::as_str),
+            Some("one_utf8_byte_per_token")
+        );
+        assert!(
+            failure
+                .context
+                .get("prompt_bytes")
+                .unwrap()
+                .parse::<usize>()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(failure.context.len(), 5);
         assert!(backend.receipts().unwrap().is_empty());
     }
     async fn server(body: &str, delay: Duration) -> (String, tokio::task::JoinHandle<()>) {
