@@ -55,3 +55,7 @@ pub use sapho_runtime as runtime;
 #[cfg(feature = "clm")]
 /// Host-configured CLM System One backend.
 pub use sapho_clm as clm;
+
+/// Explicit local Ollama provider with self-reported confidence.
+#[cfg(feature = "ollama")]
+pub use sapho_ollama as ollama;

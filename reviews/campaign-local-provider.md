@@ -1,0 +1,11 @@
+# Local Ollama provider review
+
+Scope: FR-048, sapho-ollama, facade feature. Base/integrity/scope/dependency review precedes release. Rust pre-design uses ModelBackend, structured SaphoError, deterministic typed maps, one bounded async gate, no domain rules or unsafe/blocking I/O during inference.
+
+Design fixes: Ollama native generate differs from CLM SystemOne; independent adapter required. Model self-report is explicitly uncalibrated; probabilities remain unavailable, never inferred from a sampled label. Timeout cancellation originally lost raw evidence; a drop guard now seals partial exchange. Capture is bounded before dispatch. Provider wire accepts documented metadata while typed answer objects deny unknown fields. Complete input uses a conservative UTF8-byte token upper bound plus template/output reserve; no truncation. Arbitrary model labels/context capabilities still need host diagnosis.
+
+Formal Rust review: no mutex held across await; semaphore bounds calls to one; raw HTTP bytes captured before typed decode; outer deadline includes acquisition/send/read; cancellation releases gate and retains indeterminate receipt; redirects/proxies/retries disabled; local endpoint disallows credentials/query/fragment; no generic graph/runtime or question ownership duplicated. Default tests use synthetic loopback only. Probe is explicit, public synthetic source.
+
+Validation: four unit contract tests passed (self-report, no dispatch at preflight, invalid HTTP200 retained, cancellation receipt). Live qwen3:30b-opencode-32k returned valid Boolean, Choice and Score through native transport; no probability distributions returned. Ollama ps reported 100% GPU, context32768. This is transport/GPU evidence, not accuracy/calibration/throughput evidence. Model/service upgrades require revalidation.
+
+Limitations: raw capture is host-managed process memory until snapshot; crashes before host checkpoint lose partial raw bytes and leave conservative indeterminate host state. It is not a disk durability claim. Adapter does not authenticate/install/start a service or enforce GPU placement. Host must inspect model placement. Trusted loopback service can send untruthful self-report. No statistical independence claim.

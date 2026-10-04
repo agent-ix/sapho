@@ -1843,6 +1843,7 @@ dependencies = [
  "sapho-core",
  "sapho-graph",
  "sapho-jev",
+ "sapho-ollama",
  "sapho-recording",
  "sapho-runtime",
  "serde",
@@ -1948,6 +1949,19 @@ dependencies = [
  "typesafe-sdk-http",
  "typesafe-sdk-questions",
  "typesafe-sdk-retry",
+]
+
+[[package]]
+name = "sapho-ollama"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "reqwest",
+ "sapho-core",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

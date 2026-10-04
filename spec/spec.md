@@ -16,7 +16,7 @@ Sapho executes configurable graphs of native code, typed model questions and log
 
 ### 2.1 In Scope
 
-Typed values and provenance; native Rust extension registration; YAML/JSON graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev and host-configured CLM adapters; caller-controlled recording and exact offline replay.
+Typed values and provenance; native Rust extension registration; YAML/JSON graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev and host-configured CLM and local Ollama adapters; caller-controlled recording and exact offline replay.
 
 ### 2.2 Out of Scope
 
@@ -35,6 +35,7 @@ A Rust embedding application or the Sapho CLI host supplies inputs, graph config
 | [runtime](modules/runtime/spec.md) | `sapho-runtime` | Bounded graph execution and collection identity |
 | [logic](modules/logic/spec.md) | `sapho-runtime` | Crisp logic and heuristic degree operations |
 | [systemone](modules/systemone/spec.md) | `sapho-systemone` | Shared source-free request translation into SDK-owned wire types |
+| [ollama](modules/ollama/spec.md) | `sapho-ollama` | Explicit bounded local generation with model self-reported confidence |
 | [clm](modules/clm/spec.md) | `sapho-clm` | Host-configured bounded CLM backend adapter |
 | [jev](modules/jev/spec.md) | `sapho-jev` | Hosted Jev backend adapter |
 | [recording](modules/recording/spec.md) | `sapho-recording` | Exact recording and offline replay |
