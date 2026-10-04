@@ -11,13 +11,35 @@ pub fn migrate<F>(source: &Campaign, destination: &Path, extension: F) -> Result
 where
     F: FnOnce(&Transaction<'_>, &Transaction<'_>) -> Result<()>,
 {
+    migrate_with_references(source, destination, |_| Ok(Vec::new()), extension)
+}
+/// Migrate a trusted adapter's explicit artifact references with the common snapshot.
+/// The reference callback reads the same snapshot as the table-copy callback;
+/// every hash is verified before output is created. No filesystem discovery occurs.
+pub fn migrate_with_references<R, F>(
+    source: &Campaign,
+    destination: &Path,
+    references: R,
+    extension: F,
+) -> Result<Campaign>
+where
+    R: FnOnce(&Transaction<'_>) -> Result<Vec<String>>,
+    F: FnOnce(&Transaction<'_>, &Transaction<'_>) -> Result<()>,
+{
     let snapshot = source.ledger().connection().unchecked_transaction()?;
     source.verify()?;
-    let references = {
+    let mut adapter_references = references(&snapshot)?;
+    let mut references = {
         let mut q=snapshot.prepare("SELECT evidence FROM events UNION SELECT evidence FROM campaign_jobs UNION SELECT request FROM campaign_attempts UNION SELECT response FROM campaign_attempts WHERE response IS NOT NULL ORDER BY 1")?;
         q.query_map([], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?
     };
+    references.append(&mut adapter_references);
+    references.sort();
+    references.dedup();
+    for hash in &references {
+        source.ledger().load(hash)?;
+    }
     std::fs::create_dir(destination)?;
     let mut target = Campaign::open(destination, true)?;
     for hash in references {

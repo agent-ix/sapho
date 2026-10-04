@@ -263,3 +263,58 @@ fn terminal_projection_failure_preserves_dispatch_for_explicit_recovery() {
     .unwrap();
     assert_eq!(c.attempt(id).unwrap().state, AttemptState::Failed);
 }
+
+#[test]
+fn migration_copies_only_snapshot_declared_domain_artifacts_and_prevalidates_hashes() {
+    // Trace: FR-049-AC-2, FR-049-AC-4, FR-051-AC-2
+    let (dir, mut source, _, _) = fixture();
+    let domain_hash = source.ledger().blob(b"domain only").unwrap();
+    let neighbor = source
+        .ledger()
+        .blob(b"unreferenced protected-neighbor stand-in")
+        .unwrap();
+    source
+        .ledger_mut()
+        .connection_mut()
+        .unwrap()
+        .execute_batch("CREATE TABLE domain_artifacts(hash TEXT NOT NULL)")
+        .unwrap();
+    source
+        .ledger_mut()
+        .connection_mut()
+        .unwrap()
+        .execute("INSERT INTO domain_artifacts VALUES(?)", [&domain_hash])
+        .unwrap();
+    let output = dir.path().join("domain-migration");
+    let target = sapho_campaign::migration::migrate_with_references(
+        &source,
+        &output,
+        |tx| {
+            let mut q = tx.prepare("SELECT hash FROM domain_artifacts")?;
+            Ok(q.query_map([], |r| r.get(0))?
+                .collect::<std::result::Result<Vec<String>, _>>()?)
+        },
+        |from, to| {
+            to.execute_batch("CREATE TABLE domain_artifacts(hash TEXT NOT NULL)")?;
+            let hash: String =
+                from.query_row("SELECT hash FROM domain_artifacts", [], |r| r.get(0))?;
+            to.execute("INSERT INTO domain_artifacts VALUES(?)", [hash])?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(target.ledger().load(&domain_hash).unwrap(), b"domain only");
+    assert!(!output.join("blobs").join(neighbor).exists());
+    std::fs::write(dir.path().join("blobs").join(&domain_hash), b"corrupt").unwrap();
+    let failed = dir.path().join("refused-corruption");
+    assert!(
+        sapho_campaign::migration::migrate_with_references(
+            &source,
+            &failed,
+            |_| Ok(vec![domain_hash]),
+            |_, _| Ok(())
+        )
+        .is_err()
+    );
+    assert!(!failed.exists());
+}

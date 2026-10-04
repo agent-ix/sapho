@@ -29,3 +29,8 @@ retry uses exact attempt/state and keeps the original outcome in all denominator
 Default tests are synthetic and offline. A completed graph says nothing about gold
 correctness, novelty or human usefulness. Consumer adaptation, migration and final
 review are required before this extraction is handed off as complete.
+
+Trusted adapters can use `migration::migrate_with_references` to name domain-only
+artifact hashes from the same read snapshot as their table copy. All referenced
+blobs are verified before the new destination is created; unrelated blobs are
+never discovered or copied.
