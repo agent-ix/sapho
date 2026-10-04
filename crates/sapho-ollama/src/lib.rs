@@ -119,6 +119,23 @@ pub struct Progress {
     /// A serialized inference invocation holds the gate.
     pub in_flight: bool,
 }
+/// Source-free installed-model and GPU-placement diagnosis, never inference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelInfo {
+    /// Requested installed model.
+    pub model: String,
+    /// Authoritative installed digest reported by service.
+    pub digest: String,
+    /// Advertised generation capability.
+    pub completion: bool,
+    /// Currently loaded context, absent when unloaded.
+    pub loaded_context: Option<u64>,
+    /// Loaded model bytes, zero when unloaded.
+    pub loaded_bytes: u64,
+    /// Bytes reported placed in GPU memory, zero when unloaded.
+    pub gpu_bytes: u64,
+}
 /// Host-managed local backend; never installs or starts a service.
 pub struct OllamaBackend {
     client: Client,
@@ -174,6 +191,120 @@ impl OllamaBackend {
             gate: Semaphore::new(1),
             capture: Mutex::new(Capture::default()),
             started: AtomicUsize::new(0),
+        })
+    }
+    /// Inspect installed model digest/capabilities and current GPU placement without loading it.
+    pub async fn inspect(&self, model: &str) -> Result<ModelInfo> {
+        if model.is_empty() || model.len() > 4096 {
+            return Err(error(ErrorCode::InvalidValue, "Explicit model required"));
+        }
+        tokio::time::timeout(self.limits.timeout, async {
+            let tags = self.inspect_endpoint("/api/tags", None).await?;
+            let installed = tags
+                .get("models")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|models| {
+                    models
+                        .iter()
+                        .find(|m| m.get("name").and_then(serde_json::Value::as_str) == Some(model))
+                })
+                .ok_or_else(|| {
+                    error(
+                        ErrorCode::Config,
+                        "Selected model is not installed under this exact alias",
+                    )
+                })?;
+            let digest = installed
+                .get("digest")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| error(ErrorCode::InvalidAnswer, "Installed model digest absent"))?
+                .to_owned();
+            let show = self
+                .inspect_endpoint("/api/show", Some(serde_json::json!({"model":model})))
+                .await?;
+            let completion = show
+                .get("capabilities")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|a| a.iter().any(|v| v.as_str() == Some("completion")));
+            let ps = self.inspect_endpoint("/api/ps", None).await?;
+            let loaded = ps
+                .get("models")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|models| {
+                    models
+                        .iter()
+                        .find(|m| m.get("name").and_then(serde_json::Value::as_str) == Some(model))
+                });
+            let number = |key: &str| {
+                loaded
+                    .and_then(|m| m.get(key))
+                    .and_then(serde_json::Value::as_u64)
+            };
+            Ok(ModelInfo {
+                model: model.to_owned(),
+                digest,
+                completion,
+                loaded_context: number("context_length"),
+                loaded_bytes: number("size").unwrap_or(0),
+                gpu_bytes: number("size_vram").unwrap_or(0),
+            })
+        })
+        .await
+        .map_err(|_| {
+            error(
+                ErrorCode::DeadlineExceeded,
+                "Local model inspection deadline exceeded",
+            )
+        })?
+    }
+    async fn inspect_endpoint(
+        &self,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let mut url = self.url.clone();
+        url.set_path(path);
+        let request =
+            if let Some(body) = body {
+                self.client
+                    .post(url)
+                    .header("Content-Type", "application/json")
+                    .body(serde_json::to_vec(&body).map_err(|_| {
+                        error(ErrorCode::Config, "Cannot encode inspection request")
+                    })?)
+            } else {
+                self.client.get(url)
+            };
+        let response = request.send().await.map_err(|_| {
+            error(
+                ErrorCode::BackendFailed,
+                "Local model inspection unavailable",
+            )
+        })?;
+        if !response.status().is_success() {
+            return Err(error(
+                ErrorCode::BackendFailed,
+                "Local model inspection refused",
+            ));
+        }
+        let mut bytes = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk
+                .map_err(|_| error(ErrorCode::BackendFailed, "Local inspection body failed"))?;
+            if bytes.len().saturating_add(chunk.len()) > self.limits.response_bytes {
+                return Err(error(
+                    ErrorCode::LimitExceeded,
+                    "Local inspection response exceeded cap",
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        serde_json::from_slice(&bytes).map_err(|_| {
+            error(
+                ErrorCode::InvalidAnswer,
+                "Invalid model inspection response",
+            )
         })
     }
     /// Source-free counters for a live monitoring host; no raw capture cloning.
@@ -500,5 +631,41 @@ mod tests {
         assert_eq!(receipts.len(), 1);
         assert!(receipts[0].made_call);
         task.abort();
+    }
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+    /// Trace: FR-048-AC-2
+    #[tokio::test]
+    async fn model_inspection_reports_digest_and_gpu_without_inference() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            for path in ["/api/tags", "/api/show", "/api/ps"] {
+                let (mut s, _) = listener.accept().await.unwrap();
+                let mut b = [0; 4096];
+                let n = s.read(&mut b).await.unwrap();
+                assert!(String::from_utf8_lossy(&b[..n]).contains(path));
+                let body=match path{"/api/tags"=>serde_json::json!({"models":[{"name":"local-test","digest":"abc"}]}),"/api/show"=>serde_json::json!({"capabilities":["completion"]}),_=>serde_json::json!({"models":[{"name":"local-test","size":100,"size_vram":100,"context_length":32768}]})}.to_string();
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                s.write_all(reply.as_bytes()).await.unwrap();
+            }
+        });
+        let backend = OllamaBackend::new(&url, Limits::default()).unwrap();
+        let info = backend.inspect("local-test").await.unwrap();
+        task.await.unwrap();
+        assert!(info.completion);
+        assert_eq!(info.digest, "abc");
+        assert_eq!(info.loaded_context, Some(32768));
+        assert_eq!(info.gpu_bytes, 100);
+        assert_eq!(backend.progress().unwrap().dispatch_attempts, 0);
+        assert!(backend.receipts().unwrap().is_empty());
     }
 }
