@@ -6,8 +6,9 @@
 # request per code-review case and two or three per requirement statement.
 # Needs a CLI built with --features jev and TYPESAFE_API_KEY. Jev's answers
 # vary by a few hundredths between runs, so a new recording changes the
-# documented numbers: update the docs, docs/images/diagrams.py and
-# scripts/check_docs.py (which pins them) together.
+# documented numbers: update the docs and scripts/check_docs.py (which pins
+# them), and re-render the figures (docs/images/figures.py reads the
+# recordings) with the docs-figures skill from agent-ix/dev-tools.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
