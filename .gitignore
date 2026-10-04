@@ -17,5 +17,3 @@ Cargo.lock.bak
 .idea/
 .vscode/
 
-# Fonts downloaded by docs/images/diagrams.py
-docs/images/.fonts/
