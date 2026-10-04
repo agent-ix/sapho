@@ -50,6 +50,11 @@ enum Action {
     },
     /// Report counts independently of domain correctness.
     Status,
+    /// Read a bounded versioned dashboard projection without payload disclosure.
+    Dashboard {
+        #[arg(long)]
+        attempt: Option<i64>,
+    },
     /// Attach a dashboard; detach leaves a headless worker alone.
     Tui,
     /// Queue an operator pause at a safe boundary.
@@ -119,6 +124,22 @@ pub(crate) fn execute(args: Args) -> Result<crate::command::Response, CliError> 
             &Campaign::open(&args.state, false)?.snapshot()?,
             ExitStatus::Completed,
         ),
+        Action::Dashboard { attempt } => {
+            let campaign = Campaign::open(&args.state, false)?;
+            let selected = attempt.map(AttemptId::new).transpose()?;
+            let generated = u64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(report_error)?
+                    .as_millis(),
+            )
+            .map_err(report_error)?;
+            let projection = sapho_campaign::dashboard::snapshot(&campaign, selected, generated)?;
+            Ok(crate::command::Response {
+                bytes: projection.to_json()?,
+                exit: ExitStatus::Completed,
+            })
+        }
         Action::Migrate {
             output: destination,
         } => {

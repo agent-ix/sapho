@@ -3,6 +3,7 @@
 //! Durable host infrastructure. Domain acceptance belongs to compiled consumers.
 pub mod adapter;
 pub mod control;
+pub mod dashboard;
 pub mod execution;
 pub mod export;
 pub mod lifecycle;
