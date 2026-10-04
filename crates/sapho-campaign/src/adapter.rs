@@ -3,7 +3,7 @@
 //! Trusted compiled domain ports and the stock native graph adapter.
 use crate::{
     Error, ErrorCode, Result,
-    lifecycle::{Attempt, Job, StageId},
+    lifecycle::{Attempt, AttemptId, AttemptState, Job, StageId},
     storage::Ledger,
 };
 use async_trait::async_trait;
@@ -92,6 +92,8 @@ pub struct Execution {
     pub outcome: ExecutionOutcome,
     /// Typed adapter output serialized under the host artifact bound.
     pub evidence: Vec<u8>,
+    /// Independently captured native artifacts, retained even if final sealing refuses.
+    pub captures: Vec<crate::runner::Capture>,
 }
 /// Domain-owned dashboard metric; core never derives semantic eligibility.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,11 +131,33 @@ pub trait CampaignAdapter: Send + Sync {
     fn stages(&self, job: &Job, ledger: &Ledger) -> Result<Vec<StageId>>;
     /// Produce exact isolated stage inputs and immutable execution metadata.
     fn prepare(&self, job: &Job, stage: &StageId, ledger: &Ledger) -> Result<PreparedStage>;
+    /// Commit adapter scheduling state in the same transaction as dispatch intent.
+    /// No inference, network or durable work outside this transaction belongs here.
+    fn dispatch(
+        &self,
+        _tx: &rusqlite::Transaction<'_>,
+        _job: &Job,
+        _request: &PreparedStage,
+        _attempt: AttemptId,
+    ) -> Result<()> {
+        Ok(())
+    }
+    /// Project an execution outcome in the same transaction as its generic state.
+    /// Successful domain acceptance is still owned by `seal`.
+    fn outcome(
+        &self,
+        _tx: &rusqlite::Transaction<'_>,
+        _attempt: &Attempt,
+        _state: AttemptState,
+    ) -> Result<()> {
+        Ok(())
+    }
     /// Execute using authoritative domain/native Sapho engines and explicit bindings.
     async fn execute(
         &self,
         request: &PreparedStage,
         backends: BackendRegistry,
+        attempt: AttemptId,
     ) -> Result<Execution>;
     /// Validate and atomically seal domain evidence; no network or inference here.
     fn seal(
@@ -211,6 +235,7 @@ impl CampaignAdapter for GraphAdapter {
         &self,
         request: &PreparedStage,
         backends: BackendRegistry,
+        _attempt: AttemptId,
     ) -> Result<Execution> {
         let input = decode(&request.payload)?;
         let graph = compile(&input.graph, &PrimitiveRegistry::default())
@@ -219,12 +244,14 @@ impl CampaignAdapter for GraphAdapter {
             .map_err(|e| Error::new(ErrorCode::Invalid, e.to_string()))?;
         match engine.run(&input.inputs, request.limits.run()?).await {
             Ok(run) => Ok(Execution {
+                captures: vec![],
                 outcome: ExecutionOutcome::Executed,
                 evidence: report(
                     &serde_json::json!({"schema":1,"outputs":run.outputs,"trace":run.trace}),
                 )?,
             }),
             Err(failure) => Ok(Execution {
+                captures: vec![],
                 outcome: ExecutionOutcome::Failed,
                 evidence: report(
                     &serde_json::json!({"schema":1,"error":failure.error,"trace":failure.trace}),

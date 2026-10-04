@@ -59,7 +59,7 @@ pub fn run_stage<F>(
     execute: F,
 ) -> Result<StageOutcome>
 where
-    F: FnOnce(&PreparedStage) -> Result<(Execution, Vec<Capture>)>,
+    F: FnOnce(&PreparedStage, AttemptId) -> Result<(Execution, Vec<Capture>)>,
 {
     let input = campaign.job(job)?;
     if input.adapter != adapter.id() {
@@ -104,22 +104,27 @@ where
         .as_ref()
         .zip(reason.as_deref())
         .map(|(a, reason)| (a.id, reason));
-    let id = campaign.start(job, stage, &bytes, retry)?;
-    let (execution, captures) = match execute(&request) {
+    let id = campaign.start_with(job, stage, &bytes, retry, |tx, id| {
+        adapter.dispatch(tx, &input, &request, id)
+    })?;
+    let (mut execution, mut captures) = match execute(&request, id) {
         Ok(result) => result,
         Err(error) => {
             let bytes = encode(
                 &serde_json::json!({"schema":1,"code":format!("{:?}",error.code),"message":error.message}),
             )?;
-            campaign.finish(id, AttemptState::Failed, &bytes)?;
+            campaign.finish_with(id, AttemptState::Failed, &bytes, |tx, attempt, state| {
+                adapter.outcome(tx, attempt, state)
+            })?;
             return Ok(StageOutcome::Attempt(id));
         }
     };
+    captures.append(&mut execution.captures);
     for capture in captures {
         campaign.capture(id, &capture.kind, &capture.bytes)?;
     }
     if execution.evidence.len() > DEFAULT_ARTIFACT_BYTES {
-        campaign.finish(id,AttemptState::Failed,&encode(&serde_json::json!({"schema":1,"code":"result_serialization_limit","result_bytes":execution.evidence.len(),"limit":DEFAULT_ARTIFACT_BYTES}))?)?;
+        campaign.finish_with(id,AttemptState::Failed,&encode(&serde_json::json!({"schema":1,"code":"result_serialization_limit","result_bytes":execution.evidence.len(),"limit":DEFAULT_ARTIFACT_BYTES}))?, |tx, attempt, state| adapter.outcome(tx, attempt, state))?;
         return Ok(StageOutcome::Attempt(id));
     }
     let outcome = match execution.outcome {
@@ -128,7 +133,9 @@ where
         ExecutionOutcome::BudgetRejected => AttemptState::BudgetRejected,
         ExecutionOutcome::Abstained => AttemptState::Abstained,
     };
-    campaign.finish(id, outcome, &execution.evidence)?;
+    campaign.finish_with(id, outcome, &execution.evidence, |tx, attempt, state| {
+        adapter.outcome(tx, attempt, state)
+    })?;
     if outcome == AttemptState::Executed {
         seal(campaign, adapter, id)?;
     }

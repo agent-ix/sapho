@@ -252,7 +252,7 @@ pub(crate) fn execute(args: Args) -> Result<crate::command::Response, CliError> 
                                 &id,
                                 &stage,
                                 &Default::default(),
-                                |_| Err(report_error("recovered sealing must not dispatch")),
+                                |_, _| Err(report_error("recovered sealing must not dispatch")),
                             )?;
                             continue;
                         }
@@ -345,42 +345,53 @@ pub(crate) fn execute(args: Args) -> Result<crate::command::Response, CliError> 
                         sapho_cli::live_bindings(&required, &metadata)?
                     };
                     let session = Session::record(&required, &registry, 16 * 1_048_576)?;
-                    runner::run_stage(&mut c, &adapter, &id, &stage, &provenance, |request| {
-                        let result =
-                            runtime.block_on(adapter.execute(request, session.bindings.clone()));
-                        let mut captures = session.capture()?;
-                        #[cfg(feature = "ollama")]
-                        if let Some(provider) = &provider {
-                            for (ordinal, receipt) in provider
-                                .receipts()
-                                .map_err(report_error)?
-                                .into_iter()
-                                .enumerate()
-                            {
-                                captures.push(Capture {
-                                    kind: format!("raw_provider_request:{ordinal}"),
-                                    bytes: receipt.request.clone(),
-                                });
-                                captures.push(Capture {
-                                    kind: format!("raw_provider_response:{ordinal}"),
-                                    bytes: receipt.response.clone(),
-                                });
-                                captures.push(Capture{kind:format!("provider_call_receipt:{ordinal}"),bytes:sapho_core::bounded_json(&serde_json::json!({"ordinal":ordinal,"made_call":receipt.made_call,"status":receipt.status,"request_sha256":sapho_campaign::storage::digest(&receipt.request),"response_sha256":sapho_campaign::storage::digest(&receipt.response),"confidence_evidence":receipt.confidence_evidence}),4096).map_err(report_error)?});
+                    runner::run_stage(
+                        &mut c,
+                        &adapter,
+                        &id,
+                        &stage,
+                        &provenance,
+                        |request, _attempt| {
+                            let result = runtime.block_on(adapter.execute(
+                                request,
+                                session.bindings.clone(),
+                                _attempt,
+                            ));
+                            let mut captures = session.capture()?;
+                            #[cfg(feature = "ollama")]
+                            if let Some(provider) = &provider {
+                                for (ordinal, receipt) in provider
+                                    .receipts()
+                                    .map_err(report_error)?
+                                    .into_iter()
+                                    .enumerate()
+                                {
+                                    captures.push(Capture {
+                                        kind: format!("raw_provider_request:{ordinal}"),
+                                        bytes: receipt.request.clone(),
+                                    });
+                                    captures.push(Capture {
+                                        kind: format!("raw_provider_response:{ordinal}"),
+                                        bytes: receipt.response.clone(),
+                                    });
+                                    captures.push(Capture{kind:format!("provider_call_receipt:{ordinal}"),bytes:sapho_core::bounded_json(&serde_json::json!({"ordinal":ordinal,"made_call":receipt.made_call,"status":receipt.status,"request_sha256":sapho_campaign::storage::digest(&receipt.request),"response_sha256":sapho_campaign::storage::digest(&receipt.response),"confidence_evidence":receipt.confidence_evidence}),4096).map_err(report_error)?});
+                                }
                             }
-                        }
-                        let execution = match result {
-                            Ok(run) => run,
-                            Err(error) => Execution {
-                                outcome: ExecutionOutcome::Failed,
-                                evidence: sapho_core::bounded_json(
-                                    &serde_json::json!({"schema":1,"error":error}),
-                                    4096,
-                                )
-                                .map_err(report_error)?,
-                            },
-                        };
-                        Ok((execution, captures))
-                    })?;
+                            let execution = match result {
+                                Ok(run) => run,
+                                Err(error) => Execution {
+                                    captures: vec![],
+                                    outcome: ExecutionOutcome::Failed,
+                                    evidence: sapho_core::bounded_json(
+                                        &serde_json::json!({"schema":1,"error":error}),
+                                        4096,
+                                    )
+                                    .map_err(report_error)?,
+                                },
+                            };
+                            Ok((execution, captures))
+                        },
+                    )?;
                 }
             }
             control::drain(&mut c)?;
