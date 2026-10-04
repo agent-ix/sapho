@@ -138,3 +138,78 @@ fn pause_survives_progress_and_control_replay_has_no_effect() {
     );
     assert!(c.snapshot().unwrap().paused);
 }
+#[test]
+fn migration_preserves_ids_events_and_retry_lineage_without_source_changes() {
+    // Trace: FR-049-AC-4
+    let (dir, mut source, j, s) = fixture();
+    let original = source.start(&j, &s, b"first request", None).unwrap();
+    source.recover().unwrap();
+    let retry = source
+        .start(&j, &s, b"retry", Some((original, "explicit retry")))
+        .unwrap();
+    source
+        .finish(retry, AttemptState::Failed, b"retained failure")
+        .unwrap();
+    let before = source.snapshot().unwrap();
+    let target =
+        sapho_campaign::migration::migrate(&source, &dir.path().join("migrated"), |_, _| Ok(()))
+            .unwrap();
+    assert_eq!(target.snapshot().unwrap().sequence, before.sequence);
+    assert_eq!(target.snapshot().unwrap().attempts, before.attempts);
+    assert_eq!(
+        target.attempt(original).unwrap().state,
+        AttemptState::Indeterminate
+    );
+    assert_eq!(
+        target.attempt(retry).unwrap().response,
+        source.attempt(retry).unwrap().response
+    );
+    assert_eq!(source.snapshot().unwrap().sequence, before.sequence);
+    assert_eq!(
+        target
+            .ledger()
+            .connection()
+            .query_row(
+                "SELECT parent FROM campaign_attempts WHERE id=?",
+                [retry.get()],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        original.get()
+    );
+    assert!(
+        sapho_campaign::migration::migrate(&source, &dir.path().join("migrated"), |_, _| Ok(()))
+            .is_err()
+    );
+}
+#[test]
+fn dispatch_extension_rolls_back_both_intent_and_domain_transition() {
+    // Trace: FR-049-AC-3, FR-050-AC-1
+    let (_dir, mut c, j, s) = fixture();
+    c.ledger_mut().connection_mut().unwrap().execute_batch("CREATE TABLE stage_owner(job TEXT,state TEXT); INSERT INTO stage_owner VALUES('synthetic','pending')").unwrap();
+    let before = c.snapshot().unwrap().sequence;
+    let result = c.start_with(&j, &s, b"request", None, |tx, _| {
+        tx.execute("UPDATE stage_owner SET state='running'", [])?;
+        Err(sapho_campaign::Error::new(
+            ErrorCode::Refused,
+            "domain precondition refused",
+        ))
+    });
+    assert!(result.is_err());
+    assert!(c.attempts().unwrap().is_empty());
+    assert_eq!(c.snapshot().unwrap().sequence, before);
+    assert_eq!(
+        c.ledger()
+            .connection()
+            .query_row("SELECT state FROM stage_owner", [], |r| r
+                .get::<_, String>(0))
+            .unwrap(),
+        "pending"
+    );
+    c.start_with(&j, &s, b"request", None, |tx, _| {
+        tx.execute("UPDATE stage_owner SET state='running'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(c.attempts().unwrap().len(), 1);
+}

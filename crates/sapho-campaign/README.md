@@ -12,7 +12,7 @@ engine success. `GraphAdapter` supplies the stock native Inputs/GraphSpec path.
 
 Use `sapho campaign --state PATH <command>`: init, import --job JSON, run,
 status, tui, pause, resume, retry --attempt N --reason TEXT, export --output NEW_DIR,
-doctor. Jobs use schema 1, adapter `sapho-graph/v1`, payload_schema 1 and a payload
+migrate --output NEW_STATE_DIR, doctor. Jobs use schema 1, adapter `sapho-graph/v1`, payload_schema 1 and a payload
 with native graph, typed inputs and explicit positive limits. Graphs remain native
 Sapho YAML/JSON; parsing does not introduce another workflow engine.
 

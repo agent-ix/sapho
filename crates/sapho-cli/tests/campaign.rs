@@ -58,3 +58,36 @@ fn headless_graph_campaign_exports_exact_evidence_and_queues_controls() {
     assert_eq!(manifest["snapshot"]["attempts"]["completed"], 1);
     assert!(manifest["artifacts"].as_object().unwrap().len() >= 3);
 }
+
+#[test]
+fn migration_command_preserves_stock_state_and_refuses_domain_tables() {
+    // Trace: FR-049-AC-4
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    call(&source, &["init"]);
+    let target = dir.path().join("target");
+    assert_eq!(
+        call(&source, &["migrate", "--output", target.to_str().unwrap()])["verified"],
+        true
+    );
+    assert_eq!(call(&source, &["status"]), call(&target, &["status"]));
+    let mut campaign = sapho_campaign::lifecycle::Campaign::open(&source, true).unwrap();
+    campaign
+        .ledger_mut()
+        .connection_mut()
+        .unwrap()
+        .execute_batch("CREATE TABLE domain_extension(value TEXT)")
+        .unwrap();
+    drop(campaign);
+    let rejected = dir.path().join("rejected");
+    let result = Command::new(env!("CARGO_BIN_EXE_sapho"))
+        .arg("campaign")
+        .arg("--state")
+        .arg(&source)
+        .args(["migrate", "--output"])
+        .arg(&rejected)
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(2));
+    assert!(!rejected.exists());
+}

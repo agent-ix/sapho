@@ -65,6 +65,11 @@ enum Action {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Copy a stock graph campaign into a new verified state directory.
+    Migrate {
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Verify exact evidence references; performs no inference.
     Doctor,
 }
@@ -111,6 +116,39 @@ pub(crate) fn execute(args: Args) -> Result<crate::command::Response, CliError> 
             &Campaign::open(&args.state, false)?.snapshot()?,
             ExitStatus::Completed,
         ),
+        Action::Migrate {
+            output: destination,
+        } => {
+            let source = Campaign::open(&args.state, false)?;
+            for id in source.jobs()? {
+                adapter.admit(&source.job(&id)?)?;
+            }
+            let mut query=source.ledger().connection().prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").map_err(sapho_campaign::Error::from)?;
+            let tables = query
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(sapho_campaign::Error::from)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(sapho_campaign::Error::from)?;
+            if tables.iter().any(|name| {
+                ![
+                    "events",
+                    "campaign_jobs",
+                    "campaign_attempts",
+                    "campaign_control",
+                ]
+                .contains(&name.as_str())
+            }) {
+                return Err(report_error(
+                    "stock migration refuses domain extensions; use the owning adapter migration",
+                )
+                .into());
+            }
+            let target = sapho_campaign::migration::migrate(&source, &destination, |_, _| Ok(()))?;
+            output(
+                &serde_json::json!({"migrated":true,"verified":true,"snapshot":target.snapshot()?}),
+                ExitStatus::Completed,
+            )
+        }
         Action::Doctor => {
             let c = Campaign::open(&args.state, false)?;
             c.verify()?;

@@ -6,6 +6,7 @@ pub mod control;
 pub mod execution;
 pub mod export;
 pub mod lifecycle;
+pub mod migration;
 pub mod runner;
 pub mod storage;
 use thiserror::Error;

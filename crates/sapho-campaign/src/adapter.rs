@@ -183,7 +183,9 @@ impl CampaignAdapter for GraphAdapter {
         }
         let input = decode(&job.payload)?;
         input.limits.run()?;
-        compile(&input.graph, &PrimitiveRegistry::default())
+        let graph = compile(&input.graph, &PrimitiveRegistry::default())
+            .map_err(|e| Error::new(ErrorCode::Invalid, e.to_string()))?;
+        sapho_core::check_ports(&graph.signature().inputs, &input.inputs)
             .map_err(|e| Error::new(ErrorCode::Invalid, e.to_string()))?;
         Ok(())
     }
@@ -261,7 +263,12 @@ impl CampaignAdapter for GraphAdapter {
         if result.schema != 1 {
             return Err(Error::new(ErrorCode::Refused, "unsupported graph result"));
         }
-        let _ = (result.outputs, result.trace);
+        let input = decode(&request.payload)?;
+        let graph = compile(&input.graph, &PrimitiveRegistry::default())
+            .map_err(|e| Error::new(ErrorCode::Invalid, e.to_string()))?;
+        sapho_core::check_ports(&graph.signature().outputs, &result.outputs)
+            .map_err(|e| Error::new(ErrorCode::Refused, e.to_string()))?;
+        let _ = result.trace;
         Ok(())
     }
 }

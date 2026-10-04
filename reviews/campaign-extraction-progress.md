@@ -6,7 +6,7 @@ recording session, native graph runner and reference-only export are implemented
 The separate Ratatui crate is attached through snapshot/control callbacks. Existing
 ix-cli-kit Sapho CLI exposes campaign commands.
 
-Eight library tests and one end-to-end CLI test pass. Clippy with warnings denied
+Ten library tests and two end-to-end CLI tests pass. Clippy with warnings denied
 passes for all three affected crates. No claim of completed EARS adaptation,
 verified migration, live generic replay or final formal review is made.
 
@@ -26,3 +26,11 @@ spec-artifacts-process twice, DuplicateInverseEdge for part_of (aggregates,
 contains), and semantic.inline-data-schema in that module. Validation passes;
 this warning is reported, not treated as a proven historic failure or ignored.
 No old binary/skill fallback was used.
+
+Subsequent progress: explicit snapshot migration preserves generic events, job
+identities, attempt IDs/parent links and artifact hashes. The stock CLI refuses
+unknown domain-owned tables before creating a migration destination. Trusted
+admission/dispatch extension hooks commit generic and domain transitions together;
+fault injection proves rollback leaves no dispatch intent. EARS now delegates
+storage, exact recording sessions and TUI rendering; shared lifecycle conversion
+and owning-adapter migration remain unfinished. No completion handoff has been sent.

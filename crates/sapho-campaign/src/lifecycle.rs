@@ -194,6 +194,14 @@ impl Campaign {
     }
     /// Admit one adapter-validated envelope idempotently.
     pub fn admit(&mut self, job: &Job) -> Result<bool> {
+        self.admit_with(job, |_| Ok(()))
+    }
+    /// Admit generic identity and domain-owned rows in one fenced transaction.
+    /// The trusted extension runs only for a newly admitted identity.
+    pub fn admit_with<F>(&mut self, job: &Job, extension: F) -> Result<bool>
+    where
+        F: FnOnce(&Transaction<'_>) -> Result<()>,
+    {
         if job.schema != 1 || job.payload_schema == 0 || job.adapter.trim().is_empty() {
             return Err(Error::new(ErrorCode::Invalid, "unsupported job envelope"));
         }
@@ -222,6 +230,7 @@ impl Campaign {
             "INSERT INTO campaign_jobs VALUES(?,?,?)",
             params![job.id.as_str(), job.adapter, hash],
         )?;
+        extension(&tx)?;
         Ledger::event_tx(&tx, "job_admitted", job.id.as_str(), &hash)?;
         tx.commit()?;
         Ok(true)
@@ -255,6 +264,21 @@ impl Campaign {
         request: &[u8],
         retry: Option<(AttemptId, &str)>,
     ) -> Result<AttemptId> {
+        self.start_with(job, stage, request, retry, |_, _| Ok(()))
+    }
+    /// Commit dispatch and a trusted domain state transition atomically.
+    /// The extension receives the allocated identity but must not dispatch inference.
+    pub fn start_with<F>(
+        &mut self,
+        job: &JobId,
+        stage: &StageId,
+        request: &[u8],
+        retry: Option<(AttemptId, &str)>,
+        extension: F,
+    ) -> Result<AttemptId>
+    where
+        F: FnOnce(&Transaction<'_>, AttemptId) -> Result<()>,
+    {
         self.job(job)?;
         let hash = self.ledger.blob(request)?;
         let tx = self.ledger.connection_mut()?.transaction()?;
@@ -277,6 +301,7 @@ impl Campaign {
             .unwrap_or((None, None));
         tx.execute("INSERT INTO campaign_attempts(job,stage,parent,reason,state,request) VALUES(?,?,?,?,?,?)",params![job.as_str(),stage.as_str(),parent,reason,AttemptState::DispatchIntent.as_str(),hash])?;
         let id = AttemptId::new(tx.last_insert_rowid())?;
+        extension(&tx, id)?;
         Ledger::event_tx(&tx, "dispatch_intent", &id.get().to_string(), &hash)?;
         tx.commit()?;
         Ok(id)

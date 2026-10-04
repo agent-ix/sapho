@@ -42,8 +42,8 @@ where
             "dashboard requires a terminal; use status for non-TTY monitoring",
         ));
     }
-    let mut terminal = ratatui::try_init()?;
     let _restore = Restore;
+    let mut terminal = ratatui::try_init()?;
     let mut selected = 0usize;
     let mut scroll = 0u16;
     let mut reason: Option<(
