@@ -46,6 +46,8 @@ where
     let mut terminal = ratatui::try_init()?;
     let mut selected = 0usize;
     let mut scroll = 0u16;
+    let mut detail_scroll = 0u16;
+    let mut inspect_focus = false;
     let mut reason: Option<(
         sapho_campaign::lifecycle::AttemptId,
         sapho_campaign::lifecycle::AttemptState,
@@ -95,32 +97,15 @@ where
                 .block(Block::bordered().title("Observed counts / domain evidence")),
                 areas[1],
             );
-            let detail = view
-                .attempts
-                .get(selected)
-                .map(|a| {
-                    format!(
-                        "Attempt {} / {}\nJob {} | stage {} | {:?}\nRequest {}\nResult {:?}",
-                        selected + 1,
-                        view.attempts.len(),
-                        a.job.as_str(),
-                        a.stage.as_str(),
-                        a.state,
-                        a.request,
-                        a.response
-                    )
-                })
+            let detail = view.attempts.get(selected)
+                .map(|attempt| attempt_detail(attempt,selected,view.attempts.len()))
                 .unwrap_or_else(|| "No attempts".into());
-            frame.render_widget(
-                Paragraph::new(detail)
-                    .block(Block::bordered().title("Retained attempt inspection")),
-                areas[2],
-            );
+            render_inspection(frame,areas[2],&detail,detail_scroll,inspect_focus);
             let footer = reason
                 .as_ref()
                 .map(|(_, _, r)| format!("Retry reason: {r}\nEnter submit | Esc cancel"))
                 .unwrap_or_else(|| {
-                    let help = "q detach | p pause | arrows inspect | PgUp/Dn scroll | r retry";
+                    let help = "q detach | p pause | arrows inspect | Tab focus | PgUp/Dn scroll | r retry";
                     if notice.is_empty() {
                         help.into()
                     } else {
@@ -170,14 +155,38 @@ where
         }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => break,
-            KeyCode::Up => selected = selected.saturating_sub(1),
+            KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                detail_scroll = 0;
+            }
             KeyCode::Down => {
                 selected = selected
                     .saturating_add(1)
-                    .min(view.attempts.len().saturating_sub(1))
+                    .min(view.attempts.len().saturating_sub(1));
+                detail_scroll = 0;
             }
-            KeyCode::PageDown => scroll = scroll.saturating_add(5),
-            KeyCode::PageUp => scroll = scroll.saturating_sub(5),
+            KeyCode::Tab => inspect_focus = !inspect_focus,
+            KeyCode::Home => {
+                if inspect_focus {
+                    detail_scroll = 0;
+                } else {
+                    scroll = 0;
+                }
+            }
+            KeyCode::PageDown => {
+                if inspect_focus {
+                    detail_scroll = detail_scroll.saturating_add(5);
+                } else {
+                    scroll = scroll.saturating_add(5);
+                }
+            }
+            KeyCode::PageUp => {
+                if inspect_focus {
+                    detail_scroll = detail_scroll.saturating_sub(5);
+                } else {
+                    scroll = scroll.saturating_sub(5);
+                }
+            }
             KeyCode::Char('p') => {
                 notice = match submit(&Control::Pause {
                     paused: !view.campaign.paused,
@@ -201,4 +210,83 @@ where
         }
     }
     Ok(())
+}
+
+fn attempt_detail(attempt: &Attempt, selected: usize, count: usize) -> String {
+    format!(
+        "Attempt {} ({} / {})\nJob {} | stage {} | {:?}\nRetry parent: {}\nRetry reason: {}\nRequest {}\nResult {}",
+        attempt.id.get(),
+        selected + 1,
+        count,
+        attempt.job.as_str(),
+        attempt.stage.as_str(),
+        attempt.state,
+        attempt
+            .parent
+            .map(|parent| parent.get().to_string())
+            .unwrap_or_else(|| "none".into()),
+        attempt.reason.as_deref().unwrap_or("none"),
+        attempt.request,
+        attempt.response.as_deref().unwrap_or("not captured"),
+    )
+}
+fn render_inspection(
+    frame: &mut ratatui::Frame<'_>,
+    area: ratatui::layout::Rect,
+    detail: &str,
+    scroll: u16,
+    focused: bool,
+) {
+    frame.render_widget(
+        Paragraph::new(detail)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0))
+            .block(Block::bordered().title(if focused {
+                "Attempt inspection [scroll]"
+            } else {
+                "Attempt inspection"
+            })),
+        area,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sapho_campaign::lifecycle::{AttemptId, AttemptState, JobId, StageId};
+
+    #[test]
+    fn narrow_inspection_preserves_actual_identity_lineage_and_reachable_long_reason() {
+        let attempt = Attempt {
+            id: AttemptId::new(77).unwrap(),
+            job: JobId::new("source-job").unwrap(),
+            stage: StageId::new("classify").unwrap(),
+            parent: Some(AttemptId::new(31).unwrap()),
+            reason: Some(format!(
+                "{}reason-end-marker",
+                "source grounded reason ".repeat(30)
+            )),
+            state: AttemptState::Failed,
+            request: "a".repeat(64),
+            response: Some("b".repeat(64)),
+        };
+        let detail = attempt_detail(&attempt, 0, 1);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 8)).unwrap();
+        let mut observed = String::new();
+        for scroll in 0..60 {
+            terminal
+                .draw(|frame| render_inspection(frame, frame.area(), &detail, scroll, true))
+                .unwrap();
+            for cell in &terminal.backend().buffer().content {
+                observed.push_str(cell.symbol());
+            }
+        }
+        assert!(observed.contains("Attempt 77 (1 / 1)"));
+        assert!(observed.contains("Retry parent: 31"));
+        assert!(observed.contains("reason-end-marker"));
+        assert!(observed.contains(&"a".repeat(38)));
+        assert!(observed.contains(&"b".repeat(38)));
+        assert!(observed.contains("[scroll]"));
+    }
 }
