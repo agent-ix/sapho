@@ -625,6 +625,64 @@ mod tests {
         assert_eq!(receipts[0].status, Some(200));
         assert_eq!(receipts[0].response, b"invalid-json");
     }
+    /// Trace: FR-048-AC-5 FR-048-AC-4
+    #[tokio::test]
+    async fn competing_backends_wait_before_http_and_timeout_without_dispatch() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = tempfile::tempdir().unwrap();
+        let capacity = dir.path().join("service.lock");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (observed_tx, observed_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0; 65536];
+            let n = socket.read(&mut buf).await.unwrap();
+            assert!(String::from_utf8_lossy(&buf[..n]).starts_with("POST /api/generate"));
+            observed_tx.send(()).unwrap();
+            release_rx.await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\ninvalid-json").await.unwrap();
+        });
+        let owner = std::sync::Arc::new(
+            OllamaBackend::new_shared(&url, Limits::default(), &capacity).unwrap(),
+        );
+        let active = owner.clone();
+        let first = tokio::spawn(async move { active.infer(&request()).await });
+        tokio::time::timeout(Duration::from_secs(2), observed_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        let waiter = OllamaBackend::new_shared(
+            &url,
+            Limits {
+                timeout: Duration::from_millis(60),
+                ..Default::default()
+            },
+            &capacity,
+        )
+        .unwrap();
+        assert_eq!(
+            waiter.infer(&request()).await.unwrap_err().code,
+            ErrorCode::DeadlineExceeded
+        );
+        assert_eq!(waiter.progress().unwrap().dispatch_attempts, 0);
+        assert!(waiter.receipts().unwrap().is_empty());
+        assert_eq!(owner.progress().unwrap().dispatch_attempts, 1);
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            first.await.unwrap().unwrap_err().code,
+            ErrorCode::InvalidAnswer
+        );
+        server.await.unwrap();
+        // The completed owner released capacity, even though its answer was invalid.
+        let file = capacity::prepare(&capacity).unwrap();
+        let lease = tokio::time::timeout(Duration::from_secs(1), capacity::acquire(&file))
+            .await
+            .unwrap()
+            .unwrap();
+        drop(lease);
+    }
     /// Trace: FR-048-AC-4
     #[tokio::test]
     async fn timeout_retains_dispatched_attempt_without_retry() {
