@@ -39,11 +39,19 @@ fn regular(path: &Path, write: bool, create: bool) -> Result<File> {
     }
     Ok(file)
 }
+// This field drops after the connection. Explicit unlock prevents a duplicate
+// descriptor in a concurrently spawned child prolonging a graceful writer close.
+struct WriterFence(File);
+impl Drop for WriterFence {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
+}
 /// Fenced local SQLite ledger. Synchronous storage must stay outside async workers.
 pub struct Ledger {
     root: PathBuf,
     conn: Connection,
-    lock: Option<File>,
+    lock: Option<WriterFence>,
     max_bytes: usize,
 }
 impl Ledger {
@@ -67,7 +75,7 @@ impl Ledger {
             let f = regular(&root.join("writer.lock"), true, true)?;
             f.try_lock_exclusive()
                 .map_err(|_| Error::new(ErrorCode::Conflict, "another writer holds the ledger"))?;
-            Some(f)
+            Some(WriterFence(f))
         } else {
             None
         };
@@ -232,4 +240,29 @@ pub fn read_file(path: &Path, max_bytes: usize) -> Result<Vec<u8>> {
         ));
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn writer_lifetime_releases_fence_despite_duplicated_descriptor() {
+        // Trace: FR-049-AC-1
+        // A descriptor inherited during process spawning has the same OS lock owner.
+        let dir = tempfile::tempdir().unwrap();
+        let writer =
+            Ledger::open(dir.path(), "campaign.sqlite", true, DEFAULT_ARTIFACT_BYTES).unwrap();
+        let duplicate = writer.lock.as_ref().unwrap().0.try_clone().unwrap();
+        assert!(Ledger::open(dir.path(), "campaign.sqlite", true, DEFAULT_ARTIFACT_BYTES).is_err());
+        let reader =
+            Ledger::open(dir.path(), "campaign.sqlite", false, DEFAULT_ARTIFACT_BYTES).unwrap();
+        drop(reader);
+        drop(writer);
+        let reopened = Ledger::open(dir.path(), "campaign.sqlite", true, DEFAULT_ARTIFACT_BYTES);
+        drop(duplicate);
+        assert!(
+            reopened.is_ok(),
+            "a duplicate descriptor must not prolong a closed ledger's writer lifetime"
+        );
+    }
 }
