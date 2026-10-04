@@ -4,7 +4,7 @@
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::{
     layout::{Constraint, Layout},
-    widgets::{Block, Paragraph},
+    widgets::{Block, Paragraph, Wrap},
 };
 use sapho_campaign::{
     Result,
@@ -55,16 +55,84 @@ where
     loop {
         let view = read()?;
         selected = selected.min(view.attempts.len().saturating_sub(1));
-        terminal.draw(|frame|{
-            let areas=Layout::vertical([Constraint::Length(3),Constraint::Percentage(35),Constraint::Min(4),Constraint::Length(3)]).split(frame.area());
-            let c=&view.campaign;
-            frame.render_widget(Paragraph::new(format!("Campaign | jobs {} | event {} | control {} | paused {}",c.jobs,c.sequence,c.control_revision,c.paused)).block(Block::bordered()),areas[0]);
-            let metrics=view.domain.metrics.values().map(|m|format!("{}: {}{}",m.label,m.value,m.target.map(|t|format!(" / {t}")).unwrap_or_default())).collect::<Vec<_>>().join("\n");
-            frame.render_widget(Paragraph::new(format!("Attempts: {:?}\nDomain completion: {:?}\n{}",c.attempts,view.domain.complete,metrics)).scroll((scroll,0)).block(Block::bordered().title("Observed counts / domain evidence")),areas[1]);
-            let detail=view.attempts.get(selected).map(|a|format!("Attempt {} / {}\nJob {} | stage {} | {:?}\nRequest {}\nResult {:?}",selected+1,view.attempts.len(),a.job.as_str(),a.stage.as_str(),a.state,a.request,a.response)).unwrap_or_else(||"No attempts".into());
-            frame.render_widget(Paragraph::new(detail).block(Block::bordered().title("Retained attempt inspection")),areas[2]);
-            let footer=reason.as_ref().map(|(_,_,r)|format!("Retry reason: {r} | Enter submit / Esc cancel")).unwrap_or_else(||format!("q detach | p pause/resume | arrows inspect | PgUp/PgDn scroll | r retry | {notice}"));
-            frame.render_widget(Paragraph::new(footer).block(Block::bordered()),areas[3]);
+        terminal.draw(|frame| {
+            let areas = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Percentage(35),
+                Constraint::Min(4),
+                Constraint::Length(5),
+            ])
+            .split(frame.area());
+            let c = &view.campaign;
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "Campaign | jobs {} | event {} | control {} | paused {}",
+                    c.jobs, c.sequence, c.control_revision, c.paused
+                ))
+                .block(Block::bordered()),
+                areas[0],
+            );
+            let metrics = view
+                .domain
+                .metrics
+                .values()
+                .map(|m| {
+                    format!(
+                        "{}: {}{}",
+                        m.label,
+                        m.value,
+                        m.target.map(|t| format!(" / {t}")).unwrap_or_default()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "Attempts: {:?}\nDomain completion: {:?}\n{}",
+                    c.attempts, view.domain.complete, metrics
+                ))
+                .scroll((scroll, 0))
+                .block(Block::bordered().title("Observed counts / domain evidence")),
+                areas[1],
+            );
+            let detail = view
+                .attempts
+                .get(selected)
+                .map(|a| {
+                    format!(
+                        "Attempt {} / {}\nJob {} | stage {} | {:?}\nRequest {}\nResult {:?}",
+                        selected + 1,
+                        view.attempts.len(),
+                        a.job.as_str(),
+                        a.stage.as_str(),
+                        a.state,
+                        a.request,
+                        a.response
+                    )
+                })
+                .unwrap_or_else(|| "No attempts".into());
+            frame.render_widget(
+                Paragraph::new(detail)
+                    .block(Block::bordered().title("Retained attempt inspection")),
+                areas[2],
+            );
+            let footer = reason
+                .as_ref()
+                .map(|(_, _, r)| format!("Retry reason: {r}\nEnter submit | Esc cancel"))
+                .unwrap_or_else(|| {
+                    let help = "q detach | p pause | arrows inspect | PgUp/Dn scroll | r retry";
+                    if notice.is_empty() {
+                        help.into()
+                    } else {
+                        format!("{notice}\n{help}")
+                    }
+                });
+            frame.render_widget(
+                Paragraph::new(footer)
+                    .wrap(Wrap { trim: true })
+                    .block(Block::bordered()),
+                areas[3],
+            );
         })?;
         if !crossterm::event::poll(Duration::from_millis(400))? {
             continue;
