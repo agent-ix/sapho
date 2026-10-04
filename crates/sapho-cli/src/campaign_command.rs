@@ -30,8 +30,11 @@ enum Action {
     },
     /// Run pending graph stages without automatic retries.
     Run {
-        #[arg(long,conflicts_with_all=["bindings","recording"])]
+        #[arg(long, requires = "ollama_capacity", conflicts_with_all=["bindings","recording"])]
         ollama_url: Option<String>,
+        /// Shared stable capacity file used by every worker for this service.
+        #[arg(long, requires = "ollama_url")]
+        ollama_capacity: Option<PathBuf>,
         #[arg(long, requires = "ollama_url")]
         model: Option<String>,
         #[arg(long)]
@@ -215,6 +218,7 @@ pub(crate) fn execute(args: Args) -> Result<crate::command::Response, CliError> 
         }
         Action::Run {
             ollama_url,
+            ollama_capacity,
             model,
             bindings,
             recording,
@@ -297,15 +301,22 @@ pub(crate) fn execute(args: Args) -> Result<crate::command::Response, CliError> 
                             let model = model.as_deref().ok_or_else(|| {
                                 CliError::Arguments("--model is required with --ollama-url".into())
                             })?;
-                            let local = std::sync::Arc::new(sapho_ollama::OllamaBackend::new(
-                                url,
-                                sapho_ollama::Limits {
-                                    context_tokens,
-                                    output_tokens,
-                                    think: if no_thinking { Some(false) } else { None },
-                                    ..Default::default()
-                                },
-                            )?);
+                            let local =
+                                std::sync::Arc::new(sapho_ollama::OllamaBackend::new_shared(
+                                    url,
+                                    sapho_ollama::Limits {
+                                        context_tokens,
+                                        output_tokens,
+                                        think: if no_thinking { Some(false) } else { None },
+                                        ..Default::default()
+                                    },
+                                    ollama_capacity.as_deref().ok_or_else(|| {
+                                        CliError::Arguments(
+                                            "--ollama-capacity is required for live Ollama work"
+                                                .into(),
+                                        )
+                                    })?,
+                                )?);
                             let info = runtime.block_on(local.inspect(model))?;
                             if !info.completion {
                                 return Err(CliError::Arguments(

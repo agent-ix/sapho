@@ -2838,11 +2838,14 @@ name = "sapho-ollama"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "fs2",
  "futures",
  "reqwest",
+ "rustix",
  "sapho-core",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

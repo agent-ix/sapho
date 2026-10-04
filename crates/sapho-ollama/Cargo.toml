@@ -15,5 +15,8 @@ async-trait.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 futures.workspace = true
+rustix.workspace = true
+fs2 = "0.4"
 [dev-dependencies]
+tempfile = "3"
 tokio = { workspace = true, features = ["net", "io-util"] }
