@@ -317,6 +317,21 @@ impl Campaign {
     }
     /// Retain execution result before domain sealing. Terminal success requires `seal`.
     pub fn finish(&mut self, id: AttemptId, state: AttemptState, bytes: &[u8]) -> Result<()> {
+        self.finish_with(id, state, bytes, |_, _, _| Ok(()))
+    }
+    /// Capture execution outcome and its domain projection in one transaction.
+    /// Successful semantic acceptance still requires the separate seal operation.
+    pub fn finish_with<F>(
+        &mut self,
+        id: AttemptId,
+        state: AttemptState,
+        bytes: &[u8],
+        extension: F,
+    ) -> Result<()>
+    where
+        F: FnOnce(&Transaction<'_>, &Attempt, AttemptState) -> Result<()>,
+    {
+        let attempt = self.attempt(id)?;
         if !matches!(
             state,
             AttemptState::Executed
@@ -335,6 +350,7 @@ impl Campaign {
                 "attempt is no longer dispatching",
             ));
         }
+        extension(&tx, &attempt, state)?;
         Ledger::event_tx(&tx, state.as_str(), &id.get().to_string(), &hash)?;
         tx.commit()?;
         Ok(())
@@ -369,21 +385,32 @@ impl Campaign {
     }
     /// Reopen dispatch intents as indeterminate, preserving successful unsealed results.
     pub fn recover(&mut self) -> Result<usize> {
-        let ids = {
-            let mut q=self.ledger.connection().prepare("SELECT id,request FROM campaign_attempts WHERE state='dispatch_intent' ORDER BY id")?;
-            q.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
-                .collect::<std::result::Result<Vec<_>, _>>()?
-        };
+        self.recover_with(|_, _| Ok(()))
+    }
+    /// Recover generic dispatch intents and their owning domain states atomically.
+    /// Captured executed results remain available for sealing, never redispatched.
+    pub fn recover_with<F>(&mut self, mut extension: F) -> Result<usize>
+    where
+        F: FnMut(&Transaction<'_>, &Attempt) -> Result<()>,
+    {
+        let attempts = self
+            .attempts()?
+            .into_iter()
+            .filter(|a| a.state == AttemptState::DispatchIntent)
+            .collect::<Vec<_>>();
         let tx = self.ledger.connection_mut()?.transaction()?;
-        for (id, request) in &ids {
-            tx.execute(
-                "UPDATE campaign_attempts SET state='indeterminate' WHERE id=?",
-                [id],
+        for attempt in &attempts {
+            extension(&tx, attempt)?;
+            tx.execute("UPDATE campaign_attempts SET state='indeterminate' WHERE id=? AND state='dispatch_intent'",[attempt.id.get()])?;
+            Ledger::event_tx(
+                &tx,
+                "indeterminate",
+                &attempt.id.get().to_string(),
+                &attempt.request,
             )?;
-            Ledger::event_tx(&tx, "indeterminate", &id.to_string(), request)?;
         }
         tx.commit()?;
-        Ok(ids.len())
+        Ok(attempts.len())
     }
     /// Inspect one retained attempt.
     pub fn attempt(&self, id: AttemptId) -> Result<Attempt> {

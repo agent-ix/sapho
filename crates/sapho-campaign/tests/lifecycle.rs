@@ -213,3 +213,53 @@ fn dispatch_extension_rolls_back_both_intent_and_domain_transition() {
     .unwrap();
     assert_eq!(c.attempts().unwrap().len(), 1);
 }
+#[test]
+fn recovery_domain_refusal_rolls_back_all_abandoned_intents() {
+    // Trace: FR-049-AC-3, FR-050-AC-2
+    let (_dir, mut c, j, s) = fixture();
+    let id = c.start(&j, &s, b"request", None).unwrap();
+    let other = c
+        .start(&j, &StageId::new("other").unwrap(), b"other request", None)
+        .unwrap();
+    let before = c.snapshot().unwrap().sequence;
+    let result = c.recover_with(|_, a| {
+        if a.id == other {
+            Err(sapho_campaign::Error::new(
+                ErrorCode::Refused,
+                "domain recovery refused",
+            ))
+        } else {
+            Ok(())
+        }
+    });
+    assert!(result.is_err());
+    assert_eq!(c.attempt(id).unwrap().state, AttemptState::DispatchIntent);
+    assert_eq!(
+        c.attempt(other).unwrap().state,
+        AttemptState::DispatchIntent
+    );
+    assert_eq!(c.snapshot().unwrap().sequence, before);
+    assert_eq!(c.recover().unwrap(), 2);
+}
+#[test]
+fn terminal_projection_failure_preserves_dispatch_for_explicit_recovery() {
+    // Trace: FR-049-AC-3, FR-050-AC-4
+    let (_dir, mut c, j, s) = fixture();
+    let id = c.start(&j, &s, b"request", None).unwrap();
+    let before = c.snapshot().unwrap().sequence;
+    assert!(
+        c.finish_with(id, AttemptState::Failed, b"raw failure", |_, _, _| Err(
+            sapho_campaign::Error::new(ErrorCode::Refused, "domain projection refused")
+        ))
+        .is_err()
+    );
+    assert_eq!(c.attempt(id).unwrap().state, AttemptState::DispatchIntent);
+    assert_eq!(c.snapshot().unwrap().sequence, before);
+    c.finish_with(id, AttemptState::Failed, b"raw failure", |_, a, state| {
+        assert_eq!(a.stage, s);
+        assert_eq!(state, AttemptState::Failed);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(c.attempt(id).unwrap().state, AttemptState::Failed);
+}
