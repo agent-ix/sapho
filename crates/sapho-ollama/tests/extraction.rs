@@ -162,7 +162,7 @@ async fn thinking_text_is_never_the_answer_but_stays_in_the_raw_bytes() {
     );
 }
 
-/// Trace: FR-050-AC-1
+/// Trace: FR-050-AC-1, IT-007-SC-03
 #[tokio::test]
 async fn server_context_refusal_is_too_large_with_the_servers_count() {
     let _serial = serial().await;
@@ -222,7 +222,7 @@ async fn nothing_is_refused_for_size_before_the_server_counts_it() {
     assert!(extract(&small, &request(&spaces)).await.is_ok());
 }
 
-/// Trace: FR-050-AC-3
+/// Trace: FR-050-AC-3, IT-007-SC-04
 #[tokio::test]
 async fn reply_leaving_no_room_for_the_answer_is_too_large_not_truncated() {
     let _serial = serial().await;
@@ -291,7 +291,8 @@ async fn non_ascii_input_reaches_the_server_byte_for_byte() {
 
 fn tagged(models: [&'static str; 2]) -> impl Fn(&Recorded) -> Reply + Send + Sync {
     move |r| match r.path.as_str() {
-        "/api/show" => description(BLOB),
+        // The description request is held too, so an overlap with another call's request shows.
+        "/api/show" => Reply::After(Duration::from_millis(60), Box::new(description(BLOB))),
         _ => {
             let model = models
                 .iter()
@@ -557,7 +558,7 @@ async fn an_unknown_model_is_refused_before_any_generate() {
     assert!(fake.generates().is_empty());
 }
 
-/// Trace: FR-052-AC-4, IT-007-SC-02
+/// Trace: FR-052-AC-4
 #[tokio::test]
 async fn changed_weights_and_a_different_model_name_are_mismatches() {
     let _serial = serial().await;
@@ -611,7 +612,6 @@ async fn tags_sharing_one_weights_blob_share_a_digest() {
     assert!(digests[0].is_some());
 }
 
-/// Trace: FR-049-AC-1
 #[tokio::test]
 async fn a_request_for_another_model_than_the_binding_is_refused() {
     let _serial = serial().await;
@@ -625,7 +625,7 @@ async fn a_request_for_another_model_than_the_binding_is_refused() {
     assert_eq!(fake.total(), 0);
 }
 
-/// Trace: FR-050-AC-3, IT-007-SC-04
+/// Trace: FR-048-AC-2, IT-007-SC-02
 #[tokio::test]
 async fn schema_violation_from_the_server_keeps_pointer_and_exchange() {
     let _serial = serial().await;
@@ -637,4 +637,58 @@ async fn schema_violation_from_the_server_keeps_pointer_and_exchange() {
     );
     assert_eq!(error.pointer.as_deref(), Some("/label"));
     assert!(error.raw.is_some() && error.usage.is_some());
+}
+
+/// Trace: FR-050-AC-3
+#[tokio::test]
+async fn a_prompt_filling_the_context_exactly_fits_and_one_token_more_does_not() {
+    let _serial = serial().await;
+    // num_ctx 1000 and num_predict 200 leave room for exactly 800 prompt tokens.
+    for (counted, fits) in [(800u64, true), (801, false)] {
+        let mut reply = generated(MODEL, r#"{"label":"ok"}"#);
+        reply["prompt_eval_count"] = json!(counted);
+        let fake = serving(reply).await;
+        let binding = OllamaBackend::new(
+            Server::new(&fake.url, limits()).unwrap(),
+            settings(MODEL, false, 1000, 200),
+        )
+        .unwrap();
+        let outcome = extract(&binding, &request("item")).await;
+        match (fits, outcome) {
+            (true, Ok(_)) => {}
+            (false, Err(error)) => assert_eq!(error.code, ErrorCode::TooLarge),
+            (fits, other) => panic!("fits={fits}: {other:?}"),
+        }
+    }
+}
+
+/// Trace: FR-051-AC-3
+#[tokio::test]
+async fn the_response_ceiling_holds_for_a_chunked_body_with_no_content_length() {
+    let _serial = serial().await;
+    let body = serde_json::to_vec(&generated(
+        MODEL,
+        &format!("{{\"label\":\"{}\"}}", "y".repeat(5000)),
+    ))
+    .unwrap();
+    let fake = Fake::start(move |r| match r.path.as_str() {
+        "/api/show" => description(BLOB),
+        _ => Reply::Chunked(body.clone()),
+    })
+    .await;
+    let capped = OllamaBackend::new(
+        Server::new(
+            &fake.url,
+            Limits {
+                response_bytes: 2000,
+                ..limits()
+            },
+        )
+        .unwrap(),
+        settings(MODEL, false, 4096, 512),
+    )
+    .unwrap();
+    let error = extract(&capped, &request("item")).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::LimitExceeded);
+    assert_eq!(error.reason, Some("response_too_large"));
 }

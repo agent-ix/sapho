@@ -233,3 +233,38 @@ fn core_manifest_has_no_transport_runtime_and_validator_resolves_nothing() {
     assert!(validator.contains("default-features = false"));
     assert!(!validator.contains("resolve-"));
 }
+
+/// Trace: FR-048-AC-4
+#[tokio::test]
+async fn only_schema_keywords_are_references_not_property_names_or_data() {
+    let double = ScriptedExtractor::new([Ok(completion(r#"{"$ref": "x"}"#))]);
+    let schema = json!({
+        "type": "object",
+        "properties": {"$ref": {"type": "string", "const": {"$ref": "other.json"}}},
+        "default": {"$ref": "elsewhere.json"},
+        "enum": [{"$ref": "data"}, {"$ref": "http://example.invalid/x"}, {}],
+    });
+    let response = extract(&double, &request(schema)).await.unwrap_err();
+    // The enum above never matches the answer; the point is that it was not refused as Config.
+    assert_eq!(response.code, ErrorCode::InvalidAnswer);
+
+    let nested = json!({"properties": {"a": {"items": {"$ref": "other.json#/x"}}}});
+    let error = extract(&double, &request(nested)).await.unwrap_err();
+    assert_eq!(error.reason, Some("schema_external_ref"));
+    let listed = json!({"anyOf": [{"type": "string"}, {"$ref": "https://example.invalid/s"}]});
+    let error = extract(&double, &request(listed)).await.unwrap_err();
+    assert_eq!(error.reason, Some("schema_external_ref"));
+}
+
+/// Trace: FR-006-AC-1
+#[test]
+fn errors_keep_the_exchange_and_usage_through_the_shared_error_type() {
+    let error: SaphoError = too_large()
+        .with_raw(raw())
+        .with_usage(completion("").usage)
+        .into();
+    assert_eq!(error.raw.as_deref(), Some(&raw()));
+    assert_eq!(error.usage.as_deref(), Some(&completion("").usage));
+    let json = serde_json::to_value(&SaphoError::new(ErrorCode::Config, "x")).unwrap();
+    assert!(json.get("raw").is_none() && json.get("usage").is_none());
+}

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Structured errors shared across engine crate boundaries.
+use crate::{ExtractUsage, RawExchange};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -69,6 +70,12 @@ pub struct SaphoError {
     pub message: Box<str>,
     /// Named diagnostic facts, never credentials.
     pub context: BTreeMap<String, String>,
+    /// The exact request and response bytes, when an exchange took place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<Box<RawExchange>>,
+    /// Usage the provider reported, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Box<ExtractUsage>>,
 }
 impl SaphoError {
     /// Construct a refusal under an explicit category.
@@ -77,7 +84,19 @@ impl SaphoError {
             code,
             message: message.into(),
             context: BTreeMap::new(),
+            raw: None,
+            usage: None,
         }
+    }
+    /// Retain the exchange that produced the error.
+    pub fn with_raw(mut self, raw: RawExchange) -> Self {
+        self.raw = Some(Box::new(raw));
+        self
+    }
+    /// Retain the usage the provider reported.
+    pub fn with_usage(mut self, usage: ExtractUsage) -> Self {
+        self.usage = Some(Box::new(usage));
+        self
     }
     /// Add an owned diagnostic fact.
     pub fn with_context(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {

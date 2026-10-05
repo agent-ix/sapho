@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Typed System One contracts and answer validation (FR-004/005/006).
-use crate::{BackendId, ErrorCode, Probability, Result, SaphoError, Value};
+use crate::{BackendId, ErrorCode, Probability, RawExchange, Result, SaphoError, Value};
 use crate::{DistributionAdjustment, DistributionPolicy, distribution::MASS_ROUNDOFF};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -428,6 +428,9 @@ pub struct ModelResponse {
     /// Digest of the actual model's weights, when the provider reports one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,
+    /// The exact request and response bytes, when the provider exposes them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<RawExchange>,
     /// Raw typed answers.
     pub answers: BTreeMap<String, Answer>,
     /// Usage when the provider supplies it.

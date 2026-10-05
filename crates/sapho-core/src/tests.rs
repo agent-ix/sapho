@@ -43,6 +43,7 @@ fn response(a: Answer) -> ModelResponse {
     ModelResponse {
         model: "model-1".into(),
         digest: None,
+        raw: None,
         answers: BTreeMap::from([("q".into(), a)]),
         usage: None,
     }

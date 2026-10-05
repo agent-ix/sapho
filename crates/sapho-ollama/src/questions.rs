@@ -31,11 +31,15 @@ struct Allowed {
 }
 impl Allowed {
     fn new(key: &str, value: &str) -> Self {
-        let quoted = serde_json::to_string(value).unwrap_or_default();
+        // A JSON string literal is the value between its two quotes.
+        let literal = serde_json::Value::String(value.into()).to_string();
+        let inner = literal
+            .get(1..literal.len().saturating_sub(1))
+            .unwrap_or("");
         Self {
             key: key.into(),
             value: value.into(),
-            written: quoted.trim_matches('"').as_bytes().to_vec(),
+            written: inner.as_bytes().to_vec(),
         }
     }
 }
@@ -376,7 +380,11 @@ impl ModelBackend for OllamaBackend {
         let format = ReplyFormat(&spaces);
         let body = self.body(&system, &prompt, &format, true);
         let generated = self.generate(&body).await?;
-        let from = |e: ExtractError| -> SaphoError { e.with_raw(generated.raw.clone()).into() };
+        let from = |e: ExtractError| -> SaphoError {
+            e.with_raw(generated.raw.clone())
+                .with_usage(generated.usage.clone())
+                .into()
+        };
         let tokens = generated
             .logprobs
             .as_deref()
@@ -436,6 +444,7 @@ impl ModelBackend for OllamaBackend {
         Ok(ModelResponse {
             model: generated.model.name,
             digest: generated.model.digest,
+            raw: Some(generated.raw),
             answers,
             usage,
         })

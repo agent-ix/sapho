@@ -184,6 +184,7 @@ impl ModelBackend for Scripted {
         Ok(ModelResponse {
             model: request.model.clone(),
             digest: None,
+            raw: None,
             answers: request
                 .questions
                 .iter()

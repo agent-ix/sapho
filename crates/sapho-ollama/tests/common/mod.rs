@@ -51,6 +51,8 @@ pub enum Reply {
     /// Promise more bytes than are sent, then close.
     Torn(Vec<u8>),
     Redirect,
+    /// A chunked body with no Content-Length.
+    Chunked(Vec<u8>),
 }
 impl Reply {
     pub fn ok(value: Value) -> Self {
@@ -145,6 +147,16 @@ impl Fake {
                             )
                             .into_bytes();
                             out.extend(part);
+                            Some(out)
+                        }
+                        Reply::Chunked(body) => {
+                            let mut out = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n".to_vec();
+                            for piece in body.chunks(1000) {
+                                out.extend(format!("{:x}\r\n", piece.len()).into_bytes());
+                                out.extend(piece);
+                                out.extend(b"\r\n");
+                            }
+                            out.extend(b"0\r\n\r\n");
                             Some(out)
                         }
                         Reply::Redirect => Some(

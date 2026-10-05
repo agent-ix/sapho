@@ -449,3 +449,102 @@ async fn answers_that_are_not_one_allowed_string_per_question_are_refused() {
         assert_eq!(error.code, ErrorCode::InvalidAnswer, "{text}");
     }
 }
+
+/// Trace: FR-054-AC-2
+#[tokio::test]
+async fn the_bound_falls_back_to_the_selected_mass_and_never_exceeds_it() {
+    let _serial = serial().await;
+    // No listed alternatives at all: the missing value is bounded by the selected one.
+    let fake = server(bool_reply(yes_tokens(&[]))).await;
+    let response = asked(&fake, vec![boolean("b")]).await.unwrap();
+    assert!((boolean_p(&response, "b") - 0.5).abs() < 1e-12);
+    // Every listed alternative is more likely than the selected token, so the selected
+    // mass is the smaller bound.
+    let fake = server(bool_reply(yes_tokens(&[("maybe", -0.1)]))).await;
+    let response = asked(&fake, vec![boolean("b")]).await.unwrap();
+    assert!((boolean_p(&response, "b") - 0.5).abs() < 1e-12);
+}
+
+/// Trace: FR-054-AC-2
+#[tokio::test]
+async fn an_alternative_with_different_bytes_before_the_value_is_not_attributed() {
+    let _serial = serial().await;
+    let tokens = vec![
+        fill("{\"b\":"),
+        tok(" \"yes", -2.228, &[(" \"yes", -2.228), (":\"no", -1.0)]),
+        fill("\"}"),
+    ];
+    let fake = server(bool_reply(tokens)).await;
+    let response = asked(&fake, vec![boolean("b")]).await.unwrap();
+    // `no` has no attributed token, so it takes the bound and the answer is even.
+    assert!((boolean_p(&response, "b") - 0.5).abs() < 1e-12);
+}
+
+/// Trace: FR-054-AC-3
+#[tokio::test]
+async fn a_label_ending_in_a_quote_is_matched_by_its_escaped_form() {
+    let _serial = serial().await;
+    let tokens = vec![
+        fill("{\"c\": \""),
+        tok("a\\", -1.0, &[("a\\", -1.0), ("a\\\"", -0.7), ("b", -2.0)]),
+        fill("\"\"}"),
+    ];
+    let fake = server(reply(r#"{"c": "a\""}"#, tokens)).await;
+    let result = asked(&fake, vec![choice("c", &["a\"", "b"])])
+        .await
+        .unwrap();
+    let Answer::Choice {
+        selected,
+        probabilities,
+        ..
+    } = &result.answers["c"]
+    else {
+        panic!()
+    };
+    assert_eq!(selected, "a\"");
+    let probabilities = probabilities.as_ref().unwrap();
+    let (quoted, plain) = ((-1.0f64).exp() + (-0.7f64).exp(), (-2.0f64).exp());
+    assert!((probabilities["a\""].get() - quoted / (quoted + plain)).abs() < 1e-9);
+}
+
+/// Trace: FR-054-AC-1
+#[tokio::test]
+async fn the_response_retains_the_exact_exchange_and_error_paths_keep_it_too() {
+    let _serial = serial().await;
+    let listed = [("yes", -2.228), ("no", -5.759), ("Yes", -0.162)];
+    let answer = bool_reply(yes_tokens(&listed));
+    let sent = serde_json::to_vec(&answer).unwrap();
+    let fake = server(answer).await;
+    let response = asked(&fake, vec![boolean("b")]).await.unwrap();
+    let raw = response.raw.as_ref().unwrap();
+    assert_eq!(raw.request, fake.generates()[0].body);
+    assert_eq!(raw.response, sent);
+    // The probability can be recomputed from the retained bytes alone.
+    let kept: Json = serde_json::from_slice(&raw.response).unwrap();
+    let alternatives = &kept["logprobs"][3]["top_logprobs"];
+    let mass = |token: &str| {
+        alternatives
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["token"] == token)
+            .map(|a| a["logprob"].as_f64().unwrap().exp())
+            .unwrap()
+    };
+    let recomputed = mass("yes") / (mass("yes") + mass("no"));
+    assert!((recomputed - boolean_p(&response, "b")).abs() < 1e-12);
+
+    let torn = vec![
+        fill("{\""),
+        fill("b"),
+        fill("\": \""),
+        tok("no", -0.1, &[]),
+        fill("\"}"),
+    ];
+    let bad = bool_reply(torn);
+    let sent = serde_json::to_vec(&bad).unwrap();
+    let fake = server(bad).await;
+    let error = asked(&fake, vec![boolean("b")]).await.unwrap_err();
+    assert_eq!(error.raw.as_deref().unwrap().response, sent);
+    assert_eq!(error.usage.as_deref().unwrap().input_tokens, Some(48));
+}

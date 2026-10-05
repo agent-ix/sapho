@@ -118,7 +118,8 @@ async fn an_empty_list_and_an_over_long_list_are_refused_before_sending() {
 async fn embedding_and_extraction_share_the_one_request_permit() {
     let _serial = serial().await;
     let fake = Fake::start(|r| match r.path.as_str() {
-        "/api/show" => description(BLOB),
+        // The description request is held too, so an overlap with another call's request shows.
+        "/api/show" => Reply::After(Duration::from_millis(60), Box::new(description(BLOB))),
         "/api/embed" => Reply::After(
             Duration::from_millis(60),
             Box::new(Reply::ok(embeddings(json!([[1.0]])))),

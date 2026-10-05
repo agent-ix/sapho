@@ -743,6 +743,7 @@ impl ModelBackend for Invalid {
         Ok(ModelResponse {
             model: r.model.clone(),
             digest: None,
+            raw: None,
             answers: BTreeMap::new(),
             usage: None,
         })
@@ -779,6 +780,7 @@ impl ModelBackend for Concurrent {
         Ok(ModelResponse {
             model: r.model.clone(),
             digest: None,
+            raw: None,
             answers: BTreeMap::from([(
                 "q".into(),
                 Answer::Boolean {

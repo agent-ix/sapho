@@ -159,6 +159,8 @@ impl From<ExtractError> for SaphoError {
     /// Keep the reason and `TooLarge` numbers as named context fields.
     fn from(error: ExtractError) -> Self {
         let mut out = SaphoError::new(error.code, error.message);
+        out.raw = error.raw;
+        out.usage = error.usage;
         if let Some(reason) = error.reason {
             out = out.with_context("reason", reason);
         }
@@ -251,19 +253,52 @@ pub async fn extract(
     })
 }
 
-/// True when any `$ref` or `$dynamicRef` is not a same-document fragment.
+/// Keywords whose value is one subschema, a list of them, or a map of name to subschema.
+const SUBSCHEMA: [&str; 11] = [
+    "additionalProperties",
+    "items",
+    "contains",
+    "not",
+    "if",
+    "then",
+    "else",
+    "propertyNames",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+    "contentSchema",
+];
+const SUBSCHEMA_LIST: [&str; 4] = ["allOf", "anyOf", "oneOf", "prefixItems"];
+const SUBSCHEMA_MAP: [&str; 5] = [
+    "properties",
+    "patternProperties",
+    "$defs",
+    "definitions",
+    "dependentSchemas",
+];
+
+/// True when a `$ref` or `$dynamicRef` keyword anywhere in the schema is not a
+/// same-document fragment. Only schema keywords are walked: a property named `$ref`
+/// and data under `const`, `enum` or `default` are not references.
 fn has_foreign_ref(schema: &Value) -> bool {
-    match schema {
-        Value::Object(members) => members.iter().any(|(key, value)| {
-            if matches!(key.as_str(), "$ref" | "$dynamicRef") {
-                value.as_str().is_none_or(|target| !target.starts_with('#'))
-            } else {
-                has_foreign_ref(value)
-            }
-        }),
-        Value::Array(items) => items.iter().any(has_foreign_ref),
-        _ => false,
-    }
+    let Value::Object(members) = schema else {
+        return false;
+    };
+    members
+        .iter()
+        .any(|(keyword, value)| match keyword.as_str() {
+            "$ref" | "$dynamicRef" => value.as_str().is_none_or(|target| !target.starts_with('#')),
+            k if SUBSCHEMA.contains(&k) => match value {
+                Value::Array(items) => items.iter().any(has_foreign_ref),
+                other => has_foreign_ref(other),
+            },
+            k if SUBSCHEMA_LIST.contains(&k) => value
+                .as_array()
+                .is_some_and(|items| items.iter().any(has_foreign_ref)),
+            k if SUBSCHEMA_MAP.contains(&k) => value
+                .as_object()
+                .is_some_and(|named| named.values().any(has_foreign_ref)),
+            _ => false,
+        })
 }
 
 /// An [`Extractor`] that replays configured outcomes in order and records its requests.
