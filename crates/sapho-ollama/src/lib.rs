@@ -81,6 +81,10 @@ pub struct Receipt {
     pub typed_request_sha256: String,
     /// Complete prompt decomposition and conservative limits for this one call.
     pub prompt: PromptBudget,
+    /// Service-reported digest/placement rechecked under capacity before generation.
+    /// Alias inspection and served weights are not an atomic identity proof.
+    #[serde(default)]
+    pub model_observation: Option<ModelInfo>,
     /// Elapsed invocation time, including local capacity wait.
     pub elapsed_ms: u64,
     /// Optional reported service counts and durations, independent of answer validity.
@@ -324,7 +328,7 @@ pub struct Progress {
 pub struct ModelInfo {
     /// Requested installed model.
     pub model: String,
-    /// Authoritative installed digest reported by service.
+    /// Installed digest reported by service; not atomic served-weight proof.
     pub digest: String,
     /// Advertised generation capability.
     pub completion: bool,
@@ -335,6 +339,15 @@ pub struct ModelInfo {
     /// Bytes reported placed in GPU memory, zero when unloaded.
     pub gpu_bytes: u64,
 }
+/// Caller-selected reported model identity, rechecked under shared capacity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelPin {
+    /// Exact service alias/selector.
+    pub model: String,
+    /// Expected installed digest reported by the service.
+    pub digest: String,
+}
 /// Host-managed local backend; never installs or starts a service.
 pub struct OllamaBackend {
     client: Client,
@@ -344,6 +357,7 @@ pub struct OllamaBackend {
     capacity: Option<std::fs::File>,
     capture: Mutex<Capture>,
     started: AtomicUsize,
+    model_pin: Mutex<Option<ModelPin>>,
 }
 fn error(code: ErrorCode, message: &str) -> SaphoError {
     SaphoError::new(code, message)
@@ -384,6 +398,7 @@ impl OllamaBackend {
             capacity: None,
             capture: Mutex::new(Capture::default()),
             started: AtomicUsize::new(0),
+            model_pin: Mutex::new(None),
         })
     }
     /// Prepare a shared process capacity lease synchronously, before async execution.
@@ -392,6 +407,35 @@ impl OllamaBackend {
         let mut backend = Self::new(base, limits)?;
         backend.capacity = Some(capacity::prepare(path)?);
         Ok(backend)
+    }
+    /// Bind one expected reported digest before any generation. Rebinding a
+    /// different pin is refused. This does not assert atomic served-weight identity.
+    pub fn pin_model(&self, pin: ModelPin) -> Result<()> {
+        if pin.model.is_empty()
+            || pin.model.len() > 4096
+            || pin.digest.is_empty()
+            || pin.digest.len() > 256
+        {
+            return Err(error(ErrorCode::Config, "Invalid local model pin"));
+        }
+        let mut stored = self
+            .model_pin
+            .lock()
+            .map_err(|_| error(ErrorCode::BackendFailed, "Local model pin unavailable"))?;
+        if let Some(prior) = stored.as_ref() {
+            if prior.model != pin.model || prior.digest != pin.digest {
+                return Err(error(ErrorCode::ModelMismatch, "Local model pin differs"));
+            }
+        } else {
+            if self.started.load(Ordering::Acquire) > 0 {
+                return Err(error(
+                    ErrorCode::Config,
+                    "Cannot add a model pin after dispatch",
+                ));
+            }
+            *stored = Some(pin);
+        }
+        Ok(())
     }
     /// Inspect installed model digest/capabilities and current GPU placement without loading it.
     pub async fn inspect(&self, model: &str) -> Result<ModelInfo> {
@@ -547,6 +591,7 @@ impl OllamaBackend {
                 prompt: budget,
                 elapsed_ms: 0,
                 telemetry: None,
+                model_observation: None,
                 made_call: false,
                 request: Vec::new(),
                 status: None,
@@ -571,6 +616,28 @@ impl OllamaBackend {
             )
             .with_context("context_tokens", self.limits.context_tokens.to_string())
             .with_context("token_upper_bound", "one_utf8_byte_per_token"));
+        }
+        let pin = self
+            .model_pin
+            .lock()
+            .map_err(|_| error(ErrorCode::BackendFailed, "Local model pin unavailable"))?
+            .clone();
+        if let Some(pin) = pin {
+            if request.model != pin.model {
+                return Err(error(
+                    ErrorCode::ModelMismatch,
+                    "Request model differs from pinned alias",
+                ));
+            }
+            let observed = self.inspect(&pin.model).await?;
+            let matches = observed.completion && observed.digest == pin.digest;
+            receipt.model_observation = Some(observed);
+            if !matches {
+                return Err(error(
+                    ErrorCode::ModelMismatch,
+                    "Installed local model digest/capability drift; no generation dispatch",
+                ));
+            }
         }
         let body = sapho_core::bounded_json(
             &wire_request(request, &prompt, &self.limits),
@@ -1154,6 +1221,86 @@ mod tests {
 #[cfg(test)]
 mod inspection_tests {
     use super::*;
+    /// Trace: FR-048-AC-12
+    #[tokio::test]
+    async fn pinned_digest_drift_refuses_generation_and_retains_observation() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            for path in ["/api/tags", "/api/show", "/api/ps"] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = [0; 4096];
+                let n = stream.read(&mut bytes).await.unwrap();
+                assert!(String::from_utf8_lossy(&bytes[..n]).contains(path));
+                let body = match path {
+                    "/api/tags" => {
+                        serde_json::json!({"models":[{"name":"local-test","digest":"changed"}]})
+                    }
+                    "/api/show" => serde_json::json!({"capabilities":["completion"]}),
+                    _ => serde_json::json!({"models":[]}),
+                }
+                .to_string();
+                stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let backend =
+            OllamaBackend::new_shared(&url, Limits::default(), &tmp.path().join("capacity.lock"))
+                .unwrap();
+        backend
+            .pin_model(ModelPin {
+                model: "local-test".into(),
+                digest: "original".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            backend
+                .pin_model(ModelPin {
+                    model: "local-test".into(),
+                    digest: "other".into()
+                })
+                .unwrap_err()
+                .code,
+            ErrorCode::ModelMismatch
+        );
+        let request = ModelRequest {
+            backend: sapho_core::BackendId::new("judge").unwrap(),
+            model: "local-test".into(),
+            expected_model: Some("local-test".into()),
+            distribution_policy: sapho_core::DistributionPolicy::Strict {},
+            state: sapho_core::Value::Record(BTreeMap::from([(
+                "owner".into(),
+                sapho_core::Value::Text("synthetic".into()),
+            )])),
+            questions: vec![sapho_core::NamedQuestion {
+                id: "x".into(),
+                question: sapho_core::Question::Boolean {
+                    instructions: "Synthetic check".into(),
+                    yes: "yes".into(),
+                    no: "no".into(),
+                },
+            }],
+        };
+        assert_eq!(
+            backend.infer(&request).await.unwrap_err().code,
+            ErrorCode::ModelMismatch
+        );
+        task.await.unwrap();
+        assert_eq!(backend.progress().unwrap().dispatch_attempts, 0);
+        let receipts = backend.receipts().unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert!(!receipts[0].made_call);
+        assert_eq!(
+            receipts[0].model_observation.as_ref().unwrap().digest,
+            "changed"
+        );
+        assert!(receipts[0].request.is_empty() && receipts[0].response.is_empty());
+        // The model pin cannot release or bypass the owner's capacity discipline.
+        let file = capacity::prepare(&tmp.path().join("capacity.lock")).unwrap();
+        let lease = capacity::acquire(&file).await.unwrap();
+        drop(lease);
+    }
     /// Trace: FR-048-AC-2
     #[tokio::test]
     async fn model_inspection_reports_digest_and_gpu_without_inference() {
