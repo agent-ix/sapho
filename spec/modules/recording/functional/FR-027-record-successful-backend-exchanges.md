@@ -37,7 +37,7 @@ The declared typed result, or a structured SaphoError. Runtime failures carry a 
 The exact request includes DistributionPolicy. Export/load retains exact representable f64 values, including values requiring more than two decimal places. Raw ModelResponse remains unchanged; loading/exporting/retention use that request policy through core validation. Projection adjustments are derived, never written over raw values. A request with a different policy is a different replay key. No compatibility reader for older recordings is supplied.
 
 
-RecordingBackend decorates any ModelBackend. Record exact core request, raw core response (including distributions and actual model), and backend binding identity. Recording has no automatic filesystem path. In-memory exchanges are exportable as a typed JSON recording; a caller can explicitly write to a new path using create_new. File existence/I/O failures are errors, not overwrite permission. Failed backend calls are not stored as successful exchanges; runtime traces retain their failure evidence. Concurrent completion may occur out of order; replay matching never depends on file order. Before exporting, validate request/response and impose a caller-supplied maximum serialized byte count.
+RecordingBackend decorates any ModelBackend. Record exact core request, raw core response (including distributions, actual model and, when the backend retained it, the raw exchange of request and response body text), and backend binding identity. The raw exchange never includes HTTP headers, URLs or credentials, and it counts toward the export byte ceiling like every other recorded byte. Recording has no automatic filesystem path. In-memory exchanges are exportable as a typed JSON recording; a caller can explicitly write to a new path using create_new. File existence/I/O failures are errors, not overwrite permission. Failed backend calls are not stored as successful exchanges; runtime traces retain their failure evidence. Concurrent completion may occur out of order; replay matching never depends on file order. Before exporting, validate request/response and impose a caller-supplied maximum serialized byte count.
 
 ## Acceptance Criteria
 
@@ -46,6 +46,8 @@ RecordingBackend decorates any ModelBackend. Record exact core request, raw core
 | FR-027-AC-1 | A successful decorated call retains an exact request/response exchange. | Test (TC-027) |
 | FR-027-AC-2 | An errored call adds no successful exchange. | Test (TC-027) |
 | FR-027-AC-3 | Export over the byte limit or to an existing path fails without overwriting it. | Test (TC-027) |
+| FR-027-AC-4 | A recorded exchange whose response carries a raw exchange exports and reloads with the raw exchange unchanged; a byte ceiling that the recording fits without the raw exchange but not with it refuses the export. | Test (TC-027) |
+| FR-027-AC-5 | A recording made through the header-injecting loopback double of TC-006 contains neither its sentinel credential nor the header name. | Test (TC-027) |
 
 ## Dependencies
 

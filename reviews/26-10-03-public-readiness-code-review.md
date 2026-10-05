@@ -30,7 +30,7 @@ The Discord API resolves k8DVhuYBR2 to Agent IX with expires_at null. README lic
 
 ## Verification
 
-The first `make ci` exited 0 on draco: formatting, Clippy with warnings denied in both feature lanes, 84 tests and one doctest per lane, dependency/advisory/license audit, unsafe audit, rustdoc and spec/review validation. `git diff --check` passed. No tests were added for link and prose edits; the live invite, native repository settings and canonical documents were inspected directly. Pending uncommitted documentation in the primary checkout is outside this reviewed revision and was preserved.
+The first `make ci` exited 0 on the development host: formatting, Clippy with warnings denied in both feature lanes, 84 tests and one doctest per lane, dependency/advisory/license audit, unsafe audit, rustdoc and spec/review validation. `git diff --check` passed. No tests were added for link and prose edits; the live invite, native repository settings and canonical documents were inspected directly. Pending uncommitted documentation in the primary checkout is outside this reviewed revision and was preserved.
 
 ## Delivery verification
 

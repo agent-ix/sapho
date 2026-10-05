@@ -25,19 +25,19 @@ Unstated failure modes: resume and idempotency, partial JSONL lines, concurrent 
 
 ### FND-001 (high, confidence medium, soundness)
 
-Unit: FR-050 at spec/modules/ollama/functional/FR-050.md:37. Related: FR-052, sapho-dataset/FR-010, sapho-dataset/FR-023.
+Unit: FR-050 at spec/modules/ollama/functional/FR-050.md:37. Related: FR-052, the downstream dataset consumer's FR-010, the downstream dataset consumer's FR-023.
 
 > If a response reports `prompt_eval_count + num_predict` above `num_ctx`, then the adapter SHALL return `TooLarge` with the retained raw exchange and usage, because the server can shorten a prompt to fit its context.
 
-Every item of a task sends the same `system` instructions, so Ollama reuses the cached prefix and reports in prompt_eval_count only the tokens it evaluated (the item part); on a fully cached identical request (resume of the item in flight, a retried failed item) the field can be tiny or omitted. Consequences: the post-call TooLarge check (this line) under-counts and can miss a truncated prompt; estimate_exceeded (next bullet) almost never fires, so the ratio cannot be corrected from evidence; usage.input_tokens and status tokens-per-item are wrong; and the 'lacks prompt_eval_count -> InvalidAnswer' rule can fail a resumed item on every retry. Confidence medium: verify on Draco before coding SAPHO-32 (send two requests sharing a long system prompt and compare prompt_eval_count). Options: disable prefix reuse per request if Ollama allows it, treat prompt_eval_count as a lower bound and base the post-check on Ollama's truncation signal instead, or count tokens with the model tokenizer endpoint where available.
+Every item of a task sends the same `system` instructions, so Ollama reuses the cached prefix and reports in prompt_eval_count only the tokens it evaluated (the item part); on a fully cached identical request (resume of the item in flight, a retried failed item) the field can be tiny or omitted. Consequences: the post-call TooLarge check (this line) under-counts and can miss a truncated prompt; estimate_exceeded (next bullet) almost never fires, so the ratio cannot be corrected from evidence; usage.input_tokens and status tokens-per-item are wrong; and the 'lacks prompt_eval_count -> InvalidAnswer' rule can fail a resumed item on every retry. Confidence medium: verify on the local inference host before coding SAPHO-32 (send two requests sharing a long system prompt and compare prompt_eval_count). Options: disable prefix reuse per request if Ollama allows it, treat prompt_eval_count as a lower bound and base the post-check on Ollama's truncation signal instead, or count tokens with the model tokenizer endpoint where available.
 
 ### FND-002 (low, confidence medium, other)
 
-Unit: FR-052 at spec/modules/ollama/functional/FR-052.md:34. Related: FR-053, sapho-dataset/FR-014.
+Unit: FR-052 at spec/modules/ollama/functional/FR-052.md:34. Related: FR-053, the downstream dataset consumer's FR-014.
 
 > When a binding sends its first generate request, the adapter SHALL first read the server's model list and resolve the binding's model name to its digest.
 
-The digest is read from /api/tags only at the binding's first generate request. If the operator re-pulls or re-creates the tag during an overnight run, later labels carry the old digest while a different model answered. sapho-dataset FR-014 uses name+digest to decide same-source. Re-resolve when Ollama reports a load (load_duration > 0) or at each run start, and refuse with ModelMismatch on change.
+The digest is read from /api/tags only at the binding's first generate request. If the operator re-pulls or re-creates the tag during an overnight run, later labels carry the old digest while a different model answered. The downstream dataset consumer FR-014 uses name+digest to decide same-source. Re-resolve when Ollama reports a load (load_duration > 0) or at each run start, and refuse with ModelMismatch on change.
 
 ## Scope
 
@@ -117,7 +117,7 @@ Round 2, reviewed at agent-ix/sapho@a34c54c8909d6f73a6a2258e4419fa2fa5b0af38.
 
 | FND | outcome | sha/reason |
 |-----|---------|------------|
-| FND-003 | fixed | a34c54c: Requests send `truncate: false` and `shift: false`; the server's refusal with n_prompt_tokens is the authority, the byte estimate is only a lower-bound pre-check (max_bytes_per_token 6.0). Coherent with sapho-dataset FR-010 too_large recording (four numbers). |
+| FND-003 | fixed | a34c54c: Requests send `truncate: false` and `shift: false`; the server's refusal with n_prompt_tokens is the authority, the byte estimate is only a lower-bound pre-check (max_bytes_per_token 6.0). Coherent with the downstream dataset consumer FR-010 too_large recording (four numbers). |
 
 ## Dispositions (round 3)
 
@@ -125,4 +125,4 @@ Round 3, reviewed at agent-ix/sapho@ae955d0243b5cc036dce878e13cad28277321108.
 
 | FND | outcome | sha/reason |
 |-----|---------|------------|
-| FND-004 | fixed | ae955d0: The byte estimate and its pre-send refusal are removed; the server's truncate:false refusal (exceed_context_size_error, n_prompt_tokens) is the only size authority, bounded by FR-051's 4 MiB request ceiling; FR-050-AC-2 sends a 20,000-byte whitespace prompt. Removal sweep: no estimated_input_tokens, below_estimate or max_bytes_per_token remains in sapho FR-048/049/052/054, IT-007, TC files, docs, or sapho-dataset FR-006/FR-010/docs; two stale mentions remain (new LOWs in sapho-dataset SR-002 FND-009 and SR-007 FND-004). Design change for the owner: the brief says 'estimate tokens before the call, check prompt_eval_count after'; the new design drops the pre-call estimate but keeps the intent (counted in the model's own tokens, by the server before generating; too_large recorded and skipped, never a crash; prompt_eval_count still checked after). |
+| FND-004 | fixed | ae955d0: The byte estimate and its pre-send refusal are removed; the server's truncate:false refusal (exceed_context_size_error, n_prompt_tokens) is the only size authority, bounded by FR-051's 4 MiB request ceiling; FR-050-AC-2 sends a 20,000-byte whitespace prompt. Removal sweep: no estimated_input_tokens, below_estimate or max_bytes_per_token remains in sapho FR-048/049/052/054, IT-007, TC files, docs, or the downstream dataset consumer FR-006/FR-010/docs; two stale mentions remain (new LOWs in downstream dataset consumer SR-002 FND-009 and SR-007 FND-004). Design change for the owner: the brief says 'estimate tokens before the call, check prompt_eval_count after'; the new design drops the pre-call estimate but keeps the intent (counted in the model's own tokens, by the server before generating; too_large recorded and skipped, never a crash; prompt_eval_count still checked after). |

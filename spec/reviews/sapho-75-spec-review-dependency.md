@@ -22,7 +22,7 @@ Requirement and crate dependency edges, cross-repo ix:// references, enablement 
 
 ## Analysis
 
-New edges: sapho-ollama depends only on sapho-core (NFR-001 scope and the master flowchart updated); FR-049..053 depend_on chain is acyclic (FR-048 <- FR-049 <- FR-050/051/052 <- FR-053). No Sapho artifact references sapho-dataset.
+New edges: sapho-ollama depends only on sapho-core (NFR-001 scope and the master flowchart updated); FR-049..053 depend_on chain is acyclic (FR-048 <- FR-049 <- FR-050/051/052 <- FR-053). No Sapho artifact references the downstream dataset consumer.
 ## Scope
 
 | Unit | Path | Role |

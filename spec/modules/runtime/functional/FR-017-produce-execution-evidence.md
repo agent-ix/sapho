@@ -32,7 +32,7 @@ The declared typed result, or a structured SaphoError. Runtime failures carry a 
 
 ## Behavior
 
-Trace entry includes execution path (graph/subgraph/node/item IDs), fully scoped dependency paths, resolved guard when configured, resolved operation inputs, outputs, source references, operation and params, status and optional structured error. Ask evidence includes exact request, raw normalized response, actual model and optional usage. Failure carries prior entries and a failed entry when the node began. Timing is not part of deterministic trace content. Recording is separate: traces are in-memory returned values, not automatically written to disk. Credentials are absent from trace types.
+Trace entry includes execution path (graph/subgraph/node/item IDs), fully scoped dependency paths, resolved guard when configured, resolved operation inputs, outputs, source references, operation and params, status and optional structured error. Ask evidence includes exact request, raw normalized response with its raw exchange of request and response body text when the backend retained one, actual model and optional usage; a failed ask entry keeps the raw exchange its error carries. Failure carries prior entries and a failed entry when the node began. Timing is not part of deterministic trace content, and neither is the raw exchange: provider bodies carry timestamps and duration counters that differ between identical runs. Replay is unaffected because it returns the recorded bytes. Recording is separate: traces are in-memory returned values, not automatically written to disk. Credentials are absent from trace types.
 
 ## Acceptance Criteria
 
@@ -41,6 +41,8 @@ Trace entry includes execution path (graph/subgraph/node/item IDs), fully scoped
 | FR-017-AC-1 | A threshold trace identifies the contributing answers, applied cutoff and source spans. | Test (TC-017) |
 | FR-017-AC-2 | A false guard produces a skipped entry with no request evidence. | Test (TC-017) |
 | FR-017-AC-3 | A malformed backend answer produces a failed entry retaining request/response evidence. | Test (TC-017) |
+| FR-017-AC-4 | An ask whose backend returns a raw exchange leaves that exchange unchanged in the trace's ask evidence, and a failed ask whose SaphoError carries one keeps it in the failed entry; with the header-injecting loopback double of TC-006, no trace contains its sentinel credential. | Test (TC-017) |
+| FR-017-AC-5 | Two runs of one graph whose scripted responses differ only in `created_at` and duration counters inside the raw bodies give traces equal under the deterministic comparison; a run whose answer value differs gives an unequal trace. | Test (TC-017) |
 
 ## Dependencies
 

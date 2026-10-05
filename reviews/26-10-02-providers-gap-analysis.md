@@ -26,7 +26,7 @@ PASS for repository traceability, ownership and non-hollow implementation checks
 
 ## Coverage
 
-- Repository root: isolated Sapho worktree on draco; spec root spec/; identity ix://agent-ix/sapho. The master specification has no artifact id, so the relationship names the provider stakeholder obligation rather than inventing a root id.
+- Repository root: isolated Sapho worktree on the development host; spec root spec/; identity ix://agent-ix/sapho. The master specification has no artifact id, so the relationship names the provider stakeholder obligation rather than inventing a root id.
 - Reconciliation: `quire matrix --scope . --strict --format json`, quire 0.36.1 / engine 0.50.1; no run-evidence store read.
 - Plan completion: not assessed
 - Criteria: tagged 149; untagged 0; tagged-by-ignored-test 0; method-without-symbol 3. The three are FR-047-AC-1/2 (Decisions contract/access inspection) and NFR-001-M-1 (dependency/safety inspection). They are not represented as passing inference tests. No fallback grep matrix was used.
