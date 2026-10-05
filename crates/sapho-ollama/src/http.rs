@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Bounded, serialized HTTP to one Ollama server (FR-051).
-use reqwest::{Client, Url, redirect::Policy};
-use sapho_core::{ErrorCode, ExtractError, RawExchange};
-use std::{future::Future, time::Duration};
+use reqwest::{
+    Client, Url,
+    header::{HeaderMap, HeaderName, HeaderValue},
+    redirect::Policy,
+};
+use sapho_core::{ErrorCode, ExtractError, ExtractUsage, RawExchange};
+use std::{
+    future::Future,
+    time::{Duration, Instant},
+};
 use tokio::sync::Semaphore;
 
 /// Host-local default endpoint; Sapho never starts a server.
@@ -38,11 +45,12 @@ pub struct Server {
     client: Client,
     base: Url,
     limits: Limits,
+    headers: HeaderMap,
 }
-/// A complete response: status and body bytes within the ceiling.
+/// A complete response: status and UTF-8 body text within the ceiling.
 pub(crate) struct Reply {
     pub status: u16,
-    pub body: Vec<u8>,
+    pub body: String,
 }
 
 pub(crate) fn failure(
@@ -84,10 +92,28 @@ impl Server {
             client,
             base,
             limits,
+            headers: HeaderMap::new(),
         })
     }
+    /// Send `name: value` with every request, for a server behind an authenticating gateway.
+    ///
+    /// The value is marked sensitive, and headers never enter a raw exchange.
+    pub fn with_header(mut self, name: &str, value: &str) -> Result<Self, ExtractError> {
+        let refused = || {
+            failure(
+                ErrorCode::Config,
+                "invalid_header",
+                "Invalid request header",
+            )
+        };
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| refused())?;
+        let mut value = HeaderValue::from_str(value).map_err(|_| refused())?;
+        value.set_sensitive(true);
+        self.headers.insert(name, value);
+        Ok(self)
+    }
     /// The ceiling on a serialized request, checked before anything is sent.
-    pub(crate) fn check_request(&self, body: &[u8]) -> Result<(), ExtractError> {
+    pub(crate) fn check_request(&self, body: &str) -> Result<(), ExtractError> {
         if body.len() > self.limits.request_bytes {
             return Err(failure(
                 ErrorCode::LimitExceeded,
@@ -125,7 +151,7 @@ impl Server {
             })?
     }
     /// One attempt: POST `body` to `path` and read at most the response ceiling.
-    pub(crate) async fn post(&self, path: &str, body: &[u8]) -> Result<Reply, ExtractError> {
+    pub(crate) async fn post(&self, path: &str, body: &str) -> Result<Reply, ExtractError> {
         let unreachable = || {
             failure(
                 ErrorCode::BackendFailed,
@@ -133,12 +159,14 @@ impl Server {
                 "Ollama request failed",
             )
         };
+        let started = Instant::now();
         let url = self.base.join(path).map_err(|_| unreachable())?;
         let mut response = self
             .client
             .post(url)
+            .headers(self.headers.clone())
             .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(body.to_vec())
+            .body(body.to_owned())
             .send()
             .await
             .map_err(|_| unreachable())?;
@@ -154,17 +182,26 @@ impl Server {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok(Reply {
-            status,
-            body: bytes,
-        })
+        // A body that is not text cannot be held in a raw exchange, so only the elapsed
+        // time is reported.
+        let body = String::from_utf8(bytes).map_err(|_| {
+            let mut usage = ExtractUsage::default();
+            usage.elapsed_ms = u64::try_from(started.elapsed().as_millis()).ok();
+            failure(
+                ErrorCode::InvalidAnswer,
+                "malformed_response",
+                "The response body is not valid UTF-8",
+            )
+            .with_usage(usage)
+        })?;
+        Ok(Reply { status, body })
     }
 }
 impl Reply {
     /// The exchange as it travelled, for retention inside an error or response.
-    pub fn raw(&self, request: &[u8]) -> RawExchange {
+    pub fn raw(&self, request: &str) -> RawExchange {
         RawExchange {
-            request: request.to_vec(),
+            request: request.to_string(),
             response: self.body.clone(),
         }
     }

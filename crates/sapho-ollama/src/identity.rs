@@ -31,7 +31,7 @@ pub(crate) async fn resolve(
     model: &str,
     pinned: &OnceLock<String>,
 ) -> Result<String, ExtractError> {
-    let body = serde_json::to_vec(&serde_json::json!({ "model": model })).map_err(|_| {
+    let body = serde_json::to_string(&serde_json::json!({ "model": model })).map_err(|_| {
         failure(
             ErrorCode::Config,
             "request_unserializable",
@@ -53,7 +53,7 @@ pub(crate) async fn resolve(
             "Model description request failed",
         ));
     }
-    let digest = serde_json::from_slice::<Description>(&reply.body)
+    let digest = serde_json::from_str::<Description>(&reply.body)
         .ok()
         .and_then(|d| weights_digest(&d.modelfile))
         .ok_or_else(|| {

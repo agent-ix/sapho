@@ -34,6 +34,9 @@ pub struct Recorded {
     pub body: Vec<u8>,
 }
 impl Recorded {
+    pub fn text(&self) -> String {
+        String::from_utf8(self.body.clone()).unwrap()
+    }
     pub fn json(&self) -> Value {
         serde_json::from_slice(&self.body).unwrap()
     }

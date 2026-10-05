@@ -428,7 +428,7 @@ pub struct ModelResponse {
     /// Digest of the actual model's weights, when the provider reports one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,
-    /// The exact request and response bytes, when the provider exposes them.
+    /// The exact request and response bodies (never headers or URLs), when the provider exposes them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<RawExchange>,
     /// Raw typed answers.

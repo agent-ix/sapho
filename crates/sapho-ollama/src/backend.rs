@@ -106,7 +106,7 @@ pub(crate) fn nanos_to_ms(nanos: Option<u64>) -> Option<u64> {
 
 /// The server's context refusal as Ollama 0.32 reports it: HTTP 400 whose `error` member
 /// is itself a JSON document with a typed error. Returns the server's prompt token count.
-pub(crate) fn context_refusal(body: &[u8]) -> Option<Option<u64>> {
+pub(crate) fn context_refusal(body: &str) -> Option<Option<u64>> {
     #[derive(Deserialize)]
     struct Outer {
         error: String,
@@ -120,7 +120,7 @@ pub(crate) fn context_refusal(body: &[u8]) -> Option<Option<u64>> {
         r#type: String,
         n_prompt_tokens: Option<u64>,
     }
-    let outer: Outer = serde_json::from_slice(body).ok()?;
+    let outer: Outer = serde_json::from_str(body).ok()?;
     let inner: Inner = serde_json::from_str(&outer.error).ok()?;
     (inner.error.r#type == "exceed_context_size_error").then_some(inner.error.n_prompt_tokens)
 }
@@ -190,7 +190,7 @@ impl OllamaBackend {
         &self,
         body: &GenerateBody<'_, F>,
     ) -> Result<Generated, ExtractError> {
-        let request = serde_json::to_vec(body).map_err(|_| {
+        let request = serde_json::to_string(body).map_err(|_| {
             failure(
                 ErrorCode::Config,
                 "request_unserializable",
@@ -213,7 +213,7 @@ impl OllamaBackend {
     fn accept(
         &self,
         reply: Reply,
-        request: &[u8],
+        request: &str,
         digest: String,
     ) -> Result<Generated, ExtractError> {
         let raw = reply.raw(request);
@@ -243,7 +243,7 @@ impl OllamaBackend {
                 .with_reason(reason)
                 .with_raw(raw.clone())
         };
-        let parsed: GenerateReply = serde_json::from_slice(&reply.body)
+        let parsed: GenerateReply = serde_json::from_str(&reply.body)
             .map_err(|_| invalid("malformed_response", "Response is not a generate response"))?;
         let usage = ExtractUsage {
             input_tokens: parsed.prompt_eval_count,

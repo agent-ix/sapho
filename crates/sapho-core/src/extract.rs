@@ -25,14 +25,17 @@ pub struct ExtractRequest {
     pub schema: Value,
 }
 
-/// The exact bytes of one exchange, for storage by content hash.
+/// The exact request and response bodies of one exchange, for storage by content hash.
+///
+/// Bodies only: never HTTP headers, URLs or credentials. Each serializes as a JSON string
+/// holding the body's UTF-8 text.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawExchange {
-    /// Request bytes as sent.
-    pub request: Vec<u8>,
-    /// Response bytes as received.
-    pub response: Vec<u8>,
+    /// Request body as sent.
+    pub request: String,
+    /// Response body as received.
+    pub response: String,
 }
 
 /// Provider-reported usage; a figure the provider did not report stays absent.

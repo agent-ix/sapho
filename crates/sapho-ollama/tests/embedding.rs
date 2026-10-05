@@ -49,7 +49,7 @@ async fn embed_sends_ordered_inputs_without_truncation_and_returns_vectors_in_or
         Some(format!("sha256:{BLOB}").as_str())
     );
     assert_eq!(result.input_tokens, Some(11));
-    assert_eq!(result.raw.request, sent.body);
+    assert_eq!(result.raw.request, sent.text());
 }
 
 /// Trace: FR-053-AC-2

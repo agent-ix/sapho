@@ -513,14 +513,14 @@ async fn the_response_retains_the_exact_exchange_and_error_paths_keep_it_too() {
     let _serial = serial().await;
     let listed = [("yes", -2.228), ("no", -5.759), ("Yes", -0.162)];
     let answer = bool_reply(yes_tokens(&listed));
-    let sent = serde_json::to_vec(&answer).unwrap();
+    let sent = serde_json::to_string(&answer).unwrap();
     let fake = server(answer).await;
     let response = asked(&fake, vec![boolean("b")]).await.unwrap();
     let raw = response.raw.as_ref().unwrap();
-    assert_eq!(raw.request, fake.generates()[0].body);
+    assert_eq!(raw.request, fake.generates()[0].text());
     assert_eq!(raw.response, sent);
     // The probability can be recomputed from the retained bytes alone.
-    let kept: Json = serde_json::from_slice(&raw.response).unwrap();
+    let kept: Json = serde_json::from_str(&raw.response).unwrap();
     let alternatives = &kept["logprobs"][3]["top_logprobs"];
     let mass = |token: &str| {
         alternatives
@@ -542,7 +542,7 @@ async fn the_response_retains_the_exact_exchange_and_error_paths_keep_it_too() {
         fill("\"}"),
     ];
     let bad = bool_reply(torn);
-    let sent = serde_json::to_vec(&bad).unwrap();
+    let sent = serde_json::to_string(&bad).unwrap();
     let fake = server(bad).await;
     let error = asked(&fake, vec![boolean("b")]).await.unwrap_err();
     assert_eq!(error.raw.as_deref().unwrap().response, sent);

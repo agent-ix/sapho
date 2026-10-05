@@ -89,7 +89,7 @@ impl OllamaEmbedder {
                 "The number of inputs is outside the binding's range",
             ));
         }
-        let request = serde_json::to_vec(&EmbedBody {
+        let request = serde_json::to_string(&EmbedBody {
             model: &self.model,
             input: inputs,
             truncate: false,
@@ -111,7 +111,7 @@ impl OllamaEmbedder {
             .await?;
         let raw = reply.raw(&request);
         if reply.status == 400
-            && serde_json::from_slice::<ErrorBody>(&reply.body)
+            && serde_json::from_str::<ErrorBody>(&reply.body)
                 .is_ok_and(|b| b.error == INPUT_TOO_LONG)
         {
             return Err(failure(
@@ -138,7 +138,7 @@ impl OllamaEmbedder {
             .with_raw(raw.clone())
         };
         let parsed: EmbedReply =
-            serde_json::from_slice(&reply.body).map_err(|_| invalid("malformed_response"))?;
+            serde_json::from_str(&reply.body).map_err(|_| invalid("malformed_response"))?;
         if parsed.model != self.model {
             return Err(failure(
                 ErrorCode::ModelMismatch,

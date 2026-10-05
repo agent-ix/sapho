@@ -60,7 +60,11 @@ pub enum ErrorCode {
 }
 
 /// A structured, serializable error with a stable code and diagnostic context.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
+///
+/// The exchange and usage are in-memory evidence for the caller: they are never
+/// serialized, printed by `Debug` or `Display`, or compared by `==`, so an error written
+/// to output or a log holds only its code, message and context.
+#[derive(Clone, thiserror::Error, Serialize, Deserialize)]
 #[error("{code:?}: {message}")]
 #[serde(deny_unknown_fields)]
 pub struct SaphoError {
@@ -70,12 +74,27 @@ pub struct SaphoError {
     pub message: Box<str>,
     /// Named diagnostic facts, never credentials.
     pub context: BTreeMap<String, String>,
-    /// The exact request and response bytes, when an exchange took place.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The exact request and response bodies, when an exchange took place.
+    #[serde(skip)]
     pub raw: Option<Box<RawExchange>>,
     /// Usage the provider reported, when it did.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub usage: Option<Box<ExtractUsage>>,
+}
+impl PartialEq for SaphoError {
+    fn eq(&self, other: &Self) -> bool {
+        (self.code, &self.message, &self.context) == (other.code, &other.message, &other.context)
+    }
+}
+impl Eq for SaphoError {}
+impl std::fmt::Debug for SaphoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SaphoError")
+            .field("code", &self.code)
+            .field("message", &self.message)
+            .field("context", &self.context)
+            .finish_non_exhaustive()
+    }
 }
 impl SaphoError {
     /// Construct a refusal under an explicit category.

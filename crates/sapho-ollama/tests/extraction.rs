@@ -114,14 +114,14 @@ async fn unusable_answers_have_their_own_reasons_and_keep_the_exchange() {
         (empty, "empty_response"),
         (garbage, "not_json"),
     ] {
-        let sent = serde_json::to_vec(&answer).unwrap();
+        let sent = serde_json::to_string(&answer).unwrap();
         let fake = serving(answer).await;
         let error = failing(&fake, "item").await;
         assert_eq!(error.code, ErrorCode::InvalidAnswer, "{reason}");
         assert_eq!(error.reason, Some(reason));
         let raw = error.raw.unwrap();
         assert_eq!(raw.response, sent);
-        assert_eq!(raw.request, fake.generates()[0].body);
+        assert_eq!(raw.request, fake.generates()[0].text());
     }
 }
 
@@ -155,11 +155,7 @@ async fn thinking_text_is_never_the_answer_but_stays_in_the_raw_bytes() {
         .await
         .unwrap();
     assert_eq!(response.value, json!({"label": "from-response"}));
-    assert!(
-        String::from_utf8(response.raw.response)
-            .unwrap()
-            .contains("long reasoning text")
-    );
+    assert!(response.raw.response.contains("long reasoning text"));
 }
 
 /// Trace: FR-050-AC-1, IT-007-SC-03
@@ -519,7 +515,7 @@ async fn a_body_that_is_not_a_generate_response_is_invalid_and_retained() {
     let error = failing(&fake, "item").await;
     assert_eq!(error.code, ErrorCode::InvalidAnswer);
     assert_eq!(error.reason, Some("malformed_response"));
-    assert_eq!(error.raw.unwrap().response, b"{\"model\": ");
+    assert_eq!(error.raw.unwrap().response, "{\"model\": ");
 }
 
 /// Trace: FR-052-AC-1, FR-052-AC-2, IT-007-SC-01
@@ -527,7 +523,7 @@ async fn a_body_that_is_not_a_generate_response_is_invalid_and_retained() {
 async fn success_carries_identity_usage_and_the_exact_bytes() {
     let _serial = serial().await;
     let answer = generated(MODEL, r#"{"label":"ok"}"#);
-    let sent = serde_json::to_vec(&answer).unwrap();
+    let sent = serde_json::to_string(&answer).unwrap();
     let fake = serving(answer).await;
     let response = extract(&backend(&fake, MODEL), &request("item"))
         .await
@@ -543,7 +539,7 @@ async fn success_carries_identity_usage_and_the_exact_bytes() {
     assert_eq!(response.usage.load_ms, Some(5786));
     assert_eq!(response.usage.prompt_ms, Some(103));
     assert_eq!(response.usage.generation_ms, Some(95));
-    assert_eq!(response.raw.request, fake.generates()[0].body);
+    assert_eq!(response.raw.request, fake.generates()[0].text());
     assert_eq!(response.raw.response, sent);
 }
 

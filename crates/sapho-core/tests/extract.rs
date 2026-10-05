@@ -20,8 +20,8 @@ fn object_schema() -> Value {
 }
 fn raw() -> RawExchange {
     RawExchange {
-        request: b"req".to_vec(),
-        response: b"resp".to_vec(),
+        request: "req".into(),
+        response: "resp".into(),
     }
 }
 fn completion(answer: &str) -> Completion {
