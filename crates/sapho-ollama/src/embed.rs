@@ -109,26 +109,26 @@ impl OllamaEmbedder {
                 Ok((digest, self.server.post("api/embed", &request).await?))
             })
             .await?;
-        let raw = reply.raw(&request);
-        if reply.status == 400
-            && serde_json::from_str::<ErrorBody>(&reply.body)
-                .is_ok_and(|b| b.error == INPUT_TOO_LONG)
-        {
-            return Err(failure(
-                ErrorCode::TooLarge,
-                "input_exceeds_context",
-                "An input does not fit the embedding context",
-            )
-            .with_raw(raw));
+        if !reply.success() {
+            if reply.status == 400
+                && reply
+                    .text()
+                    .and_then(|t| serde_json::from_str::<ErrorBody>(t).ok())
+                    .is_some_and(|b| b.error == INPUT_TOO_LONG)
+            {
+                return Err(reply.refusal(failure(
+                    ErrorCode::TooLarge,
+                    "input_exceeds_context",
+                    "An input does not fit the embedding context",
+                )));
+            }
+            return Err(reply.status_error());
         }
-        if !(200..300).contains(&reply.status) {
-            return Err(failure(
-                ErrorCode::BackendFailed,
-                "http_status",
-                "Ollama answered with an error status",
-            )
-            .with_raw(raw));
-        }
+        let text = reply.success_text()?;
+        let raw = RawExchange {
+            request,
+            response: text.to_string(),
+        };
         let invalid = |reason| {
             failure(
                 ErrorCode::InvalidAnswer,
@@ -138,7 +138,7 @@ impl OllamaEmbedder {
             .with_raw(raw.clone())
         };
         let parsed: EmbedReply =
-            serde_json::from_str(&reply.body).map_err(|_| invalid("malformed_response"))?;
+            serde_json::from_str(text).map_err(|_| invalid("malformed_response"))?;
         if parsed.model != self.model {
             return Err(failure(
                 ErrorCode::ModelMismatch,

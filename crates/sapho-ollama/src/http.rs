@@ -6,7 +6,7 @@ use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
     redirect::Policy,
 };
-use sapho_core::{ErrorCode, ExtractError, ExtractUsage, RawExchange};
+use sapho_core::{ErrorCode, ExtractError, ExtractUsage};
 use std::{
     future::Future,
     time::{Duration, Instant},
@@ -47,10 +47,11 @@ pub struct Server {
     limits: Limits,
     headers: HeaderMap,
 }
-/// A complete response: status and UTF-8 body text within the ceiling.
+/// A complete response within the ceiling; the body is decoded only where it is needed.
 pub(crate) struct Reply {
     pub status: u16,
-    pub body: String,
+    body: Vec<u8>,
+    elapsed_ms: Option<u64>,
 }
 
 pub(crate) fn failure(
@@ -182,29 +183,60 @@ impl Server {
             }
             bytes.extend_from_slice(&chunk);
         }
-        // A body that is not text cannot be held in a raw exchange, so only the elapsed
-        // time is reported.
-        let body = String::from_utf8(bytes).map_err(|_| {
-            let usage = ExtractUsage {
-                elapsed_ms: u64::try_from(started.elapsed().as_millis()).ok(),
-                ..ExtractUsage::default()
-            };
+        Ok(Reply {
+            status,
+            body: bytes,
+            elapsed_ms: u64::try_from(started.elapsed().as_millis()).ok(),
+        })
+    }
+}
+impl Reply {
+    pub fn success(&self) -> bool {
+        (200..300).contains(&self.status)
+    }
+    /// Only the elapsed time is known for a reply that carries no readable exchange.
+    fn elapsed_only(&self) -> ExtractUsage {
+        ExtractUsage {
+            elapsed_ms: self.elapsed_ms,
+            ..ExtractUsage::default()
+        }
+    }
+    /// The body as text, when it is valid UTF-8.
+    pub fn text(&self) -> Option<&str> {
+        std::str::from_utf8(&self.body).ok()
+    }
+    /// A non-success status is a failure whatever its body says: 404 is
+    /// `model_not_found`, anything else `http_status`. No exchange is retained.
+    pub fn status_error(&self) -> ExtractError {
+        if self.status == 404 {
+            failure(
+                ErrorCode::BackendFailed,
+                "model_not_found",
+                "The server does not know the model",
+            )
+        } else {
+            failure(
+                ErrorCode::BackendFailed,
+                "http_status",
+                "Ollama answered with an error status",
+            )
+        }
+        .with_usage(self.elapsed_only())
+    }
+    /// The body of a success reply. A body that is not text cannot be held in a raw
+    /// exchange, so only the elapsed time is reported.
+    pub fn success_text(&self) -> Result<&str, ExtractError> {
+        self.text().ok_or_else(|| {
             failure(
                 ErrorCode::InvalidAnswer,
                 "malformed_response",
                 "The response body is not valid UTF-8",
             )
-            .with_usage(usage)
-        })?;
-        Ok(Reply { status, body })
+            .with_usage(self.elapsed_only())
+        })
     }
-}
-impl Reply {
-    /// The exchange as it travelled, for retention inside an error or response.
-    pub fn raw(&self, request: &str) -> RawExchange {
-        RawExchange {
-            request: request.to_string(),
-            response: self.body.clone(),
-        }
+    /// A refusal the server's body names, as a failure with no retained exchange.
+    pub fn refusal(&self, error: ExtractError) -> ExtractError {
+        error.with_usage(self.elapsed_only())
     }
 }

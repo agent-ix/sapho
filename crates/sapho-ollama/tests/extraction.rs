@@ -177,7 +177,17 @@ async fn server_context_refusal_is_too_large_with_the_servers_count() {
             reserved_output_tokens: 512
         })
     );
-    assert!(error.raw.is_some());
+    assert!(error.raw.is_none(), "a refusal carries no exchange");
+    let binary = Fake::start(|r| match r.path.as_str() {
+        "/api/show" => description(BLOB),
+        _ => Reply::Status(400, vec![0xff, 0xfe]),
+    })
+    .await;
+    let error = failing(&binary, "item").await;
+    assert_eq!(
+        (error.code, error.reason),
+        (ErrorCode::BackendFailed, Some("http_status"))
+    );
 
     let other = Fake::start(|r| match r.path.as_str() {
         "/api/show" => description(BLOB),
@@ -692,9 +702,13 @@ async fn the_response_ceiling_holds_for_a_chunked_body_with_no_content_length() 
 
 /// Trace: FR-048-AC-7, FR-052-AC-2
 #[tokio::test]
-async fn a_body_that_is_not_utf8_has_no_raw_exchange_and_only_elapsed_usage() {
+async fn a_body_that_is_not_utf8_is_judged_by_its_status_and_has_no_raw_exchange() {
     let _serial = serial().await;
-    for status in [200, 502] {
+    for (status, code, reason) in [
+        (200, ErrorCode::InvalidAnswer, "malformed_response"),
+        (502, ErrorCode::BackendFailed, "http_status"),
+        (404, ErrorCode::BackendFailed, "model_not_found"),
+    ] {
         let fake = Fake::start(move |r| match r.path.as_str() {
             "/api/show" => description(BLOB),
             _ => Reply::Status(status, vec![b'{', 0xff, 0xfe, b'}']),
@@ -703,7 +717,7 @@ async fn a_body_that_is_not_utf8_has_no_raw_exchange_and_only_elapsed_usage() {
         let error = failing(&fake, "item").await;
         assert_eq!(
             (error.code, error.reason),
-            (ErrorCode::InvalidAnswer, Some("malformed_response")),
+            (code, Some(reason)),
             "status {status}"
         );
         assert!(error.raw.is_none());
@@ -713,6 +727,65 @@ async fn a_body_that_is_not_utf8_has_no_raw_exchange_and_only_elapsed_usage() {
             (usage.input_tokens, usage.output_tokens, usage.load_ms),
             (None, None, None)
         );
+    }
+}
+
+/// Trace: FR-051-AC-4
+#[tokio::test]
+async fn failure_statuses_with_binary_bodies_keep_their_reasons_and_no_exchange() {
+    let _serial = serial().await;
+    for (status, reason) in [(404, "model_not_found"), (500, "http_status")] {
+        let fake = Fake::start(move |r| match r.path.as_str() {
+            "/api/show" => description(BLOB),
+            _ => Reply::Status(status, vec![0xff, 0x00, 0xfe]),
+        })
+        .await;
+        let error = failing(&fake, "item").await;
+        assert_eq!(
+            (error.code, error.reason),
+            (ErrorCode::BackendFailed, Some(reason))
+        );
+        assert!(error.raw.is_none());
+    }
+    // The description request is judged the same way.
+    let fake = Fake::start(|_| Reply::Status(500, vec![0xff, 0xfe])).await;
+    let error = failing(&fake, "item").await;
+    assert_eq!(
+        (error.code, error.reason),
+        (ErrorCode::BackendFailed, Some("http_status"))
+    );
+}
+
+/// Trace: FR-051-AC-6
+#[tokio::test]
+async fn a_400_is_too_large_only_for_a_readable_size_refusal() {
+    let _serial = serial().await;
+    let cases: [(Vec<u8>, ErrorCode, Option<&str>); 3] = [
+        (
+            serde_json::to_vec(&context_refusal("exceed_context_size_error")).unwrap(),
+            ErrorCode::TooLarge,
+            None,
+        ),
+        (
+            vec![0xff, 0xfe],
+            ErrorCode::BackendFailed,
+            Some("http_status"),
+        ),
+        (
+            serde_json::to_vec(&context_refusal("invalid_request_error")).unwrap(),
+            ErrorCode::BackendFailed,
+            Some("http_status"),
+        ),
+    ];
+    for (body, code, reason) in cases {
+        let fake = Fake::start(move |r| match r.path.as_str() {
+            "/api/show" => description(BLOB),
+            _ => Reply::Status(400, body.clone()),
+        })
+        .await;
+        let error = failing(&fake, "item").await;
+        assert_eq!((error.code, error.reason), (code, reason));
+        assert!(error.raw.is_none());
     }
 }
 

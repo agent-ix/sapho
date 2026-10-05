@@ -46,14 +46,10 @@ pub(crate) async fn resolve(
             "The server does not have the model",
         ));
     }
-    if !(200..300).contains(&reply.status) {
-        return Err(failure(
-            ErrorCode::BackendFailed,
-            "http_status",
-            "Model description request failed",
-        ));
+    if !reply.success() {
+        return Err(reply.status_error());
     }
-    let digest = serde_json::from_str::<Description>(&reply.body)
+    let digest = serde_json::from_str::<Description>(reply.success_text()?)
         .ok()
         .and_then(|d| weights_digest(&d.modelfile))
         .ok_or_else(|| {

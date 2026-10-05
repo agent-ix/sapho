@@ -216,34 +216,26 @@ impl OllamaBackend {
         request: &str,
         digest: String,
     ) -> Result<Generated, ExtractError> {
-        let raw = reply.raw(request);
-        if reply.status == 400
-            && let Some(reported) = context_refusal(&reply.body)
-        {
-            return Err(self.too_large(reported).with_raw(raw));
+        if !reply.success() {
+            // The body is read only to recognise the server's context refusal.
+            if reply.status == 400
+                && let Some(reported) = reply.text().and_then(context_refusal)
+            {
+                return Err(reply.refusal(self.too_large(reported)));
+            }
+            return Err(reply.status_error());
         }
-        if !(200..300).contains(&reply.status) {
-            let error = if reply.status == 404 {
-                failure(
-                    ErrorCode::BackendFailed,
-                    "model_not_found",
-                    "The server does not know the model",
-                )
-            } else {
-                failure(
-                    ErrorCode::BackendFailed,
-                    "http_status",
-                    "Ollama answered with an error status",
-                )
-            };
-            return Err(error.with_raw(raw));
-        }
+        let text = reply.success_text()?;
+        let raw = RawExchange {
+            request: request.to_string(),
+            response: text.to_string(),
+        };
         let invalid = |reason, message| {
             ExtractError::new(ErrorCode::InvalidAnswer, message)
                 .with_reason(reason)
                 .with_raw(raw.clone())
         };
-        let parsed: GenerateReply = serde_json::from_str(&reply.body)
+        let parsed: GenerateReply = serde_json::from_str(text)
             .map_err(|_| invalid("malformed_response", "Response is not a generate response"))?;
         let usage = ExtractUsage {
             input_tokens: parsed.prompt_eval_count,

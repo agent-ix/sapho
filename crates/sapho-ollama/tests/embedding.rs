@@ -69,9 +69,23 @@ async fn refusals_and_malformed_vectors_have_their_own_outcomes() {
         (long.code, long.reason),
         (ErrorCode::TooLarge, Some("input_exceeds_context"))
     );
-    assert!(long.raw.is_some());
+    assert!(long.raw.is_none(), "a refusal carries no exchange");
     let other = refusal("something else").await;
-    assert_eq!(other.code, ErrorCode::BackendFailed);
+    assert_eq!(
+        (other.code, other.reason),
+        (ErrorCode::BackendFailed, Some("http_status"))
+    );
+    let binary = Fake::start(|r| match r.path.as_str() {
+        "/api/show" => description(BLOB),
+        _ => Reply::Status(400, vec![0xff, 0xfe]),
+    })
+    .await;
+    let error = embedder(&binary, 32).embed(&texts(1)).await.unwrap_err();
+    assert_eq!(
+        (error.code, error.reason),
+        (ErrorCode::BackendFailed, Some("http_status"))
+    );
+    assert!(error.raw.is_none());
 
     for vectors in [json!([[1.0, 0.0]]), json!([[1.0, 0.0], [1.0]])] {
         let fake = answering(embeddings(vectors)).await;
