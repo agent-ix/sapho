@@ -9,6 +9,7 @@ policy. Start with an offline rule, then add model calls when you need them.
 | Install and run my first rule | [README quickstart](../README.md#install-the-cli) |
 | Understand how a decision is made | [How Sapho works](how-it-works.md) |
 | Measure and tune a rule against labelled cases | [Improve a rule](improve-a-rule.md) |
+| Label a dataset with local models (design) | [Build a dataset](datasets.md) |
 | Write and run graphs from a shell | [CLI guide](cli-guide.md) |
 | Embed Sapho or register Rust code | [Rust user guide](user-guide.md) |
 | Look up graph fields, ports or operations | [Graph reference](graph-reference.md) |

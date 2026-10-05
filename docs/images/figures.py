@@ -579,6 +579,138 @@ def multi_stage():
     return f
 
 
+# ---- dataset pipeline (design: Sapho Datasets) --------------------------------------
+
+DATA_ROLES = [
+    ("code", "your code", "box"),
+    ("model", "model call", "box"),
+    ("logic", "your rule", "box"),
+    ("evidence", "data", "box"),
+    ("ink", "input / person", "box"),
+]
+
+
+def dataset_funnel():
+    """Datasets hero: a typical pipeline, cheap stages before the expensive call."""
+    f = Figure(
+        "dataset-funnel",
+        980,
+        424,
+        "Items are imported, deduplicated and triaged with a cheap yes/no ask, so select can "
+        "fill the quotas before the expensive step. Only selected items get one extract call "
+        "to a smart model. Your checks test its answer, a second yes/no ask confirms each "
+        "claim, and decide sets the status. Items it cannot settle go to review, whose answers "
+        "are new labels, and accepted items are frozen into a release. Every stage logs what "
+        "it dropped. A fast model can later take over the yes/no stages.",
+    )
+    w, gap = 156, 50
+    col = [i * (w + gap) for i in range(5)]
+    r1, r2 = 122, 262
+
+    f.box(col[2], 0, w, 56, "model", "fast model", "Jev · CLM", dashed=True)
+    f.line([(col[2] + w / 2, 56), (col[2] + w / 2, r1 - 35)], "model", dashed=True)
+    f.note(col[2] + w / 2 + 8, 80, "later", "muted")
+
+    f.box(col[0], r1 - 32, w, 64, "ink", "import", "items.jsonl", "one per item")
+    f.box(col[1], r1 - 32, w, 64, "code", "dedup", "exact · near", "exclude files")
+    f.box(col[2], r1 - 32, w, 64, "model", "triage", "ask · yes/no", "cheap")
+    f.box(col[3], r1 - 32, w, 64, "logic", "select", "quotas", "fill the gaps")
+    f.box(col[4], r1 - 32, w, 64, "model", "extract", "smart model", "1 call per item")
+
+    f.box(col[1], r2 - 32, w, 64, "code", "checks", "your Check", "rules")
+    f.box(col[2], r2 - 32, w, 64, "model", "confirm", "ask · yes/no", "per claim")
+    f.box(col[3], r2 - 32, w, 64, "logic", "decide", "status policy")
+    f.box(col[4], r2 - 32, w, 64, "evidence", "freeze", "release vN", "hashed manifest")
+    f.box(col[3], 336, w, 56, "ink", "review", "agent · human", dashed=True)
+    f.box(col[2], 336, w, 56, "model", "fast model", "Jev · CLM", dashed=True)
+
+    for i, role in enumerate(("ink", "code", "model", "logic")):
+        f.line([(col[i] + w, r1), (col[i + 1] - 3, r1)], role)
+    f.line([(col[4] + w / 2, r1 + 32), (col[4] + w / 2, 196), (col[1] + w / 2, 196), (col[1] + w / 2, r2 - 35)],
+           "model")
+    f.note(col[2] + 30, 188, "structured answer", "model")
+    f.line([(col[1] + w, r2), (col[2] - 3, r2)], "code")
+    f.line([(col[2] + w, r2), (col[3] - 3, r2)], "model")
+    f.line([(col[3] + w, r2), (col[4] - 3, r2)], "logic", weight=2.4)
+    f.line([(col[3] + 52, r2 + 32), (col[3] + 52, 333)], "logic", dashed=True)
+    f.line([(col[3] + 104, 336), (col[3] + 104, r2 + 35)], "ink", dashed=True)
+    f.note(col[3] + 112, 316, "new label", "muted")
+    f.line([(col[2] + w / 2, 336), (col[2] + w / 2, r2 + 35)], "model", dashed=True)
+    f.text(0, r2 - 4, "each stage logs", "muted", "mono", SMALL)
+    f.text(0, r2 + 14, "in · out · dropped", "muted", "mono", SMALL)
+    f.legend(0, 420, DATA_ROLES + [("model", "later / when needed", "dash")])
+    return f
+
+
+def batch_map():
+    """The one primitive: one stateless request per item, appended as one label."""
+    f = Figure(
+        "batch-map",
+        980,
+        316,
+        "A run sends one request per item. Each request holds the task's instructions and "
+        "that one item, nothing from earlier calls, so a-02's request knows nothing of "
+        "a-01's answer. Each answer is appended to labels.jsonl and the exact request and "
+        "response are kept by hash. Re-running skips a-03, which this task version already "
+        "labelled.",
+    )
+    rows = (100, 170, 240)
+    f.box(196, 0, 200, 56, "logic", "task · v3", "instructions + schema")
+    f.box(0, rows[1] - 39, 150, 78, "ink", "items.jsonl", "a-01", "a-02", "a-03")
+    f.box(196, rows[0] - 26, 200, 52, "model", "request", "task + a-01")
+    f.box(196, rows[1] - 26, 200, 52, "model", "request", "task + a-02")
+    f.box(196, rows[2] - 26, 200, 52, "model", "a-03 skipped", "already labelled", dashed=True)
+    f.box(448, rows[0] - 26, 150, rows[1] - rows[0] + 52, "model", "model", "1 call each", "no shared state")
+    f.box(650, rows[1] - 47, 200, 94, "evidence", "labels.jsonl", "a-01 · label", "a-02 · label", "a-03 · kept")
+    f.box(650, rows[2] + 2, 200, 50, "evidence", "raw/<sha256>", "request + response")
+
+    f.line([(296, 56), (296, rows[0] - 29)], "logic")
+    f.line([(150, rows[1]), (172, rows[1]), (172, rows[0]), (193, rows[0])], "ink")
+    f.line([(172, rows[1]), (193, rows[1])], "ink")
+    f.line([(172, rows[1]), (172, rows[2]), (193, rows[2])], "ink", dashed=True)
+    f.line([(396, rows[0]), (445, rows[0])], "model")
+    f.line([(396, rows[1]), (445, rows[1])], "model")
+    f.line([(598, rows[0]), (624, rows[0]), (624, rows[1] - 12), (647, rows[1] - 12)], "model")
+    f.line([(598, rows[1]), (612, rows[1]), (612, rows[1] + 12), (647, rows[1] + 12)], "model")
+    f.note(604, rows[0] - 9, "JSON", "model")
+    f.line([(523, rows[1] + 26), (523, rows[2] + 27), (647, rows[2] + 27)], "evidence", dashed=True)
+    f.note(531, rows[2] + 19, "kept by hash", "muted")
+    f.note(870, rows[1] - 4, "append", "evidence", sub="never edit")
+    f.legend(0, 312, DATA_ROLES)
+    return f
+
+
+def label_status():
+    """Tiered status: who can move an item forward; no model confirms itself."""
+    f = Figure(
+        "label-status",
+        980,
+        226,
+        "Every label in labels.jsonl says what made it: the extract and confirm labels came "
+        "from qwen3, the checks from native code, the review from a Claude agent. An item is "
+        "proposed once its extract passes the checks, consistent once the confirm step agrees "
+        "(good for development and training), and confirmed only when a different labeler "
+        "agrees (good for held-out evaluation). Qwen agreeing with itself is refused.",
+    )
+    cy = 60
+    made_by = [("extract", "qwen3", "model"), ("checks", "native", "deterministic"),
+               ("confirm", "qwen3", "model"), ("review", "claude", "agent")]
+    f.box(0, 12, 320, 112, "evidence", "labels.jsonl · one item",
+          *[f"{stage:<9}{who:<8}{kind:<13}" for stage, who, kind in made_by])
+    f.box(368, cy - 32, 172, 64, "ink", "proposed", "extract passed", "every check")
+    f.box(588, cy - 32, 172, 64, "ink", "consistent", "confirm agrees", "dev · training")
+    f.box(808, cy - 32, 172, 64, "ink", "confirmed", "another labeler", "held-out · eval")
+    f.box(808, 150, 172, 64, "logic", "same model?", "refused", "stays consistent", dashed=True)
+
+    f.line([(320, cy), (365, cy)], "evidence")
+    f.line([(540, cy), (585, cy)], "ink")
+    f.line([(760, cy), (805, cy)], "ink", weight=2.4)
+    f.line([(674, cy + 32), (674, 182), (805, 182)], "logic", dashed=True)
+    f.note(682, 174, "qwen3 again", "logic")
+    f.legend(0, 222, [DATA_ROLES[3], DATA_ROLES[2], DATA_ROLES[4]])
+    return f
+
+
 FIGURES = [
     how_it_works,
     model_answers,
@@ -588,4 +720,7 @@ FIGURES = [
     collections,
     evidence_loop,
     multi_stage,
+    dataset_funnel,
+    batch_map,
+    label_status,
 ]
