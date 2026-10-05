@@ -16,7 +16,7 @@ Sapho executes configurable graphs of native code, typed model questions and log
 
 ### 2.1 In Scope
 
-Typed values and provenance; native Rust extension registration; YAML/JSON graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev and host-configured CLM adapters; the Extractor port for one-call schema-checked structured extraction; a host-configured Ollama backend that calls an already running local inference server for extraction and embeddings, counting prompt size in tokens; caller-controlled recording and exact offline replay.
+Typed values and provenance; native Rust extension registration; YAML/JSON graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev and host-configured CLM adapters; the Extractor port for one-call schema-checked structured extraction; a host-configured Ollama backend that calls an already running local inference server for extraction, typed questions answered with probabilities from answer-token log-probabilities, and embeddings, counting prompt size in tokens; caller-controlled recording and exact offline replay.
 
 ### 2.2 Out of Scope
 
@@ -38,7 +38,7 @@ A Rust embedding application or the Sapho CLI host supplies inputs, graph config
 | [clm](modules/clm/spec.md) | `sapho-clm` | Host-configured bounded CLM backend adapter |
 | [jev](modules/jev/spec.md) | `sapho-jev` | Hosted Jev backend adapter |
 | [recording](modules/recording/spec.md) | `sapho-recording` | Exact recording and offline replay |
-| [ollama](modules/ollama/spec.md) | `sapho-ollama` | Host-configured Ollama extraction and embedding adapter |
+| [ollama](modules/ollama/spec.md) | `sapho-ollama` | Host-configured Ollama extraction, typed-question and embedding adapter |
 
 | [cli](modules/cli/spec.md) | `sapho-cli` | Checked command-line invocation and host-owned I/O, backends and exit policy |
 | [evidence](modules/evidence/spec.md) | `sapho-evidence` | Curated labelled cases, reproducible measurements, development tuning and training exports |
