@@ -256,7 +256,7 @@ async fn only_schema_keywords_are_references_not_property_names_or_data() {
     assert_eq!(error.reason, Some("schema_external_ref"));
 }
 
-/// Trace: FR-006-AC-1
+/// Trace: FR-006-AC-3
 #[test]
 fn errors_keep_the_exchange_and_usage_through_the_shared_error_type() {
     let error: SaphoError = too_large()
