@@ -28,7 +28,7 @@ Unit: FR-049-AC-2 at spec/modules/ollama/functional/FR-049.md:47. Related: FR-04
 
 > After two consecutive extractions with different inputs, the second captured body contains no byte sequence from the first input or first response and has no `context`, `messages`, `images`, `template`, `raw` or `suffix` member.
 
-Any two JSON bodies share byte sequences (braces, member names, common words), so the literal criterion fails on every implementation, and a test writer will silently weaken it. Use planted sentinel strings in the first input and first response, as sapho-dataset FR-008-AC-2 does.
+Any two JSON bodies share byte sequences (braces, member names, common words), so the literal criterion fails on every implementation, and a test writer will silently weaken it. Use planted sentinel strings in the first input and first response, as the downstream dataset consumer FR-008-AC-2 does.
 
 ## Scope
 

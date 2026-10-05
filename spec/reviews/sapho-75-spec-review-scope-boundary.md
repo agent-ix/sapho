@@ -12,7 +12,7 @@ review_set: subset
 
 Ticket: SAPHO-75. PR: agent-ix/sapho#19 at 83980c847c8ed97cef57e56d33fa6b09375d151d. Method: spec-review/scope-boundary (reviewer run 764c04b7-2ad7-4bef-b559-3f11ebcafc0c, claude-opus-5-5, quoin 0.28.1, spec-artifacts-process@7b50469a1c31f33e4c6e2d73e3614ca21d064735). Review date 2026-10-05.
 
-System boundaries and responsibility allocation between public Sapho, private sapho-dataset and private ears-dataset.
+System boundaries and responsibility allocation between public Sapho and the private downstream dataset consumers.
 
 ## Findings
 
@@ -22,7 +22,7 @@ System boundaries and responsibility allocation between public Sapho, private sa
 
 ## Analysis
 
-Sapho's master scope adds the Extractor port and a host-configured Ollama backend, states that installing or running a server stays out of scope, and moves 'dataset collection or labelling pipelines' explicitly out of scope. No mention of or dependency on sapho-dataset anywhere in the diff. The ask-path gap is recorded under spec-review (it is a coverage gap of SAPHO-75, not a boundary error).
+Sapho's master scope adds the Extractor port and a host-configured Ollama backend, states that installing or running a server stays out of scope, and moves 'dataset collection or labelling pipelines' explicitly out of scope. No mention of or dependency on the downstream dataset consumer anywhere in the diff. The ask-path gap is recorded under spec-review (it is a coverage gap of SAPHO-75, not a boundary error).
 ## Scope
 
 | Unit | Path | Role |

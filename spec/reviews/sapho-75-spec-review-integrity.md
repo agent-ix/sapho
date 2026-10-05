@@ -24,11 +24,11 @@ Completeness, consistency and atomicity of the requirement set, including cross-
 
 ### FND-001 (medium, confidence high, ambiguous)
 
-Unit: FR-048 at spec/modules/core/functional/FR-048.md:34. Related: FR-050, sapho-dataset/FR-010.
+Unit: FR-048 at spec/modules/core/functional/FR-048.md:34. Related: FR-050, the downstream dataset consumer's FR-010.
 
 > `ExtractError`: an ErrorCode, a message free of request and response content, and, when an exchange took place, the raw exchange and usage.
 
-FR-048 defines ExtractError as code + content-free message + (only when an exchange took place) raw exchange and usage. FR-050 says a pre-send TooLarge reports 'the estimate and the limit', and sapho-dataset FR-010 records outcome too_large 'with the estimate and limit'. With no exchange there is no usage, so the only carrier is the message, and the master spec says errors use typed codes plus contextual fields, not message parsing. Scenario: sapho-dataset's run log needs estimated tokens and num_ctx for each too_large item and must parse a human message to get them. Add typed fields (for example `estimated_input_tokens`, `limit_tokens`) to ExtractError for TooLarge.
+FR-048 defines ExtractError as code + content-free message + (only when an exchange took place) raw exchange and usage. FR-050 says a pre-send TooLarge reports 'the estimate and the limit', and the downstream dataset consumer FR-010 records outcome too_large 'with the estimate and limit'. With no exchange there is no usage, so the only carrier is the message, and the master spec says errors use typed codes plus contextual fields, not message parsing. Scenario: the downstream dataset consumer's run log needs estimated tokens and num_ctx for each too_large item and must parse a human message to get them. Add typed fields (for example `estimated_input_tokens`, `limit_tokens`) to ExtractError for TooLarge.
 
 ## Scope
 

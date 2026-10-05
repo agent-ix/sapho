@@ -37,6 +37,8 @@ The host binding contains an explicit DistributionPolicy. Registration validates
 
 ModelBackend accepts ModelRequest and returns ModelResponse or a structured SaphoError. Registrations reject duplicates. Every ModelRequest includes its BackendId, requested model, optional expected model, Record state and ordered questions. Each binding owns requested model and optional expected model identity; credentials are held by the adapter, never by graph or recording types. The caller can implement another backend without depending on graph or runtime crates. Cancellation drops the model future; usage is optional, not invented.
 
+A ModelResponse SHALL carry an optional raw exchange, the exact request bytes sent and response bytes received, using the same RawExchange type as extraction ([FR-048](FR-048.md)); it is omitted from JSON when absent, so recordings made without it still load. When a backend failure happens after an exchange took place, the SaphoError SHALL keep that raw exchange and the reported usage; the conversion of an ExtractError into a SaphoError carries both. A probability or a failure can then be audited against the bytes that produced it.
+
 ## Acceptance Criteria
 
 | ID | Criteria | Verification |
@@ -44,6 +46,8 @@ ModelBackend accepts ModelRequest and returns ModelResponse or a structured Saph
 | FR-006-AC-1 | A host-defined backend executes through the same request/response types as a supplied adapter. | Test (TC-006) |
 | FR-006-AC-2 | Duplicate backend registration is rejected without replacement. | Test (TC-006) |
 | FR-006-AC-3 | Backend failure retains a stable error code and produces no answer value. | Test (TC-006) |
+| FR-006-AC-4 | A ModelResponse with a raw exchange round-trips through JSON with its bytes unchanged; one without it serializes with no `raw` member, and a recording written without the member loads. | Test (TC-006) |
+| FR-006-AC-5 | An ExtractError carrying a raw exchange and usage, converted into a SaphoError, still exposes both unchanged. | Test (TC-006) |
 
 ## Dependencies
 
