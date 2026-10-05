@@ -5,6 +5,10 @@
 use async_trait::async_trait;
 use futures::StreamExt;
 mod capacity;
+mod catalog;
+pub use catalog::{
+    CatalogTemplate, catalog_question_bound, catalog_question_bytes, catalog_single_line_bound,
+};
 mod prompt;
 pub use prompt::PromptFormat;
 use reqwest::{Client, Url};
@@ -1073,87 +1077,88 @@ mod tests {
                 ),
             ),
         ]));
-        let format = PromptFormat::FramedStateV1;
-        let mut limits = Limits {
-            prompt_format: format,
-            ..Limits::default()
-        };
-        let measured = PromptBudget::measure(&input, &limits).unwrap();
-        limits.context_tokens = measured.prompt_bytes + limits.output_tokens + 1024;
-        let body = r#"{"model":"local-test","done":true,"done_reason":"stop","response":"{\"answers\":{\"x\":{\"kind\":\"choice\",\"selected\":\"yes\",\"confidence\":0.7,\"probabilities\":null}}}","prompt_eval_count":17,"eval_count":3}"#;
-        let (url, task) = server(body, Duration::ZERO).await;
-        let backend = OllamaBackend::new(&url, limits).unwrap();
-        let response = backend.infer(&input).await.unwrap();
-        sapho_core::validate_response(&input, &response).unwrap();
-        task.await.unwrap();
-        let captured = backend.receipts().unwrap();
-        assert_eq!(captured.len(), 1);
-        assert!(captured[0].made_call);
-        assert_eq!(captured[0].prompt.format, format);
-        assert_eq!(captured[0].prompt.prompt_bytes, measured.prompt_bytes);
-        let wire: serde_json::Value = serde_json::from_slice(&captured[0].request).unwrap();
-        let prompt = wire["prompt"].as_str().unwrap();
-        assert_eq!(prompt, prompt::render(&input, format).unwrap().text);
-        assert!(prompt.contains(owner));
-        assert_eq!(
-            captured[0].telemetry.as_ref().unwrap().input_tokens,
-            Some(17)
-        );
-        assert_eq!(
-            captured[0].telemetry.as_ref().unwrap().output_tokens,
-            Some(3)
-        );
-        assert_eq!(
-            captured[0].typed_request_sha256,
-            format!("{:x}", Sha256::digest(serde_json::to_vec(&input).unwrap()))
-        );
+        for format in [PromptFormat::FramedStateV1, PromptFormat::FramedCatalogV1] {
+            let mut limits = Limits {
+                prompt_format: format,
+                ..Limits::default()
+            };
+            let measured = PromptBudget::measure(&input, &limits).unwrap();
+            limits.context_tokens = measured.prompt_bytes + limits.output_tokens + 1024;
+            let body = r#"{"model":"local-test","done":true,"done_reason":"stop","response":"{\"answers\":{\"x\":{\"kind\":\"choice\",\"selected\":\"yes\",\"confidence\":0.7,\"probabilities\":null}}}","prompt_eval_count":17,"eval_count":3}"#;
+            let (url, task) = server(body, Duration::ZERO).await;
+            let backend = OllamaBackend::new(&url, limits).unwrap();
+            let response = backend.infer(&input).await.unwrap();
+            sapho_core::validate_response(&input, &response).unwrap();
+            task.await.unwrap();
+            let captured = backend.receipts().unwrap();
+            assert_eq!(captured.len(), 1);
+            assert!(captured[0].made_call);
+            assert_eq!(captured[0].prompt.format, format);
+            assert_eq!(captured[0].prompt.prompt_bytes, measured.prompt_bytes);
+            let wire: serde_json::Value = serde_json::from_slice(&captured[0].request).unwrap();
+            let prompt = wire["prompt"].as_str().unwrap();
+            assert_eq!(prompt, prompt::render(&input, format).unwrap().text);
+            assert!(prompt.contains(owner));
+            assert_eq!(
+                captured[0].telemetry.as_ref().unwrap().input_tokens,
+                Some(17)
+            );
+            assert_eq!(
+                captured[0].telemetry.as_ref().unwrap().output_tokens,
+                Some(3)
+            );
+            assert_eq!(
+                captured[0].typed_request_sha256,
+                format!("{:x}", Sha256::digest(serde_json::to_vec(&input).unwrap()))
+            );
 
-        let admitted = RequestBudget::measure(&input, &limits).unwrap();
-        assert!(admitted.allowed());
-        assert_eq!(
-            admitted.typed_request_sha256,
-            captured[0].typed_request_sha256
-        );
-        assert_eq!(admitted.wire_request_bytes, captured[0].request.len());
-        assert_eq!(
-            admitted.typed_request_bytes,
-            serde_json::to_vec(&input).unwrap().len()
-        );
-        assert_eq!(captured[0].request, serde_json::to_vec(&serde_json::json!({
+            let admitted = RequestBudget::measure(&input, &limits).unwrap();
+            assert!(admitted.allowed());
+            assert_eq!(
+                admitted.typed_request_sha256,
+                captured[0].typed_request_sha256
+            );
+            assert_eq!(admitted.wire_request_bytes, captured[0].request.len());
+            assert_eq!(
+                admitted.typed_request_bytes,
+                serde_json::to_vec(&input).unwrap().len()
+            );
+            assert_eq!(captured[0].request, serde_json::to_vec(&serde_json::json!({
             "format":answer_schema(&input), "model":input.model,
             "options":{"num_ctx":limits.context_tokens,"num_predict":limits.output_tokens,"temperature":0},
             "prompt":prompt,"stream":false,"think":limits.think,
         })).unwrap());
-        let byte_limited = Limits {
-            request_bytes: admitted.wire_request_bytes - 1,
-            ..limits
-        };
-        assert!(admitted.typed_request_bytes <= byte_limited.request_bytes);
-        let wire_refusal = RequestBudget::measure(&input, &byte_limited).unwrap();
-        assert!(!wire_refusal.allowed());
-        assert!(wire_refusal.prompt.allowed());
-        let refused = OllamaBackend::new("http://127.0.0.1:1", byte_limited).unwrap();
-        assert_eq!(
-            refused.infer(&input).await.unwrap_err().code,
-            ErrorCode::LimitExceeded
-        );
-        assert_eq!(refused.progress().unwrap().dispatch_attempts, 0);
-        assert!(!refused.receipts().unwrap()[0].made_call);
+            let byte_limited = Limits {
+                request_bytes: admitted.wire_request_bytes - 1,
+                ..limits
+            };
+            assert!(admitted.typed_request_bytes <= byte_limited.request_bytes);
+            let wire_refusal = RequestBudget::measure(&input, &byte_limited).unwrap();
+            assert!(!wire_refusal.allowed());
+            assert!(wire_refusal.prompt.allowed());
+            let refused = OllamaBackend::new("http://127.0.0.1:1", byte_limited).unwrap();
+            assert_eq!(
+                refused.infer(&input).await.unwrap_err().code,
+                ErrorCode::LimitExceeded
+            );
+            assert_eq!(refused.progress().unwrap().dispatch_attempts, 0);
+            assert!(!refused.receipts().unwrap()[0].made_call);
 
-        limits.context_tokens -= 1;
-        let refused = OllamaBackend::new("http://127.0.0.1:1", limits).unwrap();
-        assert!(!PromptBudget::measure(&input, &limits).unwrap().allowed());
-        assert_eq!(
-            refused.infer(&input).await.unwrap_err().code,
-            ErrorCode::LimitExceeded
-        );
-        assert_eq!(refused.progress().unwrap().dispatch_attempts, 0);
-        let capture = refused.receipts().unwrap();
-        assert_eq!(capture.len(), 1);
-        assert!(!capture[0].made_call);
-        assert_eq!(capture[0].prompt.prompt_bytes, measured.prompt_bytes);
-        assert!(capture[0].request.is_empty());
-        assert!(capture[0].response.is_empty());
+            limits.context_tokens -= 1;
+            let refused = OllamaBackend::new("http://127.0.0.1:1", limits).unwrap();
+            assert!(!PromptBudget::measure(&input, &limits).unwrap().allowed());
+            assert_eq!(
+                refused.infer(&input).await.unwrap_err().code,
+                ErrorCode::LimitExceeded
+            );
+            assert_eq!(refused.progress().unwrap().dispatch_attempts, 0);
+            let capture = refused.receipts().unwrap();
+            assert_eq!(capture.len(), 1);
+            assert!(!capture[0].made_call);
+            assert_eq!(capture[0].prompt.prompt_bytes, measured.prompt_bytes);
+            assert!(capture[0].request.is_empty());
+            assert!(capture[0].response.is_empty());
+        }
     }
 
     /// Trace: FR-048-AC-5, FR-048-AC-4

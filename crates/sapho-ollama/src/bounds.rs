@@ -23,7 +23,11 @@ mod tests {
     #[test]
     fn text_bounds_dominate_real_encoder_for_unicode_controls_and_each_format() {
         for text in ["plain", "\"\\\n\u{1} FIELD fake\n", "日本語🙂\u{7f}"] {
-            for format in [PromptFormat::ModelRequestJson, PromptFormat::FramedStateV1] {
+            for format in [
+                PromptFormat::ModelRequestJson,
+                PromptFormat::FramedStateV1,
+                PromptFormat::FramedCatalogV1,
+            ] {
                 let question = NamedQuestion {
                     id: "question-9999".into(),
                     question: Question::Choice {
@@ -71,6 +75,13 @@ mod tests {
                     &shape,
                     &fields,
                     serde_json::to_vec(&actual.questions).unwrap().len(),
+                    Some(
+                        serde_json::to_vec(
+                            &crate::catalog::Catalog::new(&actual.questions).unwrap(),
+                        )
+                        .unwrap()
+                        .len(),
+                    ),
                     &limits,
                 )
                 .unwrap();
@@ -81,6 +92,34 @@ mod tests {
                 assert!(bound.allowed());
             }
         }
+    }
+
+    /// Trace: FR-048-AC-11, FR-048-AC-13
+    #[test]
+    fn catalog_bounds_cannot_be_implicitly_inferred_from_a_typed_json_bound() {
+        let limits = Limits {
+            prompt_format: PromptFormat::FramedCatalogV1,
+            ..Default::default()
+        };
+        let shape = ModelRequest {
+            backend: BackendId::new("judge").unwrap(),
+            model: "synthetic".into(),
+            expected_model: None,
+            distribution_policy: DistributionPolicy::Strict {},
+            state: Value::Record(BTreeMap::new()),
+            questions: vec![NamedQuestion {
+                id: "q".into(),
+                question: Question::Boolean {
+                    instructions: "Complete criterion".into(),
+                    yes: "true".into(),
+                    no: "false".into(),
+                },
+            }],
+        };
+        assert!(
+            RequestUpperBound::measure_text_shape(&shape, &BTreeMap::new(), 256, None, &limits)
+                .is_err()
+        );
     }
 }
 /// Conservative sizes, distinct from exact RequestBudget measurements.
@@ -116,6 +155,7 @@ impl RequestUpperBound {
         shape: &ModelRequest,
         fields: &BTreeMap<String, TextFieldSize>,
         questions_json_bytes: usize,
+        catalog_questions_bytes: Option<usize>,
         limits: &Limits,
     ) -> Result<Self> {
         limits.validate()?;
@@ -159,13 +199,30 @@ impl RequestUpperBound {
             )?,
             questions_json_bytes,
         )?;
+        let prompt_questions_bytes = match limits.prompt_format {
+            PromptFormat::FramedCatalogV1 => catalog_questions_bytes.ok_or_else(|| {
+                error(
+                    ErrorCode::InvalidValue,
+                    "Catalog request requires a catalog bound",
+                )
+            })?,
+            PromptFormat::ModelRequestJson | PromptFormat::FramedStateV1 => questions_json_bytes,
+        };
+        if prompt_questions_bytes < 2 {
+            return Err(error(
+                ErrorCode::InvalidValue,
+                "Empty prompt question bound",
+            ));
+        }
         let (state_bytes, envelope_bytes) = match limits.prompt_format {
             PromptFormat::ModelRequestJson => (state_upper, rendered.envelope_bytes),
-            PromptFormat::FramedStateV1 => (literal, add(rendered.envelope_bytes, headers)?),
+            PromptFormat::FramedStateV1 | PromptFormat::FramedCatalogV1 => {
+                (literal, add(rendered.envelope_bytes, headers)?)
+            }
         };
         let prompt_bytes = add(
             add(rendered.instruction_bytes, state_bytes)?,
-            add(questions_json_bytes, envelope_bytes)?,
+            add(prompt_questions_bytes, envelope_bytes)?,
         )?;
         // Wire serialization escapes arbitrary complete UTF8 prompt text. Six
         // bytes per original byte covers every control/quote/backslash encoding.
@@ -183,7 +240,7 @@ impl RequestUpperBound {
                 format: limits.prompt_format,
                 instruction_bytes: rendered.instruction_bytes,
                 state_bytes,
-                question_bytes: questions_json_bytes,
+                question_bytes: prompt_questions_bytes,
                 envelope_bytes,
                 prompt_bytes,
                 context_tokens: limits.context_tokens,
