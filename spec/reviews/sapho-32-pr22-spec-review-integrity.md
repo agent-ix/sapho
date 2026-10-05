@@ -76,3 +76,11 @@ Round 1, reviewed at agent-ix/sapho@39ad473d3d505cf45508b6215007fd336bee3063.
 | FND | outcome | sha/reason |
 |-----|---------|------------|
 | FND-001 | fixed | 39ad473: A binary 502 or 404 now has one outcome: FR-048, FR-051 and FR-052 all say non-success is BackendFailed (`model_not_found` for 404, `http_status` otherwise) with no raw exchange and elapsed-time usage, and malformed_response only under a success status; FR-048-AC-7 (200, 502, 404) and FR-051-AC-4 (404, 500 with non-UTF-8 bodies) can fail. No residual text of the old rule outside review artifacts. The blanket wording introduces a new contradiction with FR-050/FR-053, recorded as FND-002. |
+
+## Dispositions (round 2)
+
+Round 2, reviewed at agent-ix/sapho@30f0b1b919dbaa8fc8e8208a509bc58ebbcfc6be.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-002 | fixed | 30f0b1b: One outcome per case in FR-048, FR-050, FR-051, FR-052, FR-053, FR-054-AC-6 and IT-007-SC-03: 404 is BackendFailed/model_not_found; a 400 with a decodable body naming the size refusal is TooLarge (n_prompt_tokens for generate, input_exceeds_context for embed); any other non-success status, including a 400 with an undecodable or unrecognised body, is BackendFailed/http_status; a success status with a non-UTF-8 body is InvalidAnswer/malformed_response; non-success responses carry no raw exchange and elapsed-time usage only. FR-050-AC-1, FR-051-AC-6 and FR-053-AC-2 test each branch and can fail. |
