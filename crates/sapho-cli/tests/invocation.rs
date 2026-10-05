@@ -3,7 +3,7 @@
 //! Real CLI workflows plus injected backend/native seams; no network or credentials.
 use sapho_cli::*;
 use sapho_core::*;
-use sapho_evidence::{Case, Dataset, Split};
+use sapho_evidence::{Case, Dataset, LabelKind, LabelProvenance, Split};
 use sapho_graph::*;
 use sapho_recording::*;
 use sapho_runtime::RunLimits;
@@ -402,6 +402,14 @@ fn conflicting_recorded_or_explicit_binding_metadata_is_refused_without_live_loo
         }))
     ));
 }
+fn curator(reference: &str) -> LabelProvenance {
+    LabelProvenance {
+        kind: LabelKind::Human,
+        source: "curator".into(),
+        model_digest: None,
+        reference: reference.into(),
+    }
+}
 fn labelled() -> Dataset {
     Dataset {
         id: SourceId::new("original-labels").unwrap(),
@@ -411,14 +419,14 @@ fn labelled() -> Dataset {
                 split: Split::Development,
                 inputs: text_input("synthetic"),
                 labels: BTreeMap::from([("result".into(), true)]),
-                label_provenance: "curator original reference".into(),
+                label_provenance: curator("curator original reference"),
             },
             Case {
                 id: ItemId::new("heldout").unwrap(),
                 split: Split::HeldOut,
                 inputs: text_input("heldout: no matching recording"),
                 labels: BTreeMap::from([("result".into(), false)]),
-                label_provenance: "curator heldout reference".into(),
+                label_provenance: curator("curator heldout reference"),
             },
         ],
     }

@@ -254,10 +254,10 @@ Your host supplies actual per-case outputs or failures.
 
 | API | Use |
 |---|---|
-| `Case`, `Dataset`, `Split` | Identified typed inputs, Boolean output labels, nonblank label provenance, development/held-out partition. Dataset `validate(max_cases)` checks all cases; `selected(split)` iterates a partition. |
-| `CaseOutcome` | Completed Inputs or Failed SaphoError, keyed by ItemId. |
+| `Case`, `Dataset`, `Split`, `LabelProvenance`, `LabelKind` | Identified typed inputs, Boolean output labels, label provenance (kind `model`, `agent`, `human` or `deterministic_check`, a nonblank source and reference, and for models an optional weights digest), development/held-out partition. Dataset `validate(max_cases)` checks all cases; `selected(split)` iterates a partition. |
+| `CaseOutcome` | Completed Inputs or Failed SaphoError, each with the models that answered during the case, keyed by ItemId. |
 | `measure(dataset, split, schemas, outcomes, max_cases)` | Return Measurement with per-output coverage and predictions against supplied labels. |
-| `Measurement::complete()` | No failed or unscored labels; inspect selected count and denominators as well. |
+| `Measurement::complete()` | No failed or unscored labels; inspect selected count and denominators as well. `Measurement.self_source` lists cases whose model-made labels came from a model that also answered them (by name or weights digest); they are scored on no output and counted in no label total. |
 | `OutputMeasurement`, `Prediction`, `UnscoredReason` | Labelled/scored/unscored/failed counts; retained values, provenance, missing/unsupported/type mismatch reasons and errors. |
 | `Metrics`, `Confusion` | Boolean agreement and TP/TN/FP/FN; Probability Brier; Unsupported schemas. No metrics for Degree. |
 | `Candidate`, `Metric`, `rank` | Rank complete development measurements for one output. Agreement descends, Brier ascends; stable ties. |

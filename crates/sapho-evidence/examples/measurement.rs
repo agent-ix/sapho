@@ -29,6 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         "needs_review".into(),
                         Datum::new(case.id.as_str(), Value::Boolean(support.get() < 0.8))?,
                     )]),
+                    models: Vec::new(),
                 },
             ))
         })
@@ -62,6 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             Value::Probability(sapho_core::Probability::new(0.5)?),
                         )?,
                     )]),
+                    models: Vec::new(),
                 },
             ))
         })
