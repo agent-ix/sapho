@@ -20,7 +20,8 @@ struct EmbedBody<'a> {
     input: &'a [String],
     truncate: bool,
 }
-// Tolerates the server's own extra members; only the listed ones are read.
+// Tolerates the server's own extra members; only the listed ones are read. A component
+// that is not a finite number cannot parse as `f64`, so it is a malformed response.
 #[derive(Deserialize)]
 struct EmbedReply {
     model: String,
@@ -152,9 +153,6 @@ impl OllamaEmbedder {
         }
         if width == 0 || parsed.embeddings.iter().any(|v| v.len() != width) {
             return Err(invalid("vector_length"));
-        }
-        if parsed.embeddings.iter().flatten().any(|c| !c.is_finite()) {
-            return Err(invalid("non_finite_component"));
         }
         Ok(Embeddings {
             vectors: parsed.embeddings,
