@@ -3,7 +3,7 @@
 //! Real CLI workflows plus injected backend/native seams; no network or credentials.
 use sapho_cli::*;
 use sapho_core::*;
-use sapho_evidence::{Case, Dataset, Split};
+use sapho_evidence::{Case, Dataset, LabelKind, LabelProvenance, Split};
 use sapho_graph::*;
 use sapho_recording::*;
 use sapho_runtime::RunLimits;
@@ -199,6 +199,11 @@ impl ModelBackend for Scripted {
         }
         Ok(ModelResponse {
             model: request.model.clone(),
+            digest: None,
+            raw: Some(RawExchange {
+                request: serde_json::to_string(request).unwrap(),
+                response: format!("{{\"created_at\":\"call {index}\"}}"),
+            }),
             answers: request
                 .questions
                 .iter()
@@ -236,7 +241,7 @@ fn text_input(text: &str) -> Inputs {
         Datum::new("text", Value::Text(text.into())).unwrap(),
     )])
 }
-/// Trace: FR-034-AC-3, FR-035-AC-1, FR-035-AC-2, FR-035-AC-3, FR-037-AC-2, TC-035
+/// Trace: FR-034-AC-3, FR-035-AC-1, FR-035-AC-2, FR-035-AC-3, FR-035-AC-4, FR-037-AC-2, TC-035
 #[tokio::test]
 async fn scripted_multilayer_capture_replays_exactly_and_preserves_partial_failures() {
     let spec = multilayer();
@@ -329,14 +334,67 @@ async fn scripted_multilayer_capture_replays_exactly_and_preserves_partial_failu
         None,
     );
     assert!(replay.status.success());
+    let printed: serde_json::Value = serde_json::from_slice(&replay.stdout).unwrap();
     let replay: RunReport = serde_json::from_slice(&replay.stdout).unwrap();
     assert_eq!(replay, original);
+    // The replayed answer still carries the exchange recorded for it, byte for byte.
+    let recorded = &recording.exchanges[0].response.raw;
+    assert!(recorded.is_some());
+    let replayed: Vec<_> = printed["trace"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|n| n["model"]["response"]["raw"].as_object())
+        .collect();
+    assert_eq!(replayed.len(), 2);
+    assert_eq!(
+        serde_json::to_value(recorded).unwrap(),
+        serde_json::Value::Object(replayed[0].clone())
+    );
+}
+/// Trace: FR-046-AC-3, FR-006-AC-5
+#[test]
+fn error_objects_hold_code_message_and_context_only() {
+    let sentinel = "SENTINEL-BODY-2290";
+    let error = SaphoError::new(ErrorCode::TooLarge, "Prompt does not fit")
+        .with_context("context_tokens", "4096")
+        .with_raw(RawExchange {
+            request: sentinel.into(),
+            response: sentinel.into(),
+        })
+        .with_usage(sapho_core::ExtractUsage {
+            input_tokens: Some(1),
+            ..Default::default()
+        });
+    for written in [
+        serde_json::to_value(CliError::Engine(error.clone())).unwrap(),
+        serde_json::to_value(RunReport {
+            outputs: None,
+            trace: Default::default(),
+            error: Some(error.clone()),
+            exit: ExitStatus::Refused,
+        })
+        .unwrap(),
+    ] {
+        assert!(!written.to_string().contains(sentinel));
+    }
+    let object = serde_json::to_value(CliError::Engine(error.clone())).unwrap();
+    let members: std::collections::BTreeSet<_> = object["detail"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(members, ["code", "context", "message"].into());
+    assert!(!CliError::Engine(error).to_string().contains(sentinel));
 }
 /// Trace: FR-035-AC-1, FR-035-AC-2, FR-034-AC-2
 #[test]
 fn conflicting_recorded_or_explicit_binding_metadata_is_refused_without_live_lookup() {
     let response = ModelResponse {
         model: "synthetic".into(),
+        digest: None,
+        raw: None,
         answers: BTreeMap::new(),
         usage: None,
     };
@@ -400,6 +458,14 @@ fn conflicting_recorded_or_explicit_binding_metadata_is_refused_without_live_loo
         }))
     ));
 }
+fn curator(reference: &str) -> LabelProvenance {
+    LabelProvenance {
+        kind: LabelKind::Human,
+        source: "curator".into(),
+        model_digest: None,
+        reference: reference.into(),
+    }
+}
 fn labelled() -> Dataset {
     Dataset {
         id: SourceId::new("original-labels").unwrap(),
@@ -409,19 +475,19 @@ fn labelled() -> Dataset {
                 split: Split::Development,
                 inputs: text_input("synthetic"),
                 labels: BTreeMap::from([("result".into(), true)]),
-                label_provenance: "curator original reference".into(),
+                label_provenance: curator("curator original reference"),
             },
             Case {
                 id: ItemId::new("heldout").unwrap(),
                 split: Split::HeldOut,
                 inputs: text_input("heldout: no matching recording"),
                 labels: BTreeMap::from([("result".into(), false)]),
-                label_provenance: "curator heldout reference".into(),
+                label_provenance: curator("curator heldout reference"),
             },
         ],
     }
 }
-/// Trace: FR-036-AC-1, FR-036-AC-2, FR-036-AC-3, FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, FR-038-AC-1, FR-038-AC-2, FR-038-AC-3
+/// Trace: FR-036-AC-1, FR-036-AC-2, FR-036-AC-3, FR-036-AC-5, FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, FR-038-AC-1, FR-038-AC-2, FR-038-AC-3
 #[tokio::test]
 async fn real_measure_tune_export_use_selected_labels_and_never_evaluate_heldout_in_tune() {
     let root = tempfile::tempdir().unwrap();
@@ -580,6 +646,42 @@ async fn real_measure_tune_export_use_selected_labels_and_never_evaluate_heldout
         Some(2)
     );
     assert_eq!(std::fs::read(exported).unwrap(), preserved);
+    let mut own = labelled();
+    own.cases[0].label_provenance = LabelProvenance {
+        kind: LabelKind::Model,
+        source: "synthetic".into(),
+        model_digest: None,
+        reference: "own earlier answer".into(),
+    };
+    std::fs::write(&dataset, serde_json::to_vec(&own).unwrap()).unwrap();
+    let own = cli(
+        &[
+            "measure",
+            path(&graph),
+            "--dataset",
+            path(&dataset),
+            "--split",
+            "development",
+            "--replay",
+            path(&saved),
+        ],
+        None,
+    );
+    assert!(
+        own.status.success(),
+        "a self-sourced case alone does not exit 2"
+    );
+    let own = result(&own);
+    assert_eq!(
+        own["measurement"]["self_source"],
+        serde_json::json!(["development"])
+    );
+    assert!(
+        own["measurement"]["outputs"]
+            .as_object()
+            .unwrap()
+            .is_empty()
+    );
 }
 /// Trace: NFR-005-M-3, FR-041-AC-3, FR-034-AC-1, FR-035-AC-3
 #[test]

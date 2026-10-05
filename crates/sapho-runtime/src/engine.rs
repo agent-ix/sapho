@@ -278,6 +278,7 @@ impl Engine {
                             state.trace_entry(index)?.model = Some(ModelEvidence {
                                 request: request.clone(),
                                 response: None,
+                                raw: None,
                             });
                             Ok((binding.backend, request))
                         })();
@@ -669,6 +670,9 @@ impl RunState {
         if let Some(e) = self.trace.nodes.get_mut(index) {
             e.status = NodeStatus::Failed;
             e.error = Some(error.clone());
+            if let Some(evidence) = &mut e.model {
+                evidence.raw = error.raw.as_deref().cloned();
+            }
         }
     }
 }

@@ -197,7 +197,13 @@ impl ReplayBackend {
         for exchange in &recording.exchanges {
             let key = bounded_json(&exchange.request, max_bytes)?;
             if let Some(previous) = exchanges.get(&key) {
-                if previous != &exchange.response {
+                // Provider bodies differ between identical requests (timestamps, durations),
+                // so the retained raw exchange is not part of the answer being compared.
+                let bare = |r: &ModelResponse| ModelResponse {
+                    raw: None,
+                    ..r.clone()
+                };
+                if bare(previous) != bare(&exchange.response) {
                     return Err(SaphoError::new(
                         ErrorCode::RecordingMismatch,
                         "Conflicting response for identical request",

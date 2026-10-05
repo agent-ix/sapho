@@ -4,6 +4,8 @@
 mod common;
 #[path = "scenarios/ears.rs"]
 mod ears;
+#[path = "scenarios/raw.rs"]
+mod raw;
 #[path = "scenarios/recording.rs"]
 mod recording;
 #[path = "scenarios/runtime.rs"]

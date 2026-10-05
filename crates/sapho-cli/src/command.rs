@@ -8,8 +8,8 @@ use sapho_cli::{
     recording_bindings, replay_bindings, select_format,
 };
 use sapho_core::{
-    ErrorCode, Inputs, ItemId, PrimitiveRegistry, SaphoError, SourceId, ValueType, bounded_json,
-    check_ports, decode_json,
+    ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry, SaphoError, SourceId, ValueType,
+    bounded_json, check_ports, decode_json,
 };
 use sapho_evidence::{
     Candidate, CaseOutcome, Dataset, EvidenceError, Measurement, Metric as ScoreMetric,
@@ -202,18 +202,34 @@ async fn run_cases(runner: &Runner, data: &Dataset, split: Split, limits: &Limit
     }
     reports
 }
+/// Every model that answered during the run, as its backend reported it.
+fn models(report: &RunReport) -> Vec<ModelIdentity> {
+    report
+        .trace
+        .nodes
+        .iter()
+        .filter_map(|node| node.model.as_ref()?.response.as_ref())
+        .map(|response| ModelIdentity {
+            name: response.model.clone(),
+            digest: response.digest.clone(),
+        })
+        .collect()
+}
 fn outcomes(runs: &[CaseRun]) -> BTreeMap<ItemId, CaseOutcome> {
     runs.iter()
         .map(|run| {
             let outcome = match (&run.report.outputs, &run.report.error) {
                 (_, Some(error)) => CaseOutcome::Failed {
                     error: error.clone(),
+                    models: models(&run.report),
                 },
                 (Some(outputs), None) => CaseOutcome::Completed {
                     outputs: outputs.clone(),
+                    models: models(&run.report),
                 },
                 (None, None) => CaseOutcome::Failed {
                     error: SaphoError::new(ErrorCode::MissingInput, "Run has no outputs"),
+                    models: models(&run.report),
                 },
             };
             (run.id.clone(), outcome)

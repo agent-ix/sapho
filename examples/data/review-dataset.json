@@ -17,7 +17,7 @@
       "labels": {
         "needs_review": false
       },
-      "label_provenance": "Original synthetic tutorial label; no semantic accuracy claim"
+      "label_provenance": {"kind": "human", "source": "Sapho docs author", "reference": "Original synthetic tutorial label; no semantic accuracy claim"}
     },
     {
       "id": "review",
@@ -35,7 +35,7 @@
       "labels": {
         "needs_review": true
       },
-      "label_provenance": "Original synthetic tutorial label; no semantic accuracy claim"
+      "label_provenance": {"kind": "human", "source": "Sapho docs author", "reference": "Original synthetic tutorial label; no semantic accuracy claim"}
     },
     {
       "id": "reserved",
@@ -53,7 +53,7 @@
       "labels": {
         "needs_review": true
       },
-      "label_provenance": "Original synthetic tutorial label; no semantic accuracy claim"
+      "label_provenance": {"kind": "human", "source": "Sapho docs author", "reference": "Original synthetic tutorial label; no semantic accuracy claim"}
     }
   ]
 }

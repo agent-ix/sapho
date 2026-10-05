@@ -254,10 +254,10 @@ Your host supplies actual per-case outputs or failures.
 
 | API | Use |
 |---|---|
-| `Case`, `Dataset`, `Split` | Identified typed inputs, Boolean output labels, nonblank label provenance, development/held-out partition. Dataset `validate(max_cases)` checks all cases; `selected(split)` iterates a partition. |
-| `CaseOutcome` | Completed Inputs or Failed SaphoError, keyed by ItemId. |
+| `Case`, `Dataset`, `Split`, `LabelProvenance`, `LabelKind` | Identified typed inputs, Boolean output labels, label provenance (kind `model`, `agent`, `human` or `deterministic_check`, a nonblank source and reference, and for models an optional weights digest), development/held-out partition. Dataset `validate(max_cases)` checks all cases; `selected(split)` iterates a partition. |
+| `CaseOutcome` | Completed Inputs or Failed SaphoError, each with the models that answered during the case, keyed by ItemId. |
 | `measure(dataset, split, schemas, outcomes, max_cases)` | Return Measurement with per-output coverage and predictions against supplied labels. |
-| `Measurement::complete()` | No failed or unscored labels; inspect selected count and denominators as well. |
+| `Measurement::complete()` | No failed or unscored labels; inspect selected count and denominators as well. `Measurement.self_source` lists cases whose model-made labels came from a model that also answered them (by name or weights digest); they are scored on no output and counted in no label total. |
 | `OutputMeasurement`, `Prediction`, `UnscoredReason` | Labelled/scored/unscored/failed counts; retained values, provenance, missing/unsupported/type mismatch reasons and errors. |
 | `Metrics`, `Confusion` | Boolean agreement and TP/TN/FP/FN; Probability Brier; Unsupported schemas. No metrics for Degree. |
 | `Candidate`, `Metric`, `rank` | Rank complete development measurements for one output. Agreement descends, Brier ascends; stable ties. |
@@ -307,6 +307,27 @@ Both providers use core validation and the shared request translator.
 an SDK SystemOneRequest, translating Boolean, Choice and Score criteria and
 plain record state without source sidecars. It performs no transport. Jev
 also re-exports this function. `CLM_DEFAULT_MODEL` is the codec's shared alias.
+
+**Ollama:** depend on `sapho-ollama` (not part of the facade).
+`Server::new(base_url, Limits)` prepares one endpoint; `DEFAULT_BASE_URL` is
+loopback port 11434 and `Limits` default to 600 seconds, 4 MiB requests and
+16 MiB responses. At most one request is in flight in the process, across every
+binding and embedder; the timeout covers waiting for that permit. URLs with a
+scheme other than http(s), userinfo, a query or a fragment refuse, and neither
+retries nor redirects happen. `OllamaBackend::new(server, Settings {model, think,
+num_ctx, num_predict})` is one model binding; it refuses a zero limit or
+`num_predict >= num_ctx`. It implements `Extractor` (call it through
+`sapho_core::extract`, which checks the request and validates the answer
+against its JSON Schema) and `ModelBackend` (one request per question block,
+with probabilities derived from the answer tokens' log-probabilities; needs
+`think: false`, at most ten Score levels, and answer values that begin with
+different bytes). Prompts are never shortened: the server counts tokens, and a
+prompt that does not fit is `TooLarge` with the counts. Every response carries
+the weights digest read from `/api/show` before the call. `OllamaEmbedder`
+calls `/api/embed` through the same permit. `ScriptedExtractor` in core is the
+test double for hosts that depend on `Extractor`. The
+[live check](../crates/sapho-ollama/examples/live_smoke.rs) is run on demand
+and is not part of the default tests.
 
 ## CLI embedding APIs
 

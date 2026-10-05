@@ -41,7 +41,7 @@ inputs and the decisions you expect:
     "public_api_changed": {"id": "default-timeout", "value": {"kind": "boolean", "value": true}, "sources": []}
   },
   "labels": {"needs_review": true},
-  "label_provenance": "Synthetic tutorial label written for the Sapho docs; no semantic accuracy claim"
+  "label_provenance": {"kind": "human", "source": "Sapho docs author", "reference": "Synthetic tutorial label written for the Sapho docs; no semantic accuracy claim"}
 }
 ```
 
@@ -54,7 +54,7 @@ The split decides how a case may be used:
 
 [`code-review-dataset.json`](../examples/data/code-review-dataset.json) has
 six development cases and two held out. `label_provenance` records where
-each label came from.
+each label came from: its kind (`human` here), its source and a reference.
 
 ## 2. Record the answers once
 

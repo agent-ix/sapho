@@ -21,7 +21,8 @@
 //! predictions retain explicit coverage. [`rank`] compares complete development
 //! candidates for one output; held-out evaluation remains a separate request.
 use sapho_core::{
-    ErrorCode, Inputs, ItemId, SaphoError, SourceId, Value, ValueType, bounded_json, validate_name,
+    ErrorCode, Inputs, ItemId, ModelIdentity, SaphoError, SourceId, Value, ValueType, bounded_json,
+    validate_name,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,7 +40,7 @@ pub enum EvidenceError {
     /// A case has no declared supervision.
     #[error("Missing labels for {0}")]
     MissingLabels(ItemId),
-    /// Label origin is absent.
+    /// Label provenance has a blank source or reference.
     #[error("Missing label provenance for {0}")]
     MissingProvenance(ItemId),
     /// A finite case ceiling was exceeded.
@@ -76,6 +77,43 @@ pub enum Split {
     /// Cases reserved for a separately requested evaluation.
     HeldOut,
 }
+/// Who made a label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelKind {
+    /// A model's answer.
+    Model,
+    /// An agent's judgement.
+    Agent,
+    /// A person's judgement.
+    Human,
+    /// A deterministic check.
+    DeterministicCheck,
+}
+/// Caller-declared origin of a case's labels; Sapho does not certify that they are true.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LabelProvenance {
+    /// Who made the labels.
+    pub kind: LabelKind,
+    /// Who made them; for kind `model`, the model identity the backend reported for the answer.
+    pub source: String,
+    /// For kind `model`, the digest of the weights that answered.
+    pub model_digest: Option<String>,
+    /// Where the labels came from.
+    pub reference: String,
+}
+impl LabelProvenance {
+    /// True when `identity` is the model that made these labels, by name or by weights digest.
+    fn made_by(&self, identity: &ModelIdentity) -> bool {
+        self.kind == LabelKind::Model
+            && (self.source == identity.name
+                || self
+                    .model_digest
+                    .as_ref()
+                    .is_some_and(|digest| identity.digest.as_ref() == Some(digest)))
+    }
+}
 /// One independently curated case; model recordings cannot deserialize into this schema.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,8 +126,8 @@ pub struct Case {
     pub inputs: Inputs,
     /// Supplied Boolean outcomes by named graph output.
     pub labels: BTreeMap<String, bool>,
-    /// Caller-declared label origin/reference, not a certification of truth.
-    pub label_provenance: String,
+    /// Declared label origin, not a certification of truth.
+    pub label_provenance: LabelProvenance,
 }
 /// Labelled data, separate from recordings and traces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -119,7 +157,9 @@ impl Dataset {
             if case.labels.is_empty() {
                 return Err(EvidenceError::MissingLabels(case.id.clone()));
             }
-            if case.label_provenance.trim().is_empty() {
+            if case.label_provenance.source.trim().is_empty()
+                || case.label_provenance.reference.trim().is_empty()
+            {
                 return Err(EvidenceError::MissingProvenance(case.id.clone()));
             }
             for name in case.labels.keys() {
@@ -145,11 +185,15 @@ pub enum CaseOutcome {
     Completed {
         /// Outputs returned by the engine.
         outputs: Inputs,
+        /// Models that answered during this case, as their backends reported them.
+        models: Vec<ModelIdentity>,
     },
     /// Execution refusal, without inventing a prediction.
     Failed {
         /// Stable engine error.
         error: SaphoError,
+        /// Models that answered before the failure.
+        models: Vec<ModelIdentity>,
     },
 }
 /// Boolean counts against supplied labels, never an author-reported accuracy claim.
@@ -224,7 +268,7 @@ pub struct Prediction {
     /// Supplied Boolean label.
     pub label: bool,
     /// Caller-declared origin.
-    pub label_provenance: String,
+    pub label_provenance: LabelProvenance,
     /// Actual value, including unsupported values, when available.
     pub predicted: Option<Value>,
     /// Explicit reason for missing coverage.
@@ -242,6 +286,8 @@ pub struct Measurement {
     pub split: Split,
     /// Total cases in this partition, irrespective of output label membership.
     pub selected_cases: u32,
+    /// Cases whose labels were made by a model that also answered them; they are scored on no output.
+    pub self_source: Vec<ItemId>,
     /// Separate coverage and metrics for each output.
     pub outputs: BTreeMap<String, OutputMeasurement>,
     /// Observed values, labels and failures.
@@ -271,12 +317,23 @@ pub fn measure(
         dataset: dataset.id.clone(),
         split,
         selected_cases: 0,
+        self_source: Vec::new(),
         outputs: BTreeMap::new(),
         predictions: Vec::new(),
     };
     let mut squared_errors = BTreeMap::<String, f64>::new();
     for case in dataset.selected(split) {
         report.selected_cases += 1;
+        let answering = match outcomes.get(&case.id) {
+            Some(CaseOutcome::Completed { models, .. } | CaseOutcome::Failed { models, .. }) => {
+                models.as_slice()
+            }
+            None => &[],
+        };
+        if answering.iter().any(|m| case.label_provenance.made_by(m)) {
+            report.self_source.push(case.id.clone());
+            continue;
+        }
         for (name, label) in &case.labels {
             let schema = schemas.get(name);
             let counts = report
@@ -309,7 +366,7 @@ pub fn measure(
                 error: None,
             };
             match outcomes.get(&case.id) {
-                Some(CaseOutcome::Failed { error }) => {
+                Some(CaseOutcome::Failed { error, .. }) => {
                     counts.failed += 1;
                     prediction.error = Some(error.clone());
                 }
@@ -320,7 +377,7 @@ pub fn measure(
                         "Case outcome absent",
                     ));
                 }
-                Some(CaseOutcome::Completed { outputs }) => {
+                Some(CaseOutcome::Completed { outputs, .. }) => {
                     if let Some(datum) = outputs.get(name) {
                         datum.validate()?;
                         prediction.predicted = Some(datum.value.clone());
@@ -484,7 +541,7 @@ pub struct TrainingRow {
     /// Explicit supplied labels.
     pub labels: BTreeMap<String, bool>,
     /// Label origin declaration.
-    pub label_provenance: String,
+    pub label_provenance: LabelProvenance,
 }
 /// Export development supervision as bounded JSONL bytes; no I/O or model work.
 pub fn export_training(

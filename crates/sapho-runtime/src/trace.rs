@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! In-memory execution evidence; this module never writes files (FR-017).
-use sapho_core::{Datum, Inputs, ModelRequest, ModelResponse, SaphoError};
+use sapho_core::{Datum, Inputs, ModelRequest, ModelResponse, RawExchange, SaphoError};
 use sapho_graph::Operation;
 use serde::{Deserialize, Serialize};
 /// Terminal execution state of a node instance.
@@ -16,13 +16,30 @@ pub enum NodeStatus {
     Failed,
 }
 /// Exact model exchange, including a raw response when validation fails.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Equality is the deterministic trace comparison: it ignores every raw exchange, whose
+/// provider bodies carry timestamps and duration counters that differ between identical runs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelEvidence {
     /// Request reconstructed by this graph execution.
     pub request: ModelRequest,
     /// Raw response if inference returned one.
     pub response: Option<ModelResponse>,
+    /// The exchange a failed ask's error carries, when the backend retained one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<RawExchange>,
+}
+impl PartialEq for ModelEvidence {
+    fn eq(&self, other: &Self) -> bool {
+        let bare = |r: &Option<ModelResponse>| {
+            r.clone().map(|mut r| {
+                r.raw = None;
+                r
+            })
+        };
+        self.request == other.request && bare(&self.response) == bare(&other.response)
+    }
 }
 /// Evidence for one concrete node, including map item scope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

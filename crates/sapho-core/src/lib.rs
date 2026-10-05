@@ -25,12 +25,14 @@
 mod data;
 mod distribution;
 mod error;
+mod extract;
 mod model;
 mod ports;
 mod value;
 pub use data::{decode_json, decode_plain};
 pub use distribution::{DistributionAdjustment, DistributionPolicy};
 pub use error::{ErrorCode, Result, SaphoError};
+pub use extract::*;
 pub use model::*;
 pub use ports::*;
 pub use value::*;
