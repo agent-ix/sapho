@@ -22,6 +22,9 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::Semaphore;
+mod bounds;
+pub use bounds::{RequestUpperBound, TextFieldSize};
+
 /// Explicit finite generation and capture bounds.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
@@ -696,6 +699,26 @@ fn decode(bytes: &[u8]) -> Result<ModelResponse> {
     }
     let answers: Answers = serde_json::from_str(&wire.response)
         .map_err(|_| error(ErrorCode::InvalidAnswer, "Invalid typed local answers"))?;
+    // This provider's declared schema requests no invented distributions. Enforce
+    // that contract even if a server returns JSON that violates its own schema;
+    // the complete raw response has already been captured by call().
+    if answers.answers.values().any(|answer| {
+        matches!(
+            answer,
+            Answer::Choice {
+                probabilities: Some(_),
+                ..
+            } | Answer::Score {
+                probabilities: Some(_),
+                ..
+            }
+        )
+    }) {
+        return Err(error(
+            ErrorCode::InvalidAnswer,
+            "Local answer violates requested null-distribution schema",
+        ));
+    }
     Ok(ModelResponse {
         model: wire.model,
         answers: answers.answers,
@@ -767,6 +790,17 @@ mod tests {
         ));
         let missing=serde_json::to_vec(&serde_json::json!({"model":"local-test","done":true,"done_reason":"stop","response":"{\"answers\":{\"x\":{\"kind\":\"choice\",\"selected\":\"yes\",\"probabilities\":null}}}"})).unwrap();
         assert!(decode(&missing).is_err());
+    }
+    /// Trace: FR-048-AC-10
+    #[test]
+    fn returned_distributions_violate_the_declared_local_schema() {
+        for answer in [
+            serde_json::json!({"kind":"choice","selected":"yes","confidence":0.7,"probabilities":{"yes":0.7,"no":0.3}}),
+            serde_json::json!({"kind":"score","expected":1,"confidence":0.7,"probabilities":{"0":0.3,"1":0.7}}),
+        ] {
+            let body = serde_json::to_vec(&serde_json::json!({"model":"synthetic","done":true,"done_reason":"stop","response":serde_json::to_string(&serde_json::json!({"answers":{"x":answer}})).unwrap()})).unwrap();
+            assert_eq!(decode(&body).unwrap_err().code, ErrorCode::InvalidAnswer);
+        }
     }
     /// Trace: FR-048-AC-2
     #[tokio::test]
@@ -894,6 +928,31 @@ mod tests {
         );
         assert_eq!(admission.prompt.format, PromptFormat::ModelRequestJson);
         assert_eq!(admission.prompt.prompt_bytes, budget.prompt_bytes);
+    }
+    /// Trace: FR-048-AC-10
+    #[tokio::test]
+    async fn schema_violating_distribution_retains_wire_and_usage_without_retry() {
+        let body = r#"{"model":"local-test","response":"{\"answers\":{\"x\":{\"kind\":\"choice\",\"selected\":\"yes\",\"confidence\":0.7,\"probabilities\":{\"yes\":0.7,\"no\":0.3}}}}","done":true,"done_reason":"stop","prompt_eval_count":19,"eval_count":3}"#;
+        let (url, task) = server(body, Duration::ZERO).await;
+        let backend = OllamaBackend::new(&url, Limits::default()).unwrap();
+        assert_eq!(
+            backend.infer(&request()).await.unwrap_err().code,
+            ErrorCode::InvalidAnswer
+        );
+        task.await.unwrap();
+        let receipts = backend.receipts().unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert!(receipts[0].made_call);
+        assert_eq!(receipts[0].status, Some(200));
+        assert_eq!(receipts[0].response, body.as_bytes());
+        assert_eq!(
+            receipts[0].telemetry.as_ref().unwrap().input_tokens,
+            Some(19)
+        );
+        assert_eq!(
+            receipts[0].telemetry.as_ref().unwrap().output_tokens,
+            Some(3)
+        );
     }
     /// Trace: FR-048-AC-2, FR-048-AC-7, FR-048-AC-8, FR-048-AC-9
     #[tokio::test]
