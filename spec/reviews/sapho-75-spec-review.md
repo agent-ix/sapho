@@ -97,3 +97,10 @@ Non-blocking but due before the milestone that builds them: the Ollama prompt-ca
 
 `quire validate --scope . 'spec/**/*.md'` (quire 0.36.1, engine 0.50.1) exits 0 in all three repos at the reviewed heads; `--summary` reports sapho 168/168 and sapho-dataset 35/35 documents grammar-clean, ears-dataset 19/20 (one ears:non-singular warning at spec/functional/FR-001.md:34). Every run prints the environmental advisories DuplicateArchetype (ADR, Plan, Review, SpecReview, Standard from spec-artifacts-process twice), DuplicateInverseEdge (part_of) and semantic.inline-data-schema; they do not affect document results. IDs are unique per repo, every relative link and every ix:// target (in-repo and cross-repo) resolves, and no FR, NFR or IT is orphaned. A grep of each diff finds no deprecated item (framed encodings, preflight certificates, byte-as-token guard, exclusion registries, Projection v1, Python, ears-campaign), no task-log wording, and no Sapho reference to sapho-dataset.
 
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 2812aa1: New FR-054 specifies the Ollama ModelBackend (format enum + logprobs); ollama spec.md In Scope and master spec updated; TC-054 added. |

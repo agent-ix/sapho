@@ -97,3 +97,10 @@ Any two JSON bodies share byte sequences (braces, member names, common words), s
 
 0 high, 0 medium, 1 low; blocking: none.
 
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 2812aa1: AC now uses planted sentinels S1/S2 and the returned context array. |

@@ -68,3 +68,28 @@ The digest is read from /api/tags only at the binding's first generate request. 
 
 1 high, 0 medium, 1 low; blocking: none.
 
+## New findings (disposition pass 1)
+
+Reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
+
+| ID | Severity | Summary | Refs |
+|----|----------|---------|------|
+| FND-003 | medium | Silent truncation still goes undetected when the byte ratio over-estimates bytes per token for an input | spec/modules/ollama/functional/FR-050.md:36 |
+
+### FND-003 (medium, confidence medium, soundness)
+
+Unit: FR-050 at spec/modules/ollama/functional/FR-050.md:36. Related: FR-054, FR-049.
+
+> If `estimated_input_tokens + num_predict` exceeds `num_ctx`, then the adapter SHALL return `TooLarge` without sending a request.
+
+Silent truncation still goes undetected when the byte ratio over-estimates bytes per token for an input. FR-050 now relies on the pre-send estimate because the server truncates silently. The ratio 3.0 is conservative for English (4.3 bytes/token measured) but not for every input: dense code, identifiers, numbers or tables can tokenize below 3 bytes per token. Such an input passes the estimate, the server keeps only part of it (measured: 1,026 of several thousand tokens at num_ctx 2048), the reported count is then low, so neither the post-check nor estimate_exceeded fires, and the answer is recorded from a shortened prompt. Options: flag a reported count far below the estimate (reported < estimate x a declared floor) as `suspected_truncation`, measure the server's keep length and flag a count equal to it, or keep a headroom fraction of num_ctx unused.
+
+
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 2812aa1: prompt_eval_count is now a lower bound, a missing count is not an error (AC-4), and a cached-prefix count below the estimate never sets estimate_exceeded (AC-3). Measured behaviour cited (0.32.14 counts the whole prompt). |
+| FND-002 | fixed | 2812aa1: Weights digest read from /api/show before every request; change gives ModelMismatch weights_changed (FR-052-AC-4). |

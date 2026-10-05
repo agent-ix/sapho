@@ -59,3 +59,10 @@ SAPHO-75 AC3 asks that the old wording be gone. FR-035 still ends 'Saved model r
 
 0 high, 0 medium, 1 low; blocking: none.
 
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 2812aa1: FR-035 and docs/cli-guide.md:145,179 reworded to the FR-036 rule. |

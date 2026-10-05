@@ -59,3 +59,27 @@ FR-048 puts schema compilation and validation in sapho-core (refuse a schema tha
 
 0 high, 1 medium, 0 low; blocking: none.
 
+## New findings (disposition pass 1)
+
+Reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
+
+| ID | Severity | Summary | Refs |
+|----|----------|---------|------|
+| FND-002 | low | Score questions with 11 or more levels always fail `ambiguous_answer_token` | spec/modules/ollama/functional/FR-054.md:48 |
+
+### FND-002 (low, confidence medium, other)
+
+Unit: FR-054 at spec/modules/ollama/functional/FR-054.md:48. Related: FR-054.
+
+> If the generated token at an answer position is a prefix of more than one allowed value, then the adapter SHALL return `InvalidAnswer` with reason `ambiguous_answer_token` for that question; label sets whose values begin with distinct tokens avoid it.
+
+Score questions with 11 or more levels always fail `ambiguous_answer_token`. Score values are decimal strings, so with level_count >= 11 the token `1` prefixes `1` and `10`; whenever the model starts with `1` the question fails. Refuse such a question block at binding time with a clear reason, or encode levels so first tokens differ.
+
+
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 2812aa1: External $ref refused; single core call path `sapho_core::extract`; AC-4 and AC-6 extended. |

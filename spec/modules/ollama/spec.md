@@ -15,7 +15,7 @@ implementation_language: rust
 
 ### In Scope
 
-The [Extractor](../core/functional/FR-048.md) and ModelBackend implementations over Ollama's generate endpoint, the latter deriving answer probabilities from answer-token log-probabilities; explicit generation settings per binding; token estimation before a call and the reported token count after it; a `TooLarge` outcome; one request in flight per process; model identity, digest, usage and raw exchange bytes on every response; embeddings over Ollama's embed endpoint; host-configured endpoint, timeout and byte ceilings.
+The [Extractor](../core/functional/FR-048.md) and ModelBackend implementations over Ollama's generate endpoint, the latter deriving answer probabilities from answer-token log-probabilities; explicit generation settings per binding; a lower-bound token estimate before a call, server-side refusal of prompts longer than the context, and the reported token count after it; a `TooLarge` outcome; one request in flight per process; model identity, digest, usage and raw exchange bytes on every response; embeddings over Ollama's embed endpoint; host-configured endpoint, timeout and byte ceilings.
 
 ### Out of Scope
 
@@ -23,7 +23,7 @@ Installing, starting, stopping or deploying Ollama, and downloading or creating 
 
 ## System Overview
 
-Owning crate: `sapho-ollama`, which depends only on `sapho-core` among workspace crates. The host supplies a binding per model and task setting (endpoint, model, thinking on or off, context size, output limit, token ratio, timeout and ceilings). The adapter performs bounded asynchronous HTTP; schema checking of extracted values is done by the core port, and answer validation of typed questions by core answer validation. See the [workspace boundaries](../../spec.md).
+Owning crate: `sapho-ollama`, which depends only on `sapho-core` among workspace crates. The host supplies a binding per model and task setting (endpoint, model, thinking on or off, context size, output limit, maximum bytes per token, timeout and ceilings). The adapter performs bounded asynchronous HTTP; schema checking of extracted values is done by the core port, and answer validation of typed questions by core answer validation. See the [workspace boundaries](../../spec.md).
 
 ## Requirements Architecture
 

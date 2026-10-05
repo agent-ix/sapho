@@ -59,3 +59,27 @@ FR-048 defines ExtractError as code + content-free message + (only when an excha
 
 0 high, 1 medium, 0 low; blocking: none.
 
+## New findings (disposition pass 1)
+
+Reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
+
+| ID | Severity | Summary | Refs |
+|----|----------|---------|------|
+| FND-002 | medium | The generated token can be counted twice when it also appears among the listed alternatives | spec/modules/ollama/functional/FR-054.md:49 |
+
+### FND-002 (medium, confidence medium, soundness)
+
+Unit: FR-054 at spec/modules/ollama/functional/FR-054.md:49. Related: FR-054-AC-2.
+
+> The mass of an allowed value SHALL be the sum of exp(log-probability) of the tokens attributed to it. The mass of an allowed value with no attributed token is unknown; the adapter SHALL bound it by `b`, the smaller of the lowest listed alternative's probability and the selected value's mass, because greedy constrained decoding at temperature 0 selects the allowed value with the highest mass.
+
+The generated token can be counted twice when it also appears among the listed alternatives. Ollama's per-token entry gives the generated token's own log-probability and a top_logprobs list that normally contains that same token. 'The generated token is always attributed' plus 'sum over attributed tokens' lets an implementation add it twice, roughly doubling the selected value's mass and overstating confidence. State that attribution is over distinct token byte strings at the position (the generated token counted once), and add an AC with the generated token present in the list.
+
+
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 2812aa1: ExtractError now carries a typed too_large detail; FR-048-AC-3 and FR-050-AC-1/2 test the fields. |
