@@ -29,6 +29,7 @@ Owning crate: `sapho-core`. Internal prerequisites: none. See the [workspace bou
 - [FR-006: Define replaceable model backend](functional/FR-006-define-replaceable-model-backend.md)
 
 - [FR-032: Decode plain data by a declared type](functional/FR-032.md)
+- [FR-048: Define a one-call structured extraction port](functional/FR-048.md)
 
 ## References
 

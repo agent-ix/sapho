@@ -16,11 +16,11 @@ Sapho executes configurable graphs of native code, typed model questions and log
 
 ### 2.1 In Scope
 
-Typed values and provenance; native Rust extension registration; YAML/JSON graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev and host-configured CLM adapters; caller-controlled recording and exact offline replay.
+Typed values and provenance; native Rust extension registration; YAML/JSON graph loading and pure compilation; bounded acyclic execution; mapped subgraphs, filtering, pairing, joining and collecting; typed System One questions; explicit batching; crisp and heuristic operators; execution traces; hosted Jev and host-configured CLM adapters; the Extractor port for one-call schema-checked structured extraction; a host-configured Ollama backend that calls an already running local inference server for extraction and embeddings, counting prompt size in tokens; caller-controlled recording and exact offline replay.
 
 ### 2.2 Out of Scope
 
-EARS extractors or questions, test-adequacy rules, code-review findings, PR rendering, implicit repository discovery, edit hooks, repair loops, arbitrary scripts, graph cycles, model training, expert/model training execution, local inference runtimes or service deployment. Downstream applications implement these using the extension boundaries.
+EARS extractors or questions, test-adequacy rules, code-review findings, PR rendering, implicit repository discovery, edit hooks, repair loops, arbitrary scripts, graph cycles, model training, expert/model training execution, installing, running or deploying an inference server or service (a backend may call one that is already running), and dataset collection or labelling pipelines. Downstream applications implement these using the extension boundaries.
 
 ## System Overview
 
@@ -30,7 +30,7 @@ A Rust embedding application or the Sapho CLI host supplies inputs, graph config
 
 | Module | Owning crate | Responsibility |
 |--------|--------------|----------------|
-| [core](modules/core/spec.md) | `sapho-core` | Typed values, evidence and extension contracts |
+| [core](modules/core/spec.md) | `sapho-core` | Typed values, evidence and extension contracts, including the ModelBackend and Extractor ports |
 | [graph](modules/graph/spec.md) | `sapho-graph` | Declarative graph definition and compilation |
 | [runtime](modules/runtime/spec.md) | `sapho-runtime` | Bounded graph execution and collection identity |
 | [logic](modules/logic/spec.md) | `sapho-runtime` | Crisp logic and heuristic degree operations |
@@ -38,6 +38,7 @@ A Rust embedding application or the Sapho CLI host supplies inputs, graph config
 | [clm](modules/clm/spec.md) | `sapho-clm` | Host-configured bounded CLM backend adapter |
 | [jev](modules/jev/spec.md) | `sapho-jev` | Hosted Jev backend adapter |
 | [recording](modules/recording/spec.md) | `sapho-recording` | Exact recording and offline replay |
+| [ollama](modules/ollama/spec.md) | `sapho-ollama` | Host-configured Ollama extraction and embedding adapter |
 
 | [cli](modules/cli/spec.md) | `sapho-cli` | Checked command-line invocation and host-owned I/O, backends and exit policy |
 | [evidence](modules/evidence/spec.md) | `sapho-evidence` | Curated labelled cases, reproducible measurements, development tuning and training exports |
@@ -57,13 +58,14 @@ flowchart TD
  clm --> systemone
  systemone --> core
  recording[sapho-recording] --> core
+ ollama[sapho-ollama] --> core
 ```
 
-The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev` and `clm` features are disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording and Jev need no runtime dependency. Jev and CLM depend on `sapho-systemone` for their identical request translation and shared CLM model alias; systemone depends only on core among workspace crates and uses SDK-owned request/question types.
+The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev` and `clm` features are disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording, Jev and Ollama need no runtime dependency. `sapho-ollama` depends only on core among workspace crates. Jev and CLM depend on `sapho-systemone` for their identical request translation and shared CLM model alias; systemone depends only on core among workspace crates and uses SDK-owned request/question types.
 
 ## Public Contract
 
-`GraphSpec::parse` loads constrained YAML; `parse_with_format` chooses YAML or JSON explicitly. TOML graph consumption is removed without a compatibility layer. `compile` binds checked graph operations and native implementations. `Engine::run` accepts named Datum values and finite RunLimits, returning RunResult or RunFailure with partial Trace. Registries reject duplicate names. ModelBackend is the asynchronous inference seam; Primitive is the synchronous native-code seam.
+`GraphSpec::parse` loads constrained YAML; `parse_with_format` chooses YAML or JSON explicitly. TOML graph consumption is removed without a compatibility layer. `compile` binds checked graph operations and native implementations. `Engine::run` accepts named Datum values and finite RunLimits, returning RunResult or RunFailure with partial Trace. Registries reject duplicate names. ModelBackend is the asynchronous inference seam for typed questions; Extractor is the asynchronous seam for one stateless call that returns one schema-checked structured record; Primitive is the synchronous native-code seam.
 
 Each binding names a graph input, a node port, or a typed literal and may select a record-field path. Each operation declares its input/output port types. Guarded ports are Optional; consumers explicitly coalesce them. Model calls accept a Record state and ordered Questions and return validated Answers. Explicit ask nodes define batching; the executor never merges different ask nodes.
 
@@ -93,7 +95,7 @@ Each binding names a graph input, a node port, or a typed literal and may select
 
 Compiled graphs are immutable. Node statuses are completed, skipped or failed. Guard false produces Optional absence without work; failures abort the run and retain the partial trace. Model calls may execute concurrently within a ready stage, but output and trace order remain deterministic. Maps reuse this executor and its global counters. A run has no implicit retry or repair loop. Native code is cooperative and cannot be forcibly preempted after it starts.
 
-Errors use a typed ErrorCode plus contextual fields, not message parsing: Config, DuplicateId, UnknownPrimitive, UnknownBackend, UnknownReference, Cycle, TypeMismatch, MissingInput, InvalidValue, InvalidAnswer, MissingAnswer, UnsupportedDistribution, LimitExceeded, DeadlineExceeded, CodeFailed, BackendFailed, Unauthorized, RateLimited, ServiceValidation, ModelMismatch, ReplayMiss, RecordingIo and RecordingMismatch.
+Errors use a typed ErrorCode plus contextual fields, not message parsing: Config, DuplicateId, UnknownPrimitive, UnknownBackend, UnknownReference, Cycle, TypeMismatch, MissingInput, InvalidValue, InvalidAnswer, MissingAnswer, UnsupportedDistribution, LimitExceeded, DeadlineExceeded, TooLarge, CodeFailed, BackendFailed, Unauthorized, RateLimited, ServiceValidation, ModelMismatch, ReplayMiss, RecordingIo and RecordingMismatch.
 
 ## Probability Semantics
 
@@ -109,7 +111,7 @@ First-release requirements are specified and reviewed before code. Requirement I
 
 ## CLI and Evidence Contracts
 
-The initial command set is validate, inspect, run, record, replay, select (files/git/json), measure, tune and export-training. Commands consume explicitly selected graph/input/binding/dataset paths. Machine output is typed JSON. Existing application-owned Rust registries remain the extension boundary; the stock executable never loads arbitrary code. Dataset curation requires independent Boolean labels and provenance, explicit development/held_out splits and stable case identities. Reports separate scored coverage from errors/unscored outputs. Only Probability is measured by Brier score; Degree remains a heuristic. Tuning ranks complete development candidates only; training export excludes held-out cases. Exact replay and raw evidence policy remain unchanged.
+The initial command set is validate, inspect, run, record, replay, select (files/git/json), measure, tune and export-training. Commands consume explicitly selected graph/input/binding/dataset paths. Machine output is typed JSON. Existing application-owned Rust registries remain the extension boundary; the stock executable never loads arbitrary code. Dataset curation requires Boolean labels whose provenance declares their kind (model, agent, human or deterministic_check) and source, explicit development/held_out splits and stable case identities. A model answer is a valid label when its kind and source are declared, and measure never scores a model against labels it made itself. Reports separate scored coverage from errors/unscored outputs. Only Probability is measured by Brier score; Degree remains a heuristic. Tuning ranks complete development candidates only; training export excludes held-out cases. Exact replay and raw evidence policy remain unchanged.
 
 All approved acquisition and graph-skill behavior is specified before implementation. Generic selectors live outside the runtime and retain full selected bytes/context with source references. EARS owns its separate consumer migration, coordinated through SAPHO-4; no EARS data or extractor source is copied here. The skills create/tune/record operate through the same CLI and guide.
 
