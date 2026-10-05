@@ -612,6 +612,7 @@ async fn tags_sharing_one_weights_blob_share_a_digest() {
     assert!(digests[0].is_some());
 }
 
+/// Trace: FR-049-AC-6
 #[tokio::test]
 async fn a_request_for_another_model_than_the_binding_is_refused() {
     let _serial = serial().await;

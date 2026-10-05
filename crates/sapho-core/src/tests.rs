@@ -879,3 +879,23 @@ fn weights_digest_is_preserved_validated_over_and_optional() {
         None
     );
 }
+/// Trace: FR-006-AC-4
+#[test]
+fn raw_exchange_round_trips_and_is_absent_from_json_when_not_kept() {
+    let mut kept = response(Answer::Boolean {
+        probability: p(0.5),
+    });
+    kept.raw = Some(RawExchange {
+        request: vec![0, 159, 146, 150],
+        response: b"{\"x\":1}".to_vec(),
+    });
+    let json = serde_json::to_value(&kept).unwrap();
+    assert_eq!(serde_json::from_value::<ModelResponse>(json).unwrap(), kept);
+    kept.raw = None;
+    let json = serde_json::to_value(&kept).unwrap();
+    assert!(json.get("raw").is_none());
+    assert_eq!(
+        serde_json::from_value::<ModelResponse>(json).unwrap().raw,
+        None
+    );
+}

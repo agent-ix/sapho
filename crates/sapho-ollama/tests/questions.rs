@@ -507,7 +507,7 @@ async fn a_label_ending_in_a_quote_is_matched_by_its_escaped_form() {
     assert!((probabilities["a\""].get() - quoted / (quoted + plain)).abs() < 1e-9);
 }
 
-/// Trace: FR-054-AC-1
+/// Trace: FR-054-AC-9
 #[tokio::test]
 async fn the_response_retains_the_exact_exchange_and_error_paths_keep_it_too() {
     let _serial = serial().await;
@@ -547,4 +547,26 @@ async fn the_response_retains_the_exact_exchange_and_error_paths_keep_it_too() {
     let error = asked(&fake, vec![boolean("b")]).await.unwrap_err();
     assert_eq!(error.raw.as_deref().unwrap().response, sent);
     assert_eq!(error.usage.as_deref().unwrap().input_tokens, Some(48));
+}
+
+/// Trace: FR-054-AC-10
+#[tokio::test]
+async fn candidates_with_other_prefix_bytes_or_running_past_the_value_end_are_not_attributed() {
+    let _serial = serial().await;
+    let alternatives = [("yes", -2.228), (" \"no", -1.0), ("no\"", -1.5)];
+    let fake = server(bool_reply(yes_tokens(&alternatives))).await;
+    let response = asked(&fake, vec![boolean("b")]).await.unwrap();
+    // `no` has no attributed token and takes the bound, so the answer is even.
+    assert!((boolean_p(&response, "b") - 0.5).abs() < 1e-12);
+}
+
+#[tokio::test]
+async fn a_request_for_another_model_than_the_binding_is_refused_before_sending() {
+    let _serial = serial().await;
+    let fake = server(bool_reply(yes_tokens(&[]))).await;
+    let mut request = ask(vec![boolean("b")], DistributionPolicy::Strict {});
+    request.model = "other".into();
+    let error = binding(&fake, false).infer(&request).await.unwrap_err();
+    assert_eq!(error.context["reason"], "request_model_differs");
+    assert_eq!(fake.total(), 0);
 }
