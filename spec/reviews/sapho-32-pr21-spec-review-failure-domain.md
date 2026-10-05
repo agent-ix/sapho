@@ -61,3 +61,27 @@ RawExchange 'exact request bytes sent' does not exclude HTTP headers, so an auth
 
 0 high, 1 medium, 0 low; blocking: none.
 
+## New findings (disposition pass 1)
+
+Reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
+
+| ID | Severity | Summary | Refs |
+|----|----------|---------|------|
+| FND-002 | low | A non-UTF-8 response is refused with no raw exchange, against FR-052's raw bytes in every error after a response arrived | spec/modules/core/functional/FR-048.md:48 |
+
+### FND-002 (low, confidence high, soundness)
+
+Unit: FR-048 at spec/modules/core/functional/FR-048.md:48. Related: FR-052, FR-006.
+
+> If a response body is not valid UTF-8, then the implementation SHALL return `InvalidAnswer` with reason `malformed_response` and no raw exchange, because a RawExchange holds bodies as text.
+
+A non-UTF-8 response is refused with no raw exchange, against FR-052's raw bytes in every error after a response arrived. FR-052 (and FR-006) keep the raw bodies inside every error raised after a response arrived; FR-048 now returns malformed_response with no raw exchange, so exactly the failure that most needs its bytes for diagnosis keeps none. State the exception in FR-052 or keep the body (for example lossily decoded with a flag, or base64 in a separate member).
+
+
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 809dc3b: RawExchange is body bytes only, never headers, URLs or credentials (FR-048, FR-006, FR-027, FR-035, FR-052); FR-006-AC-6 and FR-027-AC-5 add header-sentinel tests (see new LOW SR-047 FND-004 on their reach). |

@@ -93,3 +93,27 @@ Left on purpose, judged:
 
 Not mergeable: SR-045 FND-001 (FR-006 contradicts FR-035's "raw HTTP bodies ... are not new fields") blocks. Everything else is non-blocking.
 
+## New findings (disposition pass 1)
+
+Reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
+
+| ID | Severity | Summary | Refs |
+|----|----------|---------|------|
+| FND-002 | medium | BLOCKER (public repo): sapho-75-spec-review.md:98 still names the retired private campaign tool | spec/reviews/sapho-75-spec-review.md:98 |
+
+### FND-002 (medium, confidence high, other, blocking)
+
+Unit: spec/reviews/sapho-75-spec-review.md at spec/reviews/sapho-75-spec-review.md:98. Related: SR-044 FND-001.
+
+> Projection v1, Python, <private campaign tool name redacted>), no task-log wording, and no Sapho reference to the downstream dataset consumer.
+
+BLOCKER (public repo): sapho-75-spec-review.md:98 still names the retired private campaign tool. The list of deprecated items in the bundle-validation paragraph ends with the retired private campaign tool's own name; the sweep's grep list did not include it. Widened whole-repo grep at 809dc3b (`campaign`, `ears`, `ears-`, `dataset consumer`, `downstream`) finds no other private name: every other `EARS`/`ears` hit is the public requirement grammar (spec.md:23/106, IT-002, the 26-09-30 review, the `ears-conformance` analysis type, quire's `ears:non-singular` check name), and `downstream` hits are generic. Names-only fix: replace the tool name with 'the retired campaign tool' or drop it from the list. (This review redacts the name in its own excerpt, so the artifact does not repeat the leak.)
+
+
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 809dc3b: The 'ticket/<number>' fragment is gone ('the tickets that build it'), and the merged attribution is split into the consumers' FR-004, FR-008 (pipeline) and FR-007, FR-009 (question stages). Word diff shows names and grammar only; meanings kept. |

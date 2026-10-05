@@ -47,7 +47,7 @@ RecordingBackend decorates any ModelBackend. Record exact core request, raw core
 | FR-027-AC-2 | An errored call adds no successful exchange. | Test (TC-027) |
 | FR-027-AC-3 | Export over the byte limit or to an existing path fails without overwriting it. | Test (TC-027) |
 | FR-027-AC-4 | A recorded exchange whose response carries a raw exchange exports and reloads with the raw exchange unchanged; a byte ceiling that the recording fits without the raw exchange but not with it refuses the export. | Test (TC-027) |
-| FR-027-AC-5 | A recording of a backend whose transport sends a sentinel credential in an HTTP header contains neither the sentinel nor any header name. | Test (TC-027) |
+| FR-027-AC-5 | A recording made through the header-injecting loopback double of TC-006 contains neither its sentinel credential nor the header name. | Test (TC-027) |
 
 ## Dependencies
 

@@ -50,7 +50,7 @@ When a backend that retains the raw exchange fails after an exchange took place,
 | FR-006-AC-3 | Backend failure retains a stable error code and produces no answer value. | Test (TC-006) |
 | FR-006-AC-4 | A ModelResponse with a raw exchange round-trips through JSON with its bytes unchanged; one without it serializes with no `raw` member, and a recording written without the member loads. | Test (TC-006) |
 | FR-006-AC-5 | An ExtractError carrying a raw exchange and usage, converted into a SaphoError, still exposes both unchanged in typed fields, while the error's message and Display text contain no sentinel string planted in either body. | Test (TC-006) |
-| FR-006-AC-6 | A backend whose transport sends a sentinel credential in an HTTP header produces a ModelResponse whose raw exchange, serialized, contains neither the sentinel nor any header name. | Test (TC-006) |
+| FR-006-AC-6 | With the header-injecting loopback double of TC-006, which adds a sentinel credential header to every request and keeps the raw exchange, the ModelResponse's raw exchange, serialized, contains neither the sentinel nor the header name. | Test (TC-006) |
 
 ## Dependencies
 

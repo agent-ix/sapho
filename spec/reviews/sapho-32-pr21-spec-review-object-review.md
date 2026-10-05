@@ -61,3 +61,10 @@ The JSON form of RawExchange bytes is unspecified. FR-006-AC-4 requires a byte-e
 
 0 high, 0 medium, 1 low; blocking: none.
 
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 809dc3b: JSON form fixed as UTF-8 strings `{request, response}`; non-UTF-8 response refused as malformed_response (see new LOW SR-048 FND-002). |
