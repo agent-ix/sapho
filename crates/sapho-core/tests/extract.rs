@@ -265,6 +265,6 @@ fn errors_keep_the_exchange_and_usage_through_the_shared_error_type() {
         .into();
     assert_eq!(error.raw.as_deref(), Some(&raw()));
     assert_eq!(error.usage.as_deref(), Some(&completion("").usage));
-    let json = serde_json::to_value(&SaphoError::new(ErrorCode::Config, "x")).unwrap();
+    let json = serde_json::to_value(SaphoError::new(ErrorCode::Config, "x")).unwrap();
     assert!(json.get("raw").is_none() && json.get("usage").is_none());
 }
