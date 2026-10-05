@@ -117,7 +117,14 @@ Reviewed at agent-ix/sapho@a34c54c8909d6f73a6a2258e4419fa2fa5b0af38.
 
 Unit: ollama/spec.md#In-Scope at spec/reviews/sapho-75-spec-review.md:29. Related: .
 
-> > The [Extractor](../core/functional/FR-048.md) implementation over Ollama's generate endpoint; explicit generation settings per binding; token estimation before a call and the reported token count after it; a `TooLarge` outcome; one request in flight per process; model identity, digest, usage and raw exchange bytes on every response; embeddings over Ollama's embed endpoint; host-configured endpoint, timeout and byte ceilings.
+> > The [Extractor](../modules/core/functional/FR-048.md) implementation over Ollama's generate endpoint; explicit generation settings per binding; token estimation before a call and the reported token count after it; a `TooLarge` outcome; one request in flight per process; model identity, digest, usage and raw exchange bytes on every response; embeddings over Ollama's embed endpoint; host-configured endpoint, timeout and byte ceilings.
 
 Reviewer artifact: SR-033's quoted excerpt held a relative link that broke when the file moved to spec/reviews/. The FND-001 excerpt quoted ollama/spec.md verbatim including the relative link `../core/functional/FR-048.md`, which resolves from spec/modules/ollama/ but not from spec/reviews/. The reviewer repaired only the link path in this file's Analysis excerpt (now `../modules/core/functional/FR-048.md`); the Findings table and finding text are unchanged.
 
+## Dispositions (round 3)
+
+Round 3, reviewed at agent-ix/sapho@ae955d0243b5cc036dce878e13cad28277321108.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-002 | deferred | Reviewer artifact. The round-2 excerpt of this same finding re-quoted the link `../core/functional/FR-048.md`, so the committed file still has one broken relative link. Repaired in the round-3 scratchpad copy of this SR file, together with the same kind of quoted relative links in sapho-dataset SR-002, SR-006, SR-008 and ears-dataset SR-002 excerpts (paths rewritten to resolve from reviews/); lands when the lead commits the round-3 SR files. Link paths only; no finding text changed. |

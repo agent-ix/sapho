@@ -118,3 +118,11 @@ Round 2, reviewed at agent-ix/sapho@a34c54c8909d6f73a6a2258e4419fa2fa5b0af38.
 | FND | outcome | sha/reason |
 |-----|---------|------------|
 | FND-003 | fixed | a34c54c: Requests send `truncate: false` and `shift: false`; the server's refusal with n_prompt_tokens is the authority, the byte estimate is only a lower-bound pre-check (max_bytes_per_token 6.0). Coherent with sapho-dataset FR-010 too_large recording (four numbers). |
+
+## Dispositions (round 3)
+
+Round 3, reviewed at agent-ix/sapho@ae955d0243b5cc036dce878e13cad28277321108.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-004 | fixed | ae955d0: The byte estimate and its pre-send refusal are removed; the server's truncate:false refusal (exceed_context_size_error, n_prompt_tokens) is the only size authority, bounded by FR-051's 4 MiB request ceiling; FR-050-AC-2 sends a 20,000-byte whitespace prompt. Removal sweep: no estimated_input_tokens, below_estimate or max_bytes_per_token remains in sapho FR-048/049/052/054, IT-007, TC files, docs, or sapho-dataset FR-006/FR-010/docs; two stale mentions remain (new LOWs in sapho-dataset SR-002 FND-009 and SR-007 FND-004). Design change for the owner: the brief says 'estimate tokens before the call, check prompt_eval_count after'; the new design drops the pre-call estimate but keeps the intent (counted in the model's own tokens, by the server before generating; too_large recorded and skipped, never a crash; prompt_eval_count still checked after). |
