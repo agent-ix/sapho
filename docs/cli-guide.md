@@ -142,7 +142,7 @@ sapho record examples/graphs/review.yaml --input INPUT.json --recording saved.js
 sapho replay examples/graphs/review.yaml --input INPUT.json --recording saved.json
 ```
 
-That offline example saves an empty model recording. A model graph also receives `--bindings`; capture retains successful validated raw exchanges, while failures keep partial trace and available earlier exchanges. Responses remain proposals, separate from correctness labels.
+That offline example saves an empty model recording. A model graph also receives `--bindings`; capture retains successful validated raw exchanges, while failures keep partial trace and available earlier exchanges. A recording is not a dataset: a model answer becomes a label only when you put it in a dataset whose provenance declares kind `model` and the model as its source.
 
 Replay constructs only ReplayBackend: no credential lookup, transport or live fallback. Requests match exact model, policy, state and ordered question definitions. Changed combinations/thresholds can reuse an exchange when its request is unchanged. Changed prompts/context cause `ReplayMiss`. Binding metadata is inferred only when each backend has a unique `(model, expected_model, distribution_policy)` tuple. Conflicts refuse with `RecordingMismatch`; names absent from an empty/partial recording require explicit matching `--bindings` metadata. A no-model graph replays with an empty recording.
 
@@ -176,7 +176,7 @@ sapho measure examples/graphs/review.yaml --dataset examples/data/review-dataset
 
 Boolean outputs report TP/TN/FP/FN and agreement with supplied labels. Probability outputs report Brier score against Boolean outcomes. Degree/Number, missing outputs and failed runs remain unscored/errors. Each output reports labelled, scored, unscored and failed counts with its own scored denominator; outputs are never averaged together. Empty/unscored metrics are absent. Measurements retain predictions, labels/provenance and run evidence. Exit 2 means at least one selected label was unscored or failed; the complete report is still emitted.
 
-For model graphs, provide explicit `--bindings` for live evaluation or `--replay saved.json` for exact offline evaluation. Each case has its own declared RunLimits. Label provenance records your declaration; Sapho cannot certify that a label is true or independent of model proposals.
+For model graphs, provide explicit `--bindings` for live evaluation or `--replay saved.json` for exact offline evaluation. Each case has its own declared RunLimits. Label provenance records your declaration of each label's kind (`model`, `agent`, `human` or `deterministic_check`), source and reference; Sapho does not certify that a label is true, and measure never scores a model against labels whose source is that same model.
 
 ## Tune explicit candidates
 
