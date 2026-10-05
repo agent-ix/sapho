@@ -74,8 +74,8 @@ async fn violating_and_non_json_answers_are_invalid_with_pointer_and_exchange() 
     assert_eq!(violation.code, ErrorCode::InvalidAnswer);
     assert_eq!(violation.reason, Some("schema_violation"));
     assert_eq!(violation.pointer.as_deref(), Some("/a"));
-    assert_eq!(violation.raw, Some(raw()));
-    assert_eq!(violation.usage, Some(completion("").usage));
+    assert_eq!(violation.raw.as_deref(), Some(&raw()));
+    assert_eq!(violation.usage.as_deref(), Some(&completion("").usage));
 
     let torn = extract(&double, &request(object_schema()))
         .await
@@ -83,7 +83,7 @@ async fn violating_and_non_json_answers_are_invalid_with_pointer_and_exchange() 
     assert_eq!(torn.code, ErrorCode::InvalidAnswer);
     assert_eq!(torn.reason, Some("not_json"));
     assert_eq!(torn.pointer, None);
-    assert_eq!(torn.raw, Some(raw()));
+    assert_eq!(torn.raw.as_deref(), Some(&raw()));
 }
 
 /// Trace: FR-048-AC-3

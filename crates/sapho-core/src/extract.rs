@@ -117,9 +117,9 @@ pub struct ExtractError {
     /// Detail of a `TooLarge` refusal.
     pub too_large: Option<TooLarge>,
     /// The exchange, when one took place.
-    pub raw: Option<RawExchange>,
+    pub raw: Option<Box<RawExchange>>,
     /// Usage, when the provider reported it.
-    pub usage: Option<ExtractUsage>,
+    pub usage: Option<Box<ExtractUsage>>,
 }
 impl ExtractError {
     /// A refusal with no reason, pointer, detail or exchange.
@@ -141,12 +141,12 @@ impl ExtractError {
     }
     /// Retain the exchange that produced the refusal.
     pub fn with_raw(mut self, raw: RawExchange) -> Self {
-        self.raw = Some(raw);
+        self.raw = Some(Box::new(raw));
         self
     }
     /// Retain the usage the provider reported.
     pub fn with_usage(mut self, usage: ExtractUsage) -> Self {
-        self.usage = Some(usage);
+        self.usage = Some(Box::new(usage));
         self
     }
     /// Attach the numbers of a `TooLarge` refusal.
