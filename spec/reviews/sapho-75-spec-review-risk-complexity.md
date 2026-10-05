@@ -83,3 +83,11 @@ Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
 | FND | outcome | sha/reason |
 |-----|---------|------------|
 | FND-001 | fixed | 2812aa1: External $ref refused; single core call path `sapho_core::extract`; AC-4 and AC-6 extended. |
+
+## Dispositions (round 2)
+
+Round 2, reviewed at agent-ix/sapho@a34c54c8909d6f73a6a2258e4419fa2fa5b0af38.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-002 | fixed | a34c54c: First-byte distinctness refused up front; Score capped at 10 levels (`too_many_levels`); FR-054-AC-8. |

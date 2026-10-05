@@ -26,7 +26,7 @@ Umbrella /quoin:spec-review of the M1 bundle (sapho#19, sapho-dataset#1, ears-da
 
 Unit: ollama/spec.md#In-Scope at spec/modules/ollama/spec.md:18. Related: FR-048, FR-049, sapho-dataset/FR-004, sapho-dataset/FR-008, ears-dataset/FR-007, ears-dataset/FR-009.
 
-> The [Extractor](../core/functional/FR-048.md) implementation over Ollama's generate endpoint; explicit generation settings per binding; token estimation before a call and the reported token count after it; a `TooLarge` outcome; one request in flight per process; model identity, digest, usage and raw exchange bytes on every response; embeddings over Ollama's embed endpoint; host-configured endpoint, timeout and byte ceilings.
+> The [Extractor](../modules/core/functional/FR-048.md) implementation over Ollama's generate endpoint; explicit generation settings per binding; token estimation before a call and the reported token count after it; a `TooLarge` outcome; one request in flight per process; model identity, digest, usage and raw exchange bytes on every response; embeddings over Ollama's embed endpoint; host-configured endpoint, timeout and byte ceilings.
 
 SAPHO-75 What says the ollama module serves both ask and extract tasks (SAPHO-32: implements both ModelBackend and Extractor), and AC1 requires requirements for every listed behaviour. The module's In Scope, FR-049..053 and the master spec (spec/spec.md:19, 'for extraction and embeddings') cover only Extractor and embeddings. Failure scenario: sapho-dataset FR-004/FR-005/FR-008 route every ask task to a model binding with backend `ollama` through ModelBackend, so the M2 exit check (toy ask task over 20 items on Qwen), EARS triage (ears FR-007) and confirm (ears FR-009) have no backend that can answer them; IT-001 in ears-dataset cannot be built. The gap is real (author open item a): core Answer::Boolean carries P(true) (sapho-core model.rs, FR-005) while Ollama generate gives crisp text. Options, not decided: (a) an Ollama ModelBackend returning crisp answers as P in {0,1} with the distribution marked unavailable and a stated 'uncalibrated' semantics in core; (b) derive P(true) from Ollama token logprobs (needs an Ollama version with logprobs; verify on Draco); (c) run triage and confirm as `extract` tasks with a fixed answer schema and keep ModelBackend for the fast tier only (changes sapho-dataset FR-004/FR-008 and ears FR-007/FR-009, and also removes the dynamic-question problem in the confirm finding); (d) add a crisp Answer variant to core. Whichever is chosen, the ollama module and master spec scope must state it before M2.
 
@@ -104,3 +104,20 @@ Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
 | FND | outcome | sha/reason |
 |-----|---------|------------|
 | FND-001 | fixed | 2812aa1: New FR-054 specifies the Ollama ModelBackend (format enum + logprobs); ollama spec.md In Scope and master spec updated; TC-054 added. |
+
+## New findings (disposition pass 2)
+
+Reviewed at agent-ix/sapho@a34c54c8909d6f73a6a2258e4419fa2fa5b0af38.
+
+| ID | Severity | Summary | Refs |
+|----|----------|---------|------|
+| FND-002 | low | Reviewer artifact: SR-033's quoted excerpt held a relative link that broke when the file moved to spec/reviews/ | spec/reviews/sapho-75-spec-review.md:29 |
+
+### FND-002 (low, confidence high, other)
+
+Unit: ollama/spec.md#In-Scope at spec/reviews/sapho-75-spec-review.md:29. Related: .
+
+> > The [Extractor](../core/functional/FR-048.md) implementation over Ollama's generate endpoint; explicit generation settings per binding; token estimation before a call and the reported token count after it; a `TooLarge` outcome; one request in flight per process; model identity, digest, usage and raw exchange bytes on every response; embeddings over Ollama's embed endpoint; host-configured endpoint, timeout and byte ceilings.
+
+Reviewer artifact: SR-033's quoted excerpt held a relative link that broke when the file moved to spec/reviews/. The FND-001 excerpt quoted ollama/spec.md verbatim including the relative link `../core/functional/FR-048.md`, which resolves from spec/modules/ollama/ but not from spec/reviews/. The reviewer repaired only the link path in this file's Analysis excerpt (now `../modules/core/functional/FR-048.md`); the Findings table and finding text are unchanged.
+

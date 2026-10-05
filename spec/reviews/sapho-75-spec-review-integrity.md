@@ -83,3 +83,11 @@ Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
 | FND | outcome | sha/reason |
 |-----|---------|------------|
 | FND-001 | fixed | 2812aa1: ExtractError now carries a typed too_large detail; FR-048-AC-3 and FR-050-AC-1/2 test the fields. |
+
+## Dispositions (round 2)
+
+Round 2, reviewed at agent-ix/sapho@a34c54c8909d6f73a6a2258e4419fa2fa5b0af38.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-002 | fixed | a34c54c: Candidates counted once per distinct byte string; FR-054-AC-2 vector (generated yes -2.228 also listed, no -5.759, Yes -0.162 unattributed) recomputed: 0.97158. |

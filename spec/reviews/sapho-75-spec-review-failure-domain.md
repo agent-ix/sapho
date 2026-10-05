@@ -93,3 +93,28 @@ Round 1, reviewed at agent-ix/sapho@2812aa1800068709943743661d947c4d1ad21692.
 |-----|---------|------------|
 | FND-001 | fixed | 2812aa1: prompt_eval_count is now a lower bound, a missing count is not an error (AC-4), and a cached-prefix count below the estimate never sets estimate_exceeded (AC-3). Measured behaviour cited (0.32.14 counts the whole prompt). |
 | FND-002 | fixed | 2812aa1: Weights digest read from /api/show before every request; change gives ModelMismatch weights_changed (FR-052-AC-4). |
+
+## New findings (disposition pass 2)
+
+Reviewed at agent-ix/sapho@a34c54c8909d6f73a6a2258e4419fa2fa5b0af38.
+
+| ID | Severity | Summary | Refs |
+|----|----------|---------|------|
+| FND-004 | low | `max_bytes_per_token` 6.0 is the largest measured ratio, not a proven bound | spec/modules/ollama/functional/FR-050.md:33 |
+
+### FND-004 (low, confidence low, other)
+
+Unit: FR-050 at spec/modules/ollama/functional/FR-050.md:33. Related: FR-054.
+
+> The byte estimate divides by the largest measured bytes per token, so it is a lower bound on the token count: when even the lower bound does not fit, the request is pointless and is not sent.
+
+`max_bytes_per_token` 6.0 is the largest measured ratio, not a proven bound. Tokenizers merge long whitespace runs and repeated punctuation into single tokens of many bytes, so heavily indented or padded text can exceed 6 bytes per token, making the 'lower bound' estimate too high and refusing pre-send a prompt the server would accept. Impact is limited to inputs near the limit, and `below_estimate` records the evidence; say 'measured' rather than 'lower bound', or let the server refusal decide when the estimate is within a margin of num_ctx.
+
+
+## Dispositions (round 2)
+
+Round 2, reviewed at agent-ix/sapho@a34c54c8909d6f73a6a2258e4419fa2fa5b0af38.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-003 | fixed | a34c54c: Requests send `truncate: false` and `shift: false`; the server's refusal with n_prompt_tokens is the authority, the byte estimate is only a lower-bound pre-check (max_bytes_per_token 6.0). Coherent with sapho-dataset FR-010 too_large recording (four numbers). |
