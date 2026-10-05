@@ -52,3 +52,10 @@ Classifying a binary gateway error as an answer defect misleads callers that cou
 
 0 high, 1 medium, 0 low; blocking: none.
 
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@39ad473d3d505cf45508b6215007fd336bee3063.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 39ad473: Status judged before the body, with the reason stated (retry and halt rules keyed on BackendFailed keep working); the code on impl/ollama-extractor must follow (it decodes first at 558a3ce). |

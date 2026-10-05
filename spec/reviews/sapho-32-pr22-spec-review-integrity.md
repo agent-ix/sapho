@@ -52,3 +52,27 @@ BLOCKER: FR-048 now makes a non-UTF-8 non-success response `InvalidAnswer`, whil
 
 1 high, 0 medium, 0 low; blocking: FND-001.
 
+## New findings (disposition pass 1)
+
+Reviewed at agent-ix/sapho@39ad473d3d505cf45508b6215007fd336bee3063.
+
+| ID | Severity | Summary | Refs |
+|----|----------|---------|------|
+| FND-002 | high | BLOCKER: 'a non-success status is BackendFailed whatever the body holds' contradicts the 400 refusals FR-050 and FR-053 turn into TooLarge | spec/modules/core/functional/FR-048.md:48 |
+
+### FND-002 (high, confidence high, soundness, blocking)
+
+Unit: FR-048 at spec/modules/core/functional/FR-048.md:48. Related: FR-050, FR-050-AC-1, FR-053, FR-053-AC-2, FR-051.
+
+> An implementation SHALL judge the response status before its body. A non-success status is a transport failure, `BackendFailed`, whatever the body holds, so that a gateway or proxy outage and a binary 404 page stay transport failures and the retry and halt rules that key on `BackendFailed` keep working.
+
+BLOCKER: 'a non-success status is BackendFailed whatever the body holds' contradicts the 400 refusals FR-050 and FR-053 turn into TooLarge. FR-050:33 requires 'HTTP 400 with error type `exceed_context_size_error`' to become `TooLarge` with `reported_input_tokens` from the body's `n_prompt_tokens` (FR-050-AC-1), and FR-053:34 requires a 400 with the text 'the input length exceeds the context length' to become `TooLarge` with reason `input_exceeds_context` (FR-053-AC-2). Both read the body of a non-success response. FR-048 now says a non-success status is `BackendFailed` 'whatever the body holds', and FR-051 maps every non-404 non-success status to `BackendFailed`/`http_status`. A prompt longer than the context therefore has two required outcomes, and an implementation following FR-048/FR-051 loses the too_large handling the whole size design rests on. Fix: 'A non-success status is `BackendFailed`, except where a requirement classifies a specific status and body (FR-050, FR-053); the body of a non-success response is read only for that classification, and an undecodable one is `BackendFailed`.' Add the exception to FR-051 and keep FR-050-AC-1 and FR-053-AC-2 as they are.
+
+
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@39ad473d3d505cf45508b6215007fd336bee3063.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 39ad473: A binary 502 or 404 now has one outcome: FR-048, FR-051 and FR-052 all say non-success is BackendFailed (`model_not_found` for 404, `http_status` otherwise) with no raw exchange and elapsed-time usage, and malformed_response only under a success status; FR-048-AC-7 (200, 502, 404) and FR-051-AC-4 (404, 500 with non-UTF-8 bodies) can fail. No residual text of the old rule outside review artifacts. The blanket wording introduces a new contradiction with FR-050/FR-053, recorded as FND-002. |

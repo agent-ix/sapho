@@ -66,9 +66,16 @@ SR-043 is committed as the reviewer's latest copy (byte-identical).
 
 ## Public-repo leak check
 
-Python-regex grep of the added diff lines and of spec/reviews/sapho-32-gap-analysis.md for private repository, host, plan and campaign names, the private consumer and evaluation repositories, quire-semantic and private ticket IDs: no hits. This review's own files were checked the same way.
+Python-regex grep of the added diff lines and of spec/reviews/sapho-32-gap-analysis.md for private repository, host, plan and campaign names, the private consumer, evaluation and interpreter repositories, and private ticket IDs: no hits. This review's own files were checked the same way.
 
 ## Bundle Verdict
 
 Not mergeable: SR-052 FND-001 (FR-048 and FR-051 give a binary non-success response two different error codes) blocks; a one-sentence change to either requirement clears it, and SR-055 FND-001 recommends which.
 
+## Dispositions
+
+Round 1, reviewed at agent-ix/sapho@39ad473d3d505cf45508b6215007fd336bee3063.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-001 | fixed | 39ad473: The bullet is split into two readable statements (status first; success-status non-UTF-8 body). |
