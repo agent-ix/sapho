@@ -142,3 +142,11 @@ Round 2, reviewed at agent-ix/sapho@02779a8319a7e971603b44d01a645ad80a029cac.
 | FND | outcome | sha/reason |
 |-----|---------|------------|
 | FND-002 | fixed | 02779a8: Line 98 now reads 'the retired campaign tool'; the whole-repo grep finds no private tool or repository name except the dashboard-snapshot name recorded as FND-003. |
+
+## Dispositions (round 3)
+
+Round 3, reviewed at agent-ix/sapho@24ab346c62bcd2da5471b0e75f6c16e055d181cc.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-003 | fixed | 24ab346: Line 98 and the committed SR-044 line 108 now say 'the retired dashboard snapshot'; whole-repo Python-regex leak grep at 24ab346 finds no private name; all committed SR files are byte-identical to the reissued scratchpad copies. |
