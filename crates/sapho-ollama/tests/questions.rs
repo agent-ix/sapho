@@ -564,6 +564,7 @@ async fn a_candidate_not_sharing_the_bytes_before_the_value_is_not_attributed() 
     assert!((boolean_p(&response, "b") - 0.9970).abs() < 1e-4);
 }
 
+/// Trace: FR-054-AC-11
 #[tokio::test]
 async fn a_request_for_another_model_than_the_binding_is_refused_before_sending() {
     let _serial = serial().await;

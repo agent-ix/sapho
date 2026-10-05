@@ -694,21 +694,83 @@ async fn the_response_ceiling_holds_for_a_chunked_body_with_no_content_length() 
 #[tokio::test]
 async fn a_body_that_is_not_utf8_has_no_raw_exchange_and_only_elapsed_usage() {
     let _serial = serial().await;
-    let fake = Fake::start(|r| match r.path.as_str() {
+    for status in [200, 502] {
+        let fake = Fake::start(move |r| match r.path.as_str() {
+            "/api/show" => description(BLOB),
+            _ => Reply::Status(status, vec![b'{', 0xff, 0xfe, b'}']),
+        })
+        .await;
+        let error = failing(&fake, "item").await;
+        assert_eq!(
+            (error.code, error.reason),
+            (ErrorCode::InvalidAnswer, Some("malformed_response")),
+            "status {status}"
+        );
+        assert!(error.raw.is_none());
+        let usage = error.usage.as_deref().unwrap();
+        assert!(usage.elapsed_ms.is_some());
+        assert_eq!(
+            (usage.input_tokens, usage.output_tokens, usage.load_ms),
+            (None, None, None)
+        );
+    }
+}
+
+/// Trace: FR-051-AC-5
+#[tokio::test]
+async fn a_configured_header_reaches_every_request_and_is_never_printed_or_retained() {
+    let _serial = serial().await;
+    let sentinel = "SENTINEL-HEADER-3318";
+    let responses = std::sync::Mutex::new(vec![
+        Reply::ok(generated(MODEL, r#"{"label":"ok"}"#)),
+        Reply::status(500, json!({"error": "down"})),
+    ]);
+    let fake = Fake::start(move |r| match r.path.as_str() {
         "/api/show" => description(BLOB),
-        _ => Reply::Status(200, vec![b'{', 0xff, 0xfe, b'}']),
+        _ => responses.lock().unwrap().remove(0),
     })
     .await;
-    let error = failing(&fake, "item").await;
+    let server = Server::new(&fake.url, limits())
+        .unwrap()
+        .with_header("Authorization", &format!("Bearer {sentinel}"))
+        .unwrap();
+    let debug = format!("{server:?} {server:#?}");
+    assert!(!debug.contains(sentinel), "{debug}");
+    assert!(debug.contains("Sensitive"));
+    let binding = OllamaBackend::new(server, settings(MODEL, false, 4096, 512)).unwrap();
+    let ok = extract(&binding, &request("one")).await.unwrap();
+    let error = extract(&binding, &request("two")).await.unwrap_err();
+    let heads: Vec<_> = fake
+        .log
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|r| r.head.clone())
+        .collect();
     assert_eq!(
-        (error.code, error.reason),
-        (ErrorCode::InvalidAnswer, Some("malformed_response"))
+        heads.len(),
+        4,
+        "a description and a generate request per call"
     );
-    assert!(error.raw.is_none());
-    let usage = error.usage.as_deref().unwrap();
-    assert!(usage.elapsed_ms.is_some());
-    assert_eq!(
-        (usage.input_tokens, usage.output_tokens, usage.load_ms),
-        (None, None, None)
+    assert!(
+        heads.iter().all(|h| h.contains(sentinel)),
+        "every request carries the header"
+    );
+    let kept = serde_json::to_string(&ok.raw).unwrap();
+    assert!(!kept.contains(sentinel));
+    for text in [
+        error.to_string(),
+        format!("{error:?}"),
+        serde_json::to_string(&error).unwrap(),
+    ] {
+        assert!(!text.contains(sentinel), "{text}");
+    }
+    assert!(!format!("{binding:?}").contains(sentinel));
+    assert!(
+        Server::new(&fake.url, limits())
+            .unwrap()
+            .with_header("bad name", "x")
+            .is_err(),
+        "an invalid header is refused as Config"
     );
 }

@@ -6,6 +6,7 @@ use sapho::{core::*, recording::*, runtime::*};
 use sapho_ollama::{Limits, OllamaBackend, Server, Settings};
 use serde_json::{Value as Json, json};
 use std::{
+    collections::BTreeMap,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -237,7 +238,7 @@ async fn trace_comparison_ignores_raw_timing_but_not_the_answer() {
     );
 }
 
-/// Trace: FR-027-AC-4
+/// Trace: FR-027-AC-6
 #[tokio::test]
 async fn identical_requests_whose_raw_bodies_differ_in_timing_are_not_a_conflict() {
     let _serial = double::serial().await;
@@ -258,5 +259,27 @@ async fn identical_requests_whose_raw_bodies_differ_in_timing_are_not_a_conflict
     let (a, b) = (&saved.exchanges[0].response, &saved.exchanges[1].response);
     assert_ne!(a.raw, b.raw, "the bodies differ in timing");
     assert_eq!(a.answers, b.answers);
-    ReplayBackend::new(&saved, 1_000_000).unwrap();
+    let replay = ReplayBackend::new(&saved, 1_000_000).unwrap();
+    let request = &saved.exchanges[0].request;
+    let replayed = replay.infer(request).await.unwrap();
+    assert_eq!(
+        replayed.raw, a.raw,
+        "the first recorded exchange answers a repeated request"
+    );
+
+    // A duplicate whose answer differs is a conflict.
+    let mut conflicting = saved.clone();
+    conflicting.exchanges[1].response.answers = BTreeMap::from([(
+        "q".into(),
+        Answer::Boolean {
+            probability: probability(0.01),
+        },
+    )]);
+    assert_eq!(
+        ReplayBackend::new(&conflicting, 1_000_000)
+            .err()
+            .unwrap()
+            .code,
+        ErrorCode::RecordingMismatch
+    );
 }

@@ -123,3 +123,37 @@ Round 1, reviewed at ce6b41f035492e7ef94d63fb2b8ed6fa7936ccaa (diff origin/spec/
 | FND-006 | fixed | ebab022 (base spec PR #21): FR-048-AC-6 verification changed to Test; matrix status now tagged |
 | FND-007 | fixed | ebab022 (base spec PR #21): FR-054 states the pre-value and past-the-end rules and adds FR-054-AC-10 (see new FND-009 on its example) |
 | FND-008 | fixed | ebab022 (base spec PR #21): FR-049 now says the adapter returns the response bytes and the core parses them |
+
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+|---|---|---|---|
+| FND-011 | low | Spec: FR-046-AC-3 lists reason as a member of the CLI error object; reason lives in context | spec/modules/cli/functional/FR-046.md |
+| FND-012 | low | Spec: FR-027 does not say the duplicate-request conflict check ignores the raw exchange, or which raw replay returns | crates/sapho-recording/src/lib.rs:197 |
+| FND-013 | low | Spec: a non-UTF-8 body is malformed_response at every HTTP status, so a binary 5xx becomes an answer defect | crates/sapho-ollama/src/http.rs:187 |
+| FND-014 | low | Spec: Server::with_header is a public configuration input that FR-051 does not list | crates/sapho-ollama/src/http.rs:101 |
+
+### FND-011 (low, confidence high, ambiguous)
+
+FR-046-AC-3 says the error object's "members are exactly code, reason, message and context fields". The FR-046 statement says it holds "the error code, its reason when present, its content-free message and its named context fields". The SaphoError JSON contract has carried reason as `context["reason"]` since before this PR, and the From<ExtractError> conversion follows it. The CLI writes `{code, message, context}`, and invocation.rs:388 asserts exactly that set. The behaviour is right and the evidence is excluded, but the criterion reads as if `reason` were a top-level member. Ruling on decision (a): not blocking. Amend FR-046 and AC-3 to say "code, message and context, with the reason as the context field `reason`".
+
+### FND-012 (low, confidence high, coverage)
+
+ReplayBackend's "Conflicting response for identical request" check (recording/src/lib.rs:197-212) now compares responses with `raw` cleared. Two live calls with an identical request always differ in `created_at` and duration counters, so the old check would refuse every re-recorded duplicate. This is tested by identical_requests_whose_raw_bodies_differ_in_timing_are_not_a_conflict, and mutant N5 is killed. FR-027 does not state it. Replay keys exchanges by request, so both duplicates replay the first exchange's raw bodies. FR-035-AC-4's "same raw exchange byte for byte" therefore holds only for the first. Ruling on decision (b): the behaviour is correct and not blocking. Amend FR-027 to say the conflict check compares everything but the raw exchange, and that replay returns the first recorded raw exchange for a repeated request.
+
+### FND-013 (low, confidence medium, ambiguous)
+
+`Server::post` decodes the body as UTF-8 before any status handling (http.rs:187-200). A non-UTF-8 body therefore yields `InvalidAnswer`/`malformed_response` at any status: a 502 HTML-with-binary page from a proxy, a non-UTF-8 404, and a non-UTF-8 `/api/show` reply (which would otherwise be `BackendFailed`/`http_status` or `digest_unavailable`). This matches FR-048 and FR-052 as amended ("If a response body is not valid UTF-8 ..."), so it is not a code defect. But it classifies a transport failure as an answer defect, which a caller retrying or counting failures by code would misread. Judgment: not blocking. Either accept it as written, or amend FR-048 so a non-success status takes precedence (`BackendFailed`/`http_status`, usage with elapsed time, no raw) and only a 2xx non-UTF-8 body is `malformed_response`.
+
+### FND-014 (low, confidence high, coverage)
+
+`Server::with_header(name, value)` (http.rs:101-115) is new public API. It adds a header to every request, marks the value sensitive (so Server's derived Debug prints `Sensitive`), and never copies it into a raw exchange: the header-injecting double tests run through it and mutant N1 is killed. The spec names only a test transport ("the header-injecting loopback double ... whose test transport adds the header"). FR-051's configuration list (base URL, timeout, ceilings) does not include request headers, so a production feature for authenticating gateways is unspecified. Judgment: keep it; it is the smallest honest way to drive the double through the real client, and it is useful. Not blocking; add it to FR-051's inputs (headers sent with every request, values never in a raw exchange, error, Debug or log). The root crate's new dev-dependency on sapho-ollama is test-only (tests/scenarios/raw.rs), changes no shipped dependency graph, and needs no amendment.
+
+## Dispositions (round 2)
+
+Round 2, reviewed at 558a3ce7c12350fc48fc77c0f68cf7fa945df788 (diff origin/main...HEAD, main f71c1e8 with spec PRs #19 and #21 merged). `quire matrix --strict` exits 0; the only non-tagged rows are the earlier FR-047-AC-1/2 and NFR-001-M-1.
+
+| FND | Outcome | sha/reason |
+|---|---|---|
+| FND-009 | fixed | 558a3ce (test) on spec f71c1e8: FR-054-AC-10 is now the `"y` against ` n` fixture (0.9970 with the rule, 0.8581 without); a_candidate_not_sharing_the_bytes_before_the_value_is_not_attributed (questions.rs:552) asserts 0.9970 and fails under mutant M6; the past-the-end clause is gone from FR-054 |
+| FND-010 | deferred | Small spec amendment batched by the team leader into one sapho spec PR: add the question path's request_model_differs refusal to FR-054 (or widen FR-049-AC-6 to both ports), then tag questions.rs:567. The behaviour is implemented and tested; not blocking |
