@@ -199,6 +199,7 @@ impl ModelBackend for Scripted {
         }
         Ok(ModelResponse {
             model: request.model.clone(),
+            digest: None,
             answers: request
                 .questions
                 .iter()
@@ -337,6 +338,7 @@ async fn scripted_multilayer_capture_replays_exactly_and_preserves_partial_failu
 fn conflicting_recorded_or_explicit_binding_metadata_is_refused_without_live_lookup() {
     let response = ModelResponse {
         model: "synthetic".into(),
+        digest: None,
         answers: BTreeMap::new(),
         usage: None,
     };

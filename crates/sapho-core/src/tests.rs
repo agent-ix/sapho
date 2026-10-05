@@ -42,6 +42,7 @@ fn request(q: Vec<NamedQuestion>) -> ModelRequest {
 fn response(a: Answer) -> ModelResponse {
     ModelResponse {
         model: "model-1".into(),
+        digest: None,
         answers: BTreeMap::from([("q".into(), a)]),
         usage: None,
     }
@@ -849,5 +850,31 @@ fn plain_question_and_answer_inputs_validate_their_full_typed_contract() {
             .unwrap_err()
             .code,
         ErrorCode::TypeMismatch
+    );
+}
+/// Trace: FR-005-AC-1
+#[test]
+fn weights_digest_is_preserved_validated_over_and_optional() {
+    let mut with_digest = response(Answer::Choice {
+        selected: "z".into(),
+        confidence: p(0.7),
+        probabilities: Some(BTreeMap::from([("z".into(), p(0.7)), ("a".into(), p(0.3))])),
+    });
+    with_digest.digest = Some("sha256:58574f".into());
+    validate_response(&request(vec![choice()]), &with_digest).unwrap();
+    let json = serde_json::to_value(&with_digest).unwrap();
+    assert_eq!(json["digest"], "sha256:58574f");
+    assert_eq!(
+        serde_json::from_value::<ModelResponse>(json).unwrap(),
+        with_digest
+    );
+    with_digest.digest = None;
+    let json = serde_json::to_value(&with_digest).unwrap();
+    assert!(json.get("digest").is_none());
+    assert_eq!(
+        serde_json::from_value::<ModelResponse>(json)
+            .unwrap()
+            .digest,
+        None
     );
 }

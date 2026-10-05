@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli"]
+members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-ollama", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli"]
 resolver = "3"
 
 [workspace.package]
@@ -23,11 +23,13 @@ cap-std = "4"
 cap-fs-ext = "4"
 globset = "0.4"
 sha2 = "0.10"
+jsonschema = { version = "0.58", default-features = false }
 serde_stacker = "0.1"
 serde-saphyr = { version = "1.3", default-features = false, features = ["deserialize"] }
 sapho-core = { path = "crates/sapho-core", version = "0.1.0" }
 sapho-graph = { path = "crates/sapho-graph", version = "0.1.0" }
 sapho-runtime = { path = "crates/sapho-runtime", version = "0.1.0" }
+sapho-ollama = { path = "crates/sapho-ollama", version = "0.1.0" }
 sapho-recording = { path = "crates/sapho-recording", version = "0.1.0" }
 sapho-select = { path = "crates/sapho-select", version = "0.1.0" }
 sapho-evidence = { path = "crates/sapho-evidence", version = "0.1.0" }

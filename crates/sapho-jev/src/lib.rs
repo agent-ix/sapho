@@ -86,6 +86,7 @@ impl ModelBackend for JevBackend {
         }
         Ok(ModelResponse {
             model: raw.model,
+            digest: None,
             answers,
             usage: Some(Usage {
                 billing_units: None,

@@ -194,6 +194,7 @@ async fn explicit_clm_replay_checks_only_model_and_policy_without_guessing_provi
     };
     let response = ModelResponse {
         model: "clm-latest".into(),
+        digest: None,
         answers: BTreeMap::from([(
             "q".into(),
             Answer::Boolean {

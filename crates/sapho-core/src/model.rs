@@ -425,6 +425,9 @@ pub struct Usage {
 pub struct ModelResponse {
     /// Actual resolved model identity.
     pub model: String,
+    /// Digest of the actual model's weights, when the provider reports one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
     /// Raw typed answers.
     pub answers: BTreeMap<String, Answer>,
     /// Usage when the provider supplies it.

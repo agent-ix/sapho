@@ -183,6 +183,7 @@ impl ModelBackend for Scripted {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(ModelResponse {
             model: request.model.clone(),
+            digest: None,
             answers: request
                 .questions
                 .iter()

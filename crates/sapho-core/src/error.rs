@@ -36,6 +36,8 @@ pub enum ErrorCode {
     LimitExceeded,
     /// A deadline or cooperative cancellation was observed.
     DeadlineExceeded,
+    /// The input does not fit the model's context.
+    TooLarge,
     /// Native worker panicked or returned a failure.
     CodeFailed,
     /// Backend call failed outside a more specific service category.
