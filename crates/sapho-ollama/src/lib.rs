@@ -17,7 +17,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -358,6 +358,7 @@ pub struct OllamaBackend {
     capture: Mutex<Capture>,
     started: AtomicUsize,
     model_pin: Mutex<Option<ModelPin>>,
+    pin_started: AtomicBool,
 }
 fn error(code: ErrorCode, message: &str) -> SaphoError {
     SaphoError::new(code, message)
@@ -399,6 +400,7 @@ impl OllamaBackend {
             capture: Mutex::new(Capture::default()),
             started: AtomicUsize::new(0),
             model_pin: Mutex::new(None),
+            pin_started: AtomicBool::new(false),
         })
     }
     /// Prepare a shared process capacity lease synchronously, before async execution.
@@ -409,7 +411,8 @@ impl OllamaBackend {
         Ok(backend)
     }
     /// Bind one expected reported digest before any generation. Rebinding a
-    /// different pin is refused. This does not assert atomic served-weight identity.
+    /// different pin is refused. The first invocation seals the optional pin;
+    /// binding must precede invocation. This does not assert atomic served-weight identity.
     pub fn pin_model(&self, pin: ModelPin) -> Result<()> {
         if pin.model.is_empty()
             || pin.model.len() > 4096
@@ -427,10 +430,10 @@ impl OllamaBackend {
                 return Err(error(ErrorCode::ModelMismatch, "Local model pin differs"));
             }
         } else {
-            if self.started.load(Ordering::Acquire) > 0 {
+            if self.pin_started.load(Ordering::Acquire) {
                 return Err(error(
                     ErrorCode::Config,
-                    "Cannot add a model pin after dispatch",
+                    "Cannot add a model pin after an invocation starts",
                 ));
             }
             *stored = Some(pin);
@@ -572,6 +575,16 @@ impl OllamaBackend {
     }
     async fn call(&self, request: &ModelRequest) -> Result<ModelResponse> {
         let started = Instant::now();
+        // Seal the optional pin under the same lock used by pin_model before any
+        // await, so a concurrent first invocation cannot race first-time binding.
+        let pin = {
+            let stored = self
+                .model_pin
+                .lock()
+                .map_err(|_| error(ErrorCode::BackendFailed, "Local model pin unavailable"))?;
+            self.pin_started.store(true, Ordering::Release);
+            stored.clone()
+        };
         let _slot = self
             .gate
             .acquire()
@@ -617,11 +630,6 @@ impl OllamaBackend {
             .with_context("context_tokens", self.limits.context_tokens.to_string())
             .with_context("token_upper_bound", "one_utf8_byte_per_token"));
         }
-        let pin = self
-            .model_pin
-            .lock()
-            .map_err(|_| error(ErrorCode::BackendFailed, "Local model pin unavailable"))?
-            .clone();
         if let Some(pin) = pin {
             if request.model != pin.model {
                 return Err(error(
@@ -884,6 +892,17 @@ mod tests {
         .unwrap();
         let failure = backend.infer(&request()).await.unwrap_err();
         assert_eq!(failure.code, ErrorCode::LimitExceeded);
+        // First-time binding is refused even after a no-dispatch invocation.
+        assert_eq!(
+            backend
+                .pin_model(ModelPin {
+                    model: "local-test".into(),
+                    digest: "late".into()
+                })
+                .unwrap_err()
+                .code,
+            ErrorCode::Config
+        );
         assert_eq!(
             failure.context.get("output_tokens").map(String::as_str),
             Some("1")
