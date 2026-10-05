@@ -157,3 +157,15 @@ Round 2, reviewed at 558a3ce7c12350fc48fc77c0f68cf7fa945df788 (diff origin/main.
 |---|---|---|
 | FND-009 | fixed | 558a3ce (test) on spec f71c1e8: FR-054-AC-10 is now the `"y` against ` n` fixture (0.9970 with the rule, 0.8581 without); a_candidate_not_sharing_the_bytes_before_the_value_is_not_attributed (questions.rs:552) asserts 0.9970 and fails under mutant M6; the past-the-end clause is gone from FR-054 |
 | FND-010 | deferred | Small spec amendment batched by the team leader into one sapho spec PR: add the question path's request_model_differs refusal to FR-054 (or widen FR-049-AC-6 to both ports), then tag questions.rs:567. The behaviour is implemented and tested; not blocking |
+
+## Dispositions (round 3)
+
+Round 3, reviewed at c63f8b09d729e51b550e398792e2c73a86c18cad (diff origin/main...HEAD, main 8348342 with spec PRs #19, #21 and #22 merged). `quire matrix --strict` exits 0; FR-046-AC-3, FR-027-AC-6, FR-051-AC-5/6 and FR-054-AC-11 are tagged. All 40 mutants in rv20-mut/run.sh are killed, plus the two header and UTF-8 mutants rewritten for the current code.
+
+| FND | Outcome | sha/reason |
+|---|---|---|
+| FND-010 | fixed | 0950cb3 on spec 8348342: FR-054 states the question path's request_model_differs refusal and FR-054-AC-11 tests it; the test at questions.rs:567 is tagged FR-054-AC-11 |
+| FND-011 | fixed | spec 8348342: FR-046 and FR-046-AC-3 now say exactly `code`, `message` and `context`, with the reason as `context.reason`; error_objects_hold_code_message_and_context_only asserts that set, and mutant N4 is killed |
+| FND-012 | fixed | 0950cb3 on spec 8348342: FR-027 and FR-027-AC-6 state that the conflict check ignores raw and that replay returns the first exchange; the raw.rs test checks that the first raw replays and that a different answer is a RecordingMismatch; mutants N5 and N11 are killed |
+| FND-013 | fixed | c63f8b0 on spec 8348342: Reply checks the status before decoding. 404 is model_not_found; a readable 400 size refusal is TooLarge on generate and on embed; any other non-success, including a binary 400, is BackendFailed http_status; a non-UTF-8 200 is malformed_response; none carries raw, and each has elapsed-only usage. A /api/show 404 is still Config model_not_installed. Mutants N14, N15, R1, R2, R3 and R4 are killed |
+| FND-014 | fixed | 0950cb3 on spec 8348342: FR-051 lists the request headers and FR-051-AC-5 tests them. The header reaches all four recorded requests (description and generate), never appears in raw, error Display, Debug or JSON, or binding Debug, and an invalid header name is refused. Mutants N12, N13 and the rewritten N1 are killed |
