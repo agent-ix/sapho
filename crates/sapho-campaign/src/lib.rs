@@ -7,6 +7,7 @@ pub mod dashboard;
 pub mod execution;
 pub mod export;
 pub mod lifecycle;
+pub mod meter;
 pub mod migration;
 pub mod runner;
 pub mod storage;

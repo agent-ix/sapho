@@ -1,6 +1,7 @@
 # Campaign dashboard JSON projection
 
-Status: proposed interface, implementation and verification pending. This is a
+Status: generic projection implemented with focused read-only/schema/bounds tests;
+consumer integration and complete CLI delivery receipts remain in progress. This is a
 machine interface for read-only integrations, separate from Ratatui display text.
 The CLI command is `sapho campaign --state PRIVATE_STATE dashboard`, with optional
 `--attempt POSITIVE_ID`. Domain hosts expose an equivalent `dashboard` command.
@@ -14,6 +15,7 @@ The response is an object with these fields:
 |---|---|
 | `schema` | Integer 1. Unknown versions are refused by consumers. |
 | `generated_unix_ms` | Projection generation time, not the last durable update. |
+| `last_event_unix_ms` | Authoritative durable change time, or null when the ledger has no event timestamps. |
 | `campaign` | Durable sequence, control revision, paused, job count and exhaustive attempt-state counts. |
 | `metrics` | Bounded map of typed metric records. |
 | `complete` | Domain completion predicate; null when the host supplies none. |
@@ -21,7 +23,10 @@ The response is an object with these fields:
 | `selected_attempt` | One structured retained attempt, or null when no selection was requested. |
 
 Metric records contain `value`, optional `target`, `unit`, `meaning` and
-`authority`. Units are explicit (`jobs`, `attempts`, `passages`, `repositories`,
+`authority`, plus optional `denominator`. A denominator contains an actual positive
+applicable `value`, explicit `split`, `assessment_sha256` and assessment `meaning`.
+Targets are goals and never scoring denominators. Agreement and source correctness
+require distinct assessment meanings and evidence. Units are explicit (`jobs`, `attempts`, `passages`, `repositories`,
 `domains`, `readings`, `packets`, `judgments`, `http_dispatches`). Meaning is a
 stable machine category rather than a translated label. Authority identifies
 durable execution counts, downstream domain assessment, supplied human response,
@@ -46,8 +51,7 @@ not labelled correctness, novelty or usefulness.
 
 ## Bounds and consistency
 
-At most 256 metric records, 128 UTF8 bytes per metric key, 256 bytes per optional
-label and 256 bytes per selected stage are accepted. The serialized response is
+At most 256 metric records, 128 UTF8 bytes per metric key and meaning, and 256 bytes per selected stage are accepted. The serialized response is
 bounded to 256 KiB and refuses oversize rather than truncating fields. The command
 does not enumerate all attempts or read all output blobs. Selection reads one
 exact retained attempt. Durable counts, metrics and selection come from one

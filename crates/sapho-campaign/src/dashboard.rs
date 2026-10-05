@@ -60,6 +60,22 @@ pub struct Metric {
     pub meaning: String,
     /// Evidence authority.
     pub authority: Authority,
+    /// Actual scoring denominator and assessment provenance; a goal is never this value.
+    #[serde(default)]
+    pub denominator: Option<Denominator>,
+}
+/// Explicit quality/ratio assessment scope, separate from campaign targets.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Denominator {
+    /// Number of actually assessed applicable cells/records.
+    pub value: u64,
+    /// Actual evaluated partition or frozen cohort identity.
+    pub split: String,
+    /// Immutable assessment evidence identity.
+    pub assessment_sha256: String,
+    /// Host-defined assessment meaning, including agreement vs source correctness.
+    pub meaning: String,
 }
 /// Selected immutable attempt references, excluding private retry text and payloads.
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,6 +133,9 @@ pub struct Projection {
     pub schema: u32,
     /// Generation time, not durable event time.
     pub generated_unix_ms: u64,
+    /// Authoritative last durable event time; absent for ledgers without event timestamps.
+    #[serde(default)]
+    pub last_event_unix_ms: Option<u64>,
     /// Counts from one durable read snapshot.
     pub campaign: CampaignSnapshot,
     /// Bounded host-owned metric records.
@@ -134,8 +153,24 @@ impl Projection {
         if self.schema != 1
             || self.metrics.len() > 256
             || self.metrics.iter().any(|(k, m)| {
-                k.is_empty() || k.len() > 128 || m.meaning.is_empty() || m.meaning.len() > 128
+                k.is_empty()
+                    || k.len() > 128
+                    || m.meaning.is_empty()
+                    || m.meaning.len() > 128
+                    || m.denominator.as_ref().is_some_and(|d| {
+                        d.value == 0
+                            || m.value > d.value
+                            || d.split.is_empty()
+                            || d.split.len() > 128
+                            || d.meaning.is_empty()
+                            || d.meaning.len() > 128
+                            || d.assessment_sha256.len() != 64
+                            || !d.assessment_sha256.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
             })
+            || self
+                .last_event_unix_ms
+                .is_some_and(|time| time > self.generated_unix_ms)
             || self
                 .selected_attempt
                 .as_ref()
@@ -181,12 +216,14 @@ pub fn snapshot(
             unit: Unit::Jobs,
             meaning: "imported_jobs".into(),
             authority: Authority::Execution,
+            denominator: None,
         },
     )]);
     transaction.commit()?;
     let projection = Projection {
         schema: 1,
         generated_unix_ms,
+        last_event_unix_ms: None,
         campaign: durable,
         metrics,
         complete: None,
@@ -211,6 +248,7 @@ mod tests {
         assert_eq!(view.campaign.sequence, before);
         assert!(view.complete.is_none());
         assert!(view.live.is_none());
+        assert!(view.last_event_unix_ms.is_none());
         assert!(view.selected_attempt.is_none());
         assert_eq!(campaign.snapshot().unwrap().sequence, before);
         let bytes = view.to_json().unwrap();
@@ -221,6 +259,51 @@ mod tests {
         assert!(view.to_json().is_err());
         view.schema = 1;
         view.metrics.get_mut("jobs").unwrap().meaning = "x".repeat(129);
+        assert!(view.to_json().is_err());
+    }
+    /// Trace: FR-052-AC-6
+    #[test]
+    fn durable_freshness_and_quality_denominators_are_explicit_and_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let campaign = Campaign::open(dir.path(), true).unwrap();
+        let mut view = snapshot(&campaign, None, 100).unwrap();
+        let mut old: serde_json::Value = serde_json::from_slice(&view.to_json().unwrap()).unwrap();
+        old.as_object_mut().unwrap().remove("last_event_unix_ms");
+        old["metrics"]["jobs"]
+            .as_object_mut()
+            .unwrap()
+            .remove("denominator");
+        let legacy: Projection = serde_json::from_value(old).unwrap();
+        assert!(legacy.last_event_unix_ms.is_none());
+        assert!(legacy.metrics["jobs"].denominator.is_none());
+        view.last_event_unix_ms = Some(101);
+        assert!(view.to_json().is_err());
+        view.last_event_unix_ms = Some(90);
+        let metric = view.metrics.get_mut("jobs").unwrap();
+        metric.value = 2;
+        metric.target = Some(1000);
+        metric.denominator = Some(Denominator {
+            value: 3,
+            split: "frozen-dev".into(),
+            assessment_sha256: "a".repeat(64),
+            meaning: "source_reviewed_correctness".into(),
+        });
+        view.to_json().unwrap();
+        view.metrics
+            .get_mut("jobs")
+            .unwrap()
+            .denominator
+            .as_mut()
+            .unwrap()
+            .value = 1;
+        assert!(view.to_json().is_err());
+        view.metrics
+            .get_mut("jobs")
+            .unwrap()
+            .denominator
+            .as_mut()
+            .unwrap()
+            .value = 0;
         assert!(view.to_json().is_err());
     }
     /// Trace: FR-052-AC-6

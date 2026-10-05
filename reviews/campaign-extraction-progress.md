@@ -1,3 +1,12 @@
+# Current increment scope
+
+2026-10-04: per-request pure admission measurement and explicit lossless prompt
+framing are implemented, along with provider-independent typed invocation receipts
+and the dashboard freshness/assessment-denominator extensions. These are generic
+APIs; whole-classification answer-dependent planning remains downstream work and
+no inference launch is authorized by this increment. Historical receipts below
+retain their original scope and are not current completion counts.
+
 # Campaign extraction implementation evidence
 
 2026-10-04: specs FR-049–052 and IT-007, plus base/integrity/scope/dependency reviews
@@ -6,7 +15,7 @@ recording session, native graph runner and reference-only export are implemented
 The separate Ratatui crate is attached through snapshot/control callbacks. Existing
 ix-cli-kit Sapho CLI exposes campaign commands.
 
-Ten library tests and two end-to-end CLI tests pass. Clippy with warnings denied
+Fourteen library tests and two end-to-end CLI tests pass. Clippy with warnings denied
 passes for all three affected crates. No claim of completed EARS adaptation,
 verified migration, live generic replay or final formal review is made.
 
@@ -34,3 +43,16 @@ admission/dispatch extension hooks commit generic and domain transitions togethe
 fault injection proves rollback leaves no dispatch intent. EARS now delegates
 storage, exact recording sessions and TUI rendering; shared lifecycle conversion
 and owning-adapter migration remain unfinished. No completion handoff has been sent.
+
+2026-10-04 migration acceptance: shared snapshot migration now lets trusted
+adapters supply domain-only references from the same read transaction, validating
+all hashes before creating the destination. EARS pins d66c9c4 and implements
+explicit shared-v1 and legacy-v1 imports. Its 23 tests and strict Clippy pass;
+policy-history blobs, IDs, auxiliary roles, pause state and retry lineage survive.
+Unknown schema, queued controls and missing history refuse before output. The
+original synthetic smoke migrated successfully and replays the native full report
+byte-identically (SHA3f8e9c56971dadf62832979334c5f5d627d759632d74fb06925256172a97a24a).
+No campaign-newness or human-usefulness claim follows. Compiled adapter/runner
+integration, full acceptance coverage, actual TUI interaction, final review and
+completion handoff are still pending. Relay caller placement remains unverified;
+Redis and Draco watcher are healthy according to the actual doctor output.

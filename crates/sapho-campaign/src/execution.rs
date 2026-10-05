@@ -18,6 +18,7 @@ pub struct Session {
     /// Explicit wrapped backend registry passed to the native engine/evaluator.
     pub bindings: BackendRegistry,
     recordings: Vec<(BackendId, Arc<RecordingBackend>)>,
+    meters: Vec<Arc<crate::meter::Meter>>,
     max_bytes: usize,
 }
 impl Session {
@@ -35,12 +36,19 @@ impl Session {
         }
         let mut bindings = BackendRegistry::default();
         let mut recordings = Vec::new();
+        let mut meters = Vec::new();
         for id in required {
             let mut binding = registry
                 .get(id)
                 .map_err(|e| Error::new(ErrorCode::Invalid, e.to_string()))?;
+            let meter = Arc::new(crate::meter::Meter::new(
+                binding.backend,
+                max_bytes,
+                100_000,
+            )?);
+            meters.push(meter.clone());
             let recording = Arc::new(
-                RecordingBackend::new(binding.backend, max_bytes)
+                RecordingBackend::new(meter, max_bytes)
                     .map_err(|e| Error::new(ErrorCode::Invalid, e.to_string()))?,
             );
             binding.backend = recording.clone();
@@ -52,6 +60,7 @@ impl Session {
         Ok(Self {
             bindings,
             recordings,
+            meters,
             max_bytes,
         })
     }
@@ -59,6 +68,9 @@ impl Session {
     /// Call synchronously after await, including failed engine runs.
     pub fn capture(&self) -> Result<Vec<Capture>> {
         let mut captures = Vec::new();
+        for meter in &self.meters {
+            captures.extend(meter.capture()?);
+        }
         for (id, recording) in &self.recordings {
             let snapshot = recording.snapshot().and_then(|r| r.to_json(self.max_bytes));
             match snapshot {

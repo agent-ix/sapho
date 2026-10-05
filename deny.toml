@@ -81,3 +81,19 @@ allow = ["AGPL-3.0-or-later"]
 [[licenses.exceptions]]
 name = "sapho-systemone"
 allow = ["AGPL-3.0-or-later"]
+
+# New workspace-owned campaign/provider crates inherit Sapho's AGPL license.
+# Keep this restricted to these examined 0.1.0 packages; external dependency
+# licenses, advisory checks and the permissive allowlist above are unchanged.
+[[licenses.exceptions]]
+name = "sapho-campaign"
+version = "=0.1.0"
+allow = ["AGPL-3.0-or-later"]
+[[licenses.exceptions]]
+name = "sapho-campaign-tui"
+version = "=0.1.0"
+allow = ["AGPL-3.0-or-later"]
+[[licenses.exceptions]]
+name = "sapho-ollama"
+version = "=0.1.0"
+allow = ["AGPL-3.0-or-later"]
