@@ -31,6 +31,8 @@ pub async fn serial() -> MutexGuard<'static, ()> {
 #[derive(Clone)]
 pub struct Recorded {
     pub path: String,
+    /// Request line and headers as received.
+    pub head: String,
     pub body: Vec<u8>,
 }
 impl Recorded {
@@ -112,7 +114,11 @@ impl Fake {
                     if stream.read_exact(&mut body).await.is_err() {
                         return;
                     }
-                    let request = Recorded { path, body };
+                    let request = Recorded {
+                        path,
+                        head: text.clone(),
+                        body,
+                    };
                     log.lock().unwrap().push(request.clone());
                     let now = active.fetch_add(1, Ordering::SeqCst) + 1;
                     max.fetch_max(now, Ordering::SeqCst);

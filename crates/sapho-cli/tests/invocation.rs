@@ -200,7 +200,10 @@ impl ModelBackend for Scripted {
         Ok(ModelResponse {
             model: request.model.clone(),
             digest: None,
-            raw: None,
+            raw: Some(RawExchange {
+                request: serde_json::to_string(request).unwrap(),
+                response: format!("{{\"created_at\":\"call {index}\"}}"),
+            }),
             answers: request
                 .questions
                 .iter()
@@ -238,7 +241,7 @@ fn text_input(text: &str) -> Inputs {
         Datum::new("text", Value::Text(text.into())).unwrap(),
     )])
 }
-/// Trace: FR-034-AC-3, FR-035-AC-1, FR-035-AC-2, FR-035-AC-3, FR-037-AC-2, TC-035
+/// Trace: FR-034-AC-3, FR-035-AC-1, FR-035-AC-2, FR-035-AC-3, FR-035-AC-4, FR-037-AC-2, TC-035
 #[tokio::test]
 async fn scripted_multilayer_capture_replays_exactly_and_preserves_partial_failures() {
     let spec = multilayer();
@@ -331,8 +334,59 @@ async fn scripted_multilayer_capture_replays_exactly_and_preserves_partial_failu
         None,
     );
     assert!(replay.status.success());
+    let printed: serde_json::Value = serde_json::from_slice(&replay.stdout).unwrap();
     let replay: RunReport = serde_json::from_slice(&replay.stdout).unwrap();
     assert_eq!(replay, original);
+    // The replayed answer still carries the exchange recorded for it, byte for byte.
+    let recorded = &recording.exchanges[0].response.raw;
+    assert!(recorded.is_some());
+    let replayed: Vec<_> = printed["trace"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|n| n["model"]["response"]["raw"].as_object())
+        .collect();
+    assert_eq!(replayed.len(), 2);
+    assert_eq!(
+        serde_json::to_value(recorded).unwrap(),
+        serde_json::Value::Object(replayed[0].clone())
+    );
+}
+/// Trace: FR-046-AC-3, FR-006-AC-5
+#[test]
+fn error_objects_hold_code_message_and_context_only() {
+    let sentinel = "SENTINEL-BODY-2290";
+    let error = SaphoError::new(ErrorCode::TooLarge, "Prompt does not fit")
+        .with_context("context_tokens", "4096")
+        .with_raw(RawExchange {
+            request: sentinel.into(),
+            response: sentinel.into(),
+        })
+        .with_usage(sapho_core::ExtractUsage {
+            input_tokens: Some(1),
+            ..Default::default()
+        });
+    for written in [
+        serde_json::to_value(CliError::Engine(error.clone())).unwrap(),
+        serde_json::to_value(RunReport {
+            outputs: None,
+            trace: Default::default(),
+            error: Some(error.clone()),
+            exit: ExitStatus::Refused,
+        })
+        .unwrap(),
+    ] {
+        assert!(!written.to_string().contains(sentinel));
+    }
+    let object = serde_json::to_value(CliError::Engine(error.clone())).unwrap();
+    let members: std::collections::BTreeSet<_> = object["detail"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(members, ["code", "context", "message"].into());
+    assert!(!CliError::Engine(error).to_string().contains(sentinel));
 }
 /// Trace: FR-035-AC-1, FR-035-AC-2, FR-034-AC-2
 #[test]

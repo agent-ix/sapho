@@ -69,7 +69,8 @@ sapho-jev = { workspace = true, optional = true }
 sapho-clm = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "net", "io-util"] }
+sapho-ollama.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true

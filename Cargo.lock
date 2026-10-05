@@ -2129,6 +2129,7 @@ dependencies = [
  "sapho-core",
  "sapho-graph",
  "sapho-jev",
+ "sapho-ollama",
  "sapho-recording",
  "sapho-runtime",
  "serde",

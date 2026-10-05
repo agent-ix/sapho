@@ -75,7 +75,7 @@ FR-048-AC-1..5: the port, the single checked path, the refusals before calling t
 
 ### Outside this diff
 
-The public-repo naming rule is met in this diff. The base branch (spec PR #19) commits spec/reviews/sapho-75-spec-review-{criterion-strength,dependency,failure-domain,integrity,scope-boundary}.md, which name the private dataset repositories, and FR-052 names a host machine. These belong to PR #19, not this PR, and need a sweep before the stack lands on main.
+This diff contains no out-of-scope content. Out-of-scope wording in files from the base spec PR was reported to the team leader for that PR.
 
 ## Scope
 
@@ -93,3 +93,33 @@ The public-repo naming rule is met in this diff. The base branch (spec PR #19) c
 | IT-007 | spec/modules/ollama/integration/IT-007.md | examined |
 | TC-048 | spec/modules/core/test_cases/TC-048.md | examined |
 | FR-006 | spec/modules/core/functional/FR-006-define-replaceable-model-backend.md | context_only |
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+|---|---|---|---|
+| FND-009 | low | Spec: FR-054-AC-10's example does not exercise the pre-value rule it names, and its binder does not test it | spec/modules/ollama/functional/FR-054.md |
+| FND-010 | low | Spec: FR-054 does not state the question path's request_model_differs refusal, and its test is untagged | crates/sapho-ollama/tests/questions.rs:563 |
+
+### FND-009 (low, confidence high, trace)
+
+FR-054-AC-10 says a listed alternative ` "no`, next to a generated `yes` that starts exactly at the value start, is not attributed because "its bytes before the value start, ` "`, differ from the generated token's empty prefix". The answer position is offset 0 inside the generated token, so under the rule the alternative's bytes before the value start are also empty. It is excluded because its remaining bytes ` "no` are not a prefix of `no`, not by the pre-value rule. Its binder, candidates_with_other_prefix_bytes_or_running_past_the_value_end_are_not_attributed (questions.rs:552), still passes with the pre-value rule deleted (mutant M6). The rule is actually tested by an_alternative_with_different_bytes_before_the_value_is_not_attributed, which is tagged FR-054-AC-2. Fix: reword AC-10's example to a generated ` "yes` with a listed `:"no`, and tag that test FR-054-AC-10.
+
+### FND-010 (low, confidence high, coverage)
+
+`ModelBackend::infer` refuses a ModelRequest whose model differs from the binding's with `Config`/`request_model_differs`, and a_request_for_another_model_than_the_binding_is_refused_before_sending (questions.rs:563) tests that, but FR-054 does not state the refusal, and the test carries no Trace tag. FR-049-AC-6 covers only ExtractRequest on the Extractor port, so the question path is not covered by it. Judgment: a small spec gap, not acceptable as covered. Fix: add one sentence and a criterion to FR-054 (or widen FR-049-AC-6 to both ports), then tag the test.
+
+## Dispositions
+
+Round 1, reviewed at ce6b41f035492e7ef94d63fb2b8ed6fa7936ccaa (diff origin/spec/model-raw-and-sweep...HEAD; spec fixes at base ebab022c10835bb091a7b82a60b8073cfb75aa36). `quire matrix --strict` exits 0 with every in-scope criterion `tagged`, including FR-006-AC-4/5, FR-048-AC-6, FR-049-AC-6 and FR-054-AC-9/10.
+
+| FND | Outcome | sha/reason |
+|---|---|---|
+| FND-001 | fixed | ea98149: ModelResponse.raw and SaphoError.raw/usage; the From conversion keeps raw and usage; the question path returns raw: Some(generated.raw) and attaches raw and usage to every error; questions.rs:510 recomputes the Boolean probability from the retained bytes alone, and a logprobs_mismatch error carries the response bytes and usage; mutants M22, M23 and M24 fail |
+| FND-002 | fixed | ea98149: the schema-violation test is tagged FR-048-AC-2, IT-007-SC-02 |
+| FND-003 | fixed | ea98149: IT-007-SC-02 removed from the weights test; IT-007-SC-03 added at extraction.rs:165 and IT-007-SC-04 at extraction.rs:225 |
+| FND-004 | fixed | ce6b41f: the test is tagged FR-049-AC-6, which spec base ebab022 adds for request_model_differs |
+| FND-005 | fixed | ebab022 (base spec PR #21): FR-054-AC-9 and FR-006-AC-4/5 plus the raw carrier in FR-006, all bound to tests |
+| FND-006 | fixed | ebab022 (base spec PR #21): FR-048-AC-6 verification changed to Test; matrix status now tagged |
+| FND-007 | fixed | ebab022 (base spec PR #21): FR-054 states the pre-value and past-the-end rules and adds FR-054-AC-10 (see new FND-009 on its example) |
+| FND-008 | fixed | ebab022 (base spec PR #21): FR-049 now says the adapter returns the response bytes and the core parses them |

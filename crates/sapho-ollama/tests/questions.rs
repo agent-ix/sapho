@@ -467,7 +467,7 @@ async fn the_bound_falls_back_to_the_selected_mass_and_never_exceeds_it() {
 
 /// Trace: FR-054-AC-2
 #[tokio::test]
-async fn an_alternative_with_different_bytes_before_the_value_is_not_attributed() {
+async fn a_listed_alternative_with_other_structural_bytes_is_left_to_the_bound() {
     let _serial = serial().await;
     let tokens = vec![
         fill("{\"b\":"),
@@ -551,13 +551,17 @@ async fn the_response_retains_the_exact_exchange_and_error_paths_keep_it_too() {
 
 /// Trace: FR-054-AC-10
 #[tokio::test]
-async fn candidates_with_other_prefix_bytes_or_running_past_the_value_end_are_not_attributed() {
+async fn a_candidate_not_sharing_the_bytes_before_the_value_is_not_attributed() {
     let _serial = serial().await;
-    let alternatives = [("yes", -2.228), (" \"no", -1.0), ("no\"", -1.5)];
-    let fake = server(bool_reply(yes_tokens(&alternatives))).await;
+    let tokens = vec![
+        fill("{\"b\": "),
+        tok("\"y", -0.2, &[(" n", -2.0), ("\"x", -6.0)]),
+        fill("es\"}"),
+    ];
+    let fake = server(bool_reply(tokens)).await;
     let response = asked(&fake, vec![boolean("b")]).await.unwrap();
-    // `no` has no attributed token and takes the bound, so the answer is even.
-    assert!((boolean_p(&response, "b") - 0.5).abs() < 1e-12);
+    // ` n` is not attributed to `no`, which takes the bound exp(-6): 0.9970, not 0.8581.
+    assert!((boolean_p(&response, "b") - 0.9970).abs() < 1e-4);
 }
 
 #[tokio::test]
@@ -569,4 +573,31 @@ async fn a_request_for_another_model_than_the_binding_is_refused_before_sending(
     let error = binding(&fake, false).infer(&request).await.unwrap_err();
     assert_eq!(error.context["reason"], "request_model_differs");
     assert_eq!(fake.total(), 0);
+}
+
+/// Trace: FR-006-AC-6
+#[tokio::test]
+async fn a_header_credential_never_enters_the_raw_exchange() {
+    let _serial = serial().await;
+    let sentinel = "SENTINEL-BEARER-5521";
+    let fake = server(bool_reply(yes_tokens(&[]))).await;
+    let backend = OllamaBackend::new(
+        Server::new(&fake.url, limits())
+            .unwrap()
+            .with_header("Authorization", &format!("Bearer {sentinel}"))
+            .unwrap(),
+        settings(MODEL, false, 4096, 512),
+    )
+    .unwrap();
+    let response = backend
+        .infer(&ask(vec![boolean("b")], DistributionPolicy::Strict {}))
+        .await
+        .unwrap();
+    assert!(
+        fake.generates()[0].head.contains(sentinel),
+        "the double sends the header"
+    );
+    let serialized = serde_json::to_string(&response.raw).unwrap().to_lowercase();
+    assert!(!serialized.contains(&sentinel.to_lowercase()));
+    assert!(!serialized.contains("authorization"));
 }

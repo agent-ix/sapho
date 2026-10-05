@@ -185,8 +185,10 @@ impl Server {
         // A body that is not text cannot be held in a raw exchange, so only the elapsed
         // time is reported.
         let body = String::from_utf8(bytes).map_err(|_| {
-            let mut usage = ExtractUsage::default();
-            usage.elapsed_ms = u64::try_from(started.elapsed().as_millis()).ok();
+            let usage = ExtractUsage {
+                elapsed_ms: u64::try_from(started.elapsed().as_millis()).ok(),
+                ..ExtractUsage::default()
+            };
             failure(
                 ErrorCode::InvalidAnswer,
                 "malformed_response",

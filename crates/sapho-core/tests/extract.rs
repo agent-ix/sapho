@@ -258,13 +258,37 @@ async fn only_schema_keywords_are_references_not_property_names_or_data() {
 
 /// Trace: FR-006-AC-5
 #[test]
-fn errors_keep_the_exchange_and_usage_through_the_shared_error_type() {
+fn errors_keep_the_exchange_and_usage_in_fields_but_never_print_or_serialize_them() {
+    let sentinel = "SENTINEL-BODY-7731";
+    let planted = RawExchange {
+        request: format!("{{\"in\":\"{sentinel}\"}}"),
+        response: format!("{{\"out\":\"{sentinel}\"}}"),
+    };
+    let usage = completion("").usage;
     let error: SaphoError = too_large()
-        .with_raw(raw())
-        .with_usage(completion("").usage)
+        .with_raw(planted.clone())
+        .with_usage(usage.clone())
         .into();
-    assert_eq!(error.raw.as_deref(), Some(&raw()));
-    assert_eq!(error.usage.as_deref(), Some(&completion("").usage));
-    let json = serde_json::to_value(SaphoError::new(ErrorCode::Config, "x")).unwrap();
-    assert!(json.get("raw").is_none() && json.get("usage").is_none());
+    assert_eq!(error.raw.as_deref(), Some(&planted));
+    assert_eq!(error.usage.as_deref(), Some(&usage));
+    for text in [
+        error.to_string(),
+        format!("{error:?}"),
+        format!("{error:#?}"),
+        serde_json::to_string(&error).unwrap(),
+    ] {
+        assert!(!text.contains(sentinel), "{text}");
+    }
+    let json = serde_json::to_value(&error).unwrap();
+    let members: std::collections::BTreeSet<_> = json
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(members, ["code", "context", "message"].into());
+    let mut bare = error.clone();
+    bare.raw = None;
+    bare.usage = None;
+    assert_eq!(error, bare, "evidence is not part of an error's identity");
 }

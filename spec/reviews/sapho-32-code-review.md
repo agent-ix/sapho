@@ -67,7 +67,7 @@ backend.rs:267-269 raises `TooLarge` when `prompt_eval_count + num_predict > num
 - Integer conversions at the wire: counts and durations are `u64` end to end; `temperature` and `top_logprobs` are `u8` constants; no `as` casts on wire values.
 - Resource bounds: request ceiling checked before the permit; response read in chunks against the ceiling; JSON depth: a probe with 200,000 nested arrays in `response`, and in an ignored envelope member, returned `InvalidAnswer` with no stack overflow (serde_json keeps its default recursion limit; `unbounded_depth` only adds an opt-in method).
 - Dependencies: reqwest has `default-features = false` with `rustls-tls` and `stream` (no gzip, brotli or other compressed encodings); jsonschema has `default-features = false` (no HTTP or file resolution); `cargo tree -p sapho-core` shows no runtime, HTTP or file-access crate.
-- No deprecated items: no byte-as-token estimate, no pre-send size refusal other than the byte ceiling, no preflight certificates, no compressed encodings, nothing held between calls except the spec-mandated digest pin. No mention of private datasets or the campaign in this diff.
+- No deprecated items: no byte-as-token estimate, no pre-send size refusal other than the byte ceiling, no preflight certificates, no compressed encodings, nothing held between calls except the spec-mandated digest pin. No out-of-scope content in this diff.
 
 ### Coder decisions
 
@@ -97,3 +97,17 @@ backend.rs:267-269 raises `TooLarge` when `prompt_eval_count + num_predict > num
 | deny.toml | deny.toml | examined |
 | Cargo.toml | Cargo.toml | examined |
 | docs/api-reference.md | docs/api-reference.md | examined |
+
+## Dispositions
+
+Round 1, reviewed at ce6b41f035492e7ef94d63fb2b8ed6fa7936ccaa (diff origin/spec/model-raw-and-sweep...HEAD). Each outcome was checked by re-running the mutation script at that head (rv20-mut/results.txt): all 21 mutants are killed.
+
+| FND | Outcome | sha/reason |
+|---|---|---|
+| FND-001 | fixed | ea98149: the fakes delay their /api/show reply 60 ms (extraction.rs tagged(), embedding.rs:122), so mutant M3 now fails both serialization tests |
+| FND-002 | fixed | ea98149: Reply::Chunked plus the_response_ceiling_holds_for_a_chunked_body_with_no_content_length; mutant M9 now fails |
+| FND-003 | fixed | ea98149: the_bound_falls_back_to_the_selected_mass_and_never_exceeds_it (empty alternatives, and a listed alternative above the selected token); mutant M12 now fails |
+| FND-004 | fixed | ea98149: an_alternative_with_different_bytes_before_the_value_is_not_attributed; mutant M6 now fails; the rule is in FR-054 at base ebab022 |
+| FND-005 | fixed | ea98149: a_prompt_filling_the_context_exactly_fits_and_one_token_more_does_not (800 fits, 801 TooLarge); mutant M20 now fails |
+| FND-006 | fixed | ea98149: has_foreign_ref walks only subschema keywords; a property named $ref and $ref under const/enum/default are accepted, while a foreign $ref under properties/items/anyOf is still refused; mutants M25 and M26 fail |
+| FND-007 | fixed | ea98149: Allowed::new takes literal[1..len-1]; a_label_ending_in_a_quote_is_matched_by_its_escaped_form; mutant M21 now fails |

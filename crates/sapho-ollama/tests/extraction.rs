@@ -689,3 +689,26 @@ async fn the_response_ceiling_holds_for_a_chunked_body_with_no_content_length() 
     assert_eq!(error.code, ErrorCode::LimitExceeded);
     assert_eq!(error.reason, Some("response_too_large"));
 }
+
+/// Trace: FR-048-AC-7, FR-052-AC-2
+#[tokio::test]
+async fn a_body_that_is_not_utf8_has_no_raw_exchange_and_only_elapsed_usage() {
+    let _serial = serial().await;
+    let fake = Fake::start(|r| match r.path.as_str() {
+        "/api/show" => description(BLOB),
+        _ => Reply::Status(200, vec![b'{', 0xff, 0xfe, b'}']),
+    })
+    .await;
+    let error = failing(&fake, "item").await;
+    assert_eq!(
+        (error.code, error.reason),
+        (ErrorCode::InvalidAnswer, Some("malformed_response"))
+    );
+    assert!(error.raw.is_none());
+    let usage = error.usage.as_deref().unwrap();
+    assert!(usage.elapsed_ms.is_some());
+    assert_eq!(
+        (usage.input_tokens, usage.output_tokens, usage.load_ms),
+        (None, None, None)
+    );
+}
