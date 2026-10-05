@@ -431,7 +431,7 @@ fn labelled() -> Dataset {
         ],
     }
 }
-/// Trace: FR-036-AC-1, FR-036-AC-2, FR-036-AC-3, FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, FR-038-AC-1, FR-038-AC-2, FR-038-AC-3
+/// Trace: FR-036-AC-1, FR-036-AC-2, FR-036-AC-3, FR-036-AC-5, FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, FR-038-AC-1, FR-038-AC-2, FR-038-AC-3
 #[tokio::test]
 async fn real_measure_tune_export_use_selected_labels_and_never_evaluate_heldout_in_tune() {
     let root = tempfile::tempdir().unwrap();
@@ -590,6 +590,42 @@ async fn real_measure_tune_export_use_selected_labels_and_never_evaluate_heldout
         Some(2)
     );
     assert_eq!(std::fs::read(exported).unwrap(), preserved);
+    let mut own = labelled();
+    own.cases[0].label_provenance = LabelProvenance {
+        kind: LabelKind::Model,
+        source: "synthetic".into(),
+        model_digest: None,
+        reference: "own earlier answer".into(),
+    };
+    std::fs::write(&dataset, serde_json::to_vec(&own).unwrap()).unwrap();
+    let own = cli(
+        &[
+            "measure",
+            path(&graph),
+            "--dataset",
+            path(&dataset),
+            "--split",
+            "development",
+            "--replay",
+            path(&saved),
+        ],
+        None,
+    );
+    assert!(
+        own.status.success(),
+        "a self-sourced case alone does not exit 2"
+    );
+    let own = result(&own);
+    assert_eq!(
+        own["measurement"]["self_source"],
+        serde_json::json!(["development"])
+    );
+    assert!(
+        own["measurement"]["outputs"]
+            .as_object()
+            .unwrap()
+            .is_empty()
+    );
 }
 /// Trace: NFR-005-M-3, FR-041-AC-3, FR-034-AC-1, FR-035-AC-3
 #[test]

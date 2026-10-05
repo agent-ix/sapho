@@ -308,6 +308,27 @@ an SDK SystemOneRequest, translating Boolean, Choice and Score criteria and
 plain record state without source sidecars. It performs no transport. Jev
 also re-exports this function. `CLM_DEFAULT_MODEL` is the codec's shared alias.
 
+**Ollama:** depend on `sapho-ollama` (not part of the facade).
+`Server::new(base_url, Limits)` prepares one endpoint; `DEFAULT_BASE_URL` is
+loopback port 11434 and `Limits` default to 600 seconds, 4 MiB requests and
+16 MiB responses. At most one request is in flight in the process, across every
+binding and embedder; the timeout covers waiting for that permit. URLs with a
+scheme other than http(s), userinfo, a query or a fragment refuse, and neither
+retries nor redirects happen. `OllamaBackend::new(server, Settings {model, think,
+num_ctx, num_predict})` is one model binding; it refuses a zero limit or
+`num_predict >= num_ctx`. It implements `Extractor` (call it through
+`sapho_core::extract`, which checks the request and validates the answer
+against its JSON Schema) and `ModelBackend` (one request per question block,
+with probabilities derived from the answer tokens' log-probabilities; needs
+`think: false`, at most ten Score levels, and answer values that begin with
+different bytes). Prompts are never shortened: the server counts tokens, and a
+prompt that does not fit is `TooLarge` with the counts. Every response carries
+the weights digest read from `/api/show` before the call. `OllamaEmbedder`
+calls `/api/embed` through the same permit. `ScriptedExtractor` in core is the
+test double for hosts that depend on `Extractor`. The
+[live check](../crates/sapho-ollama/examples/live_smoke.rs) is run on demand
+and is not part of the default tests.
+
 ## CLI embedding APIs
 
 Use `sapho-cli` when your Rust host needs stock reporting and exit policy:
