@@ -131,3 +131,12 @@ Round 1, reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
 |-----|---------|------------|
 | FND-001 | fixed | 809dc3b: Half 1 now isolates the before-value-start rule: generated `"y` (prefix `"`), alternative ` n` (prefix ` `, then `n`): with the rule it is ignored and `no` takes b; without it `n` is a prefix of `no`, so m(no)=p(' n'). The probabilities differ provided ` n` is not itself the lowest listed alternative (see new MED SR-047 FND-003 for the second half). |
 | FND-002 | fixed | 809dc3b: AC-9 recomputes from the raw exchange alone, request body for allowed values and types, response body for tokens. |
+
+## Dispositions (round 2)
+
+Round 2, reviewed at agent-ix/sapho@02779a8319a7e971603b44d01a645ad80a029cac.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-003 | fixed | 02779a8: The redundant past-the-end bullet is deleted and AC-10 tests the one remaining rule with a fixture that separates it. Hand computation: m(yes)=e^-0.2=0.81873; with the rule ` n` is ignored, the lowest listed alternative is `"x` (e^-6=0.0024788), b=min(0.0024788, 0.81873), P(yes)=0.81873/0.82121=0.99698; without the rule m(no)=e^-2=0.13534, P(yes)=0.85815. Both match the AC (0.9970, 0.8581) and differ. `"x` is not attributed (`x` is no prefix of yes or no). |
+| FND-004 | fixed | 02779a8: TC-006 names a loopback Ollama binding whose test transport adds `Authorization: Bearer <sentinel>` and keeps the raw exchange; FR-006-AC-6, FR-017-AC-4, FR-027-AC-5 and FR-035-AC-4 are bound to it, so a raw exchange that copied headers would fail them. |

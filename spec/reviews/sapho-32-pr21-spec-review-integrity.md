@@ -95,3 +95,11 @@ Round 1, reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
 |-----|---------|------------|
 | FND-001 | fixed | 809dc3b: FR-035, FR-027 and FR-017 now say recordings and traces keep the raw exchange (body text only) and that it counts toward FR-027's ceiling; FR-035-AC-4, FR-027-AC-4/5, FR-017-AC-4 test it. Repo grep: the old 'raw HTTP bodies ... are not new fields' wording survives only as a quotation in review artifacts, and no requirement says recordings drop the raw exchange. FR-027-AC-4 is constructible (ceiling = size without raw + 1). |
 | FND-002 | fixed | 809dc3b: Scoped to backends that retain the exchange; bytes only in typed fields; FR-044 now restricts messages and Display; FR-046 restricts every CLI error object to code, reason, message and context fields (AC-3 with a planted sentinel). Refusal envelopes still carry partial trace evidence, which by FR-017 holds the raw exchange; that is trace evidence, not the error object, and is consistent with FR-006. |
+
+## Dispositions (round 2)
+
+Round 2, reviewed at agent-ix/sapho@02779a8319a7e971603b44d01a645ad80a029cac.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-003 | fixed | 02779a8: The raw exchange is excluded from the deterministic trace comparison, with the reason; FR-017-AC-5 tests equal traces for timing-only body differences and unequal traces for a different answer. |

@@ -105,7 +105,7 @@ Reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
 
 Unit: spec/reviews/sapho-75-spec-review.md at spec/reviews/sapho-75-spec-review.md:98. Related: SR-044 FND-001.
 
-> Projection v1, Python, <private campaign tool name redacted>), no task-log wording, and no Sapho reference to the downstream dataset consumer.
+> the retired dashboard snapshot, Python, <private campaign tool name redacted>), no task-log wording, and no Sapho reference to the downstream dataset consumer.
 
 BLOCKER (public repo): sapho-75-spec-review.md:98 still names the retired private campaign tool. The list of deprecated items in the bundle-validation paragraph ends with the retired private campaign tool's own name; the sweep's grep list did not include it. Widened whole-repo grep at 809dc3b (`campaign`, `ears`, `ears-`, `dataset consumer`, `downstream`) finds no other private name: every other `EARS`/`ears` hit is the public requirement grammar (spec.md:23/106, IT-002, the 26-09-30 review, the `ears-conformance` analysis type, quire's `ears:non-singular` check name), and `downstream` hits are generic. Names-only fix: replace the tool name with 'the retired campaign tool' or drop it from the list. (This review redacts the name in its own excerpt, so the artifact does not repeat the leak.)
 
@@ -117,3 +117,28 @@ Round 1, reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
 | FND | outcome | sha/reason |
 |-----|---------|------------|
 | FND-001 | fixed | 809dc3b: The 'ticket/<number>' fragment is gone ('the tickets that build it'), and the merged attribution is split into the consumers' FR-004, FR-008 (pipeline) and FR-007, FR-009 (question stages). Word diff shows names and grammar only; meanings kept. |
+
+## New findings (disposition pass 2)
+
+Reviewed at agent-ix/sapho@02779a8319a7e971603b44d01a645ad80a029cac.
+
+| ID | Severity | Summary | Refs |
+|----|----------|---------|------|
+| FND-003 | medium | BLOCKER (public repo): sapho-75-spec-review.md:98 still names the retired private campaign's dashboard snapshot | spec/reviews/sapho-75-spec-review.md:98 |
+
+### FND-003 (medium, confidence high, other, blocking)
+
+Unit: spec/reviews/sapho-75-spec-review.md at spec/reviews/sapho-75-spec-review.md:98. Related: SR-044 FND-002.
+
+> Python, the retired campaign tool), no task-log wording, and no Sapho reference to the downstream dataset consumer.
+
+BLOCKER (public repo): sapho-75-spec-review.md:98 still names the retired private campaign's dashboard snapshot. The deprecated-items list on line 98 still names the old campaign's dashboard snapshot by its private name. That name first entered the public repository through this review artifact (commit 9876a4a) and was never part of public Sapho, so it is a private-campaign trace. Names-only fix: 'the retired dashboard snapshot'. This review's own excerpt and SR-044 line 108 are redacted the same way in the reissued scratchpad copy.
+
+
+## Dispositions (round 2)
+
+Round 2, reviewed at agent-ix/sapho@02779a8319a7e971603b44d01a645ad80a029cac.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-002 | fixed | 02779a8: Line 98 now reads 'the retired campaign tool'; the whole-repo grep finds no private tool or repository name except the dashboard-snapshot name recorded as FND-003. |

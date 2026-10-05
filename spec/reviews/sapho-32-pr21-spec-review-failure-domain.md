@@ -85,3 +85,11 @@ Round 1, reviewed at agent-ix/sapho@809dc3bab03c5d8e6d488f92da0f7bfeb669891b.
 | FND | outcome | sha/reason |
 |-----|---------|------------|
 | FND-001 | fixed | 809dc3b: RawExchange is body bytes only, never headers, URLs or credentials (FR-048, FR-006, FR-027, FR-035, FR-052); FR-006-AC-6 and FR-027-AC-5 add header-sentinel tests (see new LOW SR-047 FND-004 on their reach). |
+
+## Dispositions (round 2)
+
+Round 2, reviewed at agent-ix/sapho@02779a8319a7e971603b44d01a645ad80a029cac.
+
+| FND | outcome | sha/reason |
+|-----|---------|------------|
+| FND-002 | fixed | 02779a8: FR-052 states the one exception (malformed_response, no raw exchange, usage with elapsed time only), aligned with FR-048 and FR-048-AC-7. |
