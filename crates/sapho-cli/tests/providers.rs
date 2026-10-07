@@ -525,12 +525,20 @@ fn ollama_binding_loads_with_the_cli_defaults_and_refuses_unknown_members_and_pr
     assert!(format!("{error:?}").contains("foo"), "{error:?}");
     // The generation members belong to this provider alone.
     for provider in ["jev", "clm"] {
-        assert!(
-            parse(&format!(
-                "judge: {{provider: {provider}, model: m, num_ctx: 4096, distribution_policy: {{kind: strict}}}}"
-            ))
-            .is_err()
-        );
+        for member in [
+            "think: true",
+            "num_ctx: 4096",
+            "num_predict: 8",
+            "timeout_seconds: 5",
+        ] {
+            assert!(
+                parse(&format!(
+                    "judge: {{provider: {provider}, model: m, {member}, distribution_policy: {{kind: strict}}}}"
+                ))
+                .is_err(),
+                "{provider} {member}"
+            );
+        }
     }
     // The model is required, and is not defaulted as it is for CLM.
     assert!(parse("judge: {provider: ollama, distribution_policy: {kind: strict}}").is_err());

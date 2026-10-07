@@ -231,10 +231,15 @@ pub fn live_bindings(
     }
     Ok(registry)
 }
-/// The Ollama server URL: the `OLLAMA_BASE_URL` value when set, else the loopback default.
+/// The Ollama server URL: the `OLLAMA_BASE_URL` value when set and nonempty, else the
+/// loopback default. An empty value counts as unset.
 #[cfg(feature = "ollama")]
 pub fn ollama_base_url(environment: Option<String>) -> String {
-    crate::resolve_endpoint(None, environment, sapho_ollama::DEFAULT_BASE_URL)
+    crate::resolve_endpoint(
+        None,
+        environment.filter(|value| !value.is_empty()),
+        sapho_ollama::DEFAULT_BASE_URL,
+    )
 }
 /// Build the Ollama backend for one required binding; no credential or secret store is used.
 #[cfg(feature = "ollama")]

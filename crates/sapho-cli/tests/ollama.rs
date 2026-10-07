@@ -3,6 +3,7 @@
 //! The `ollama` provider through the real executable against a loopback double of the server.
 #![cfg(feature = "ollama")]
 use sapho_cli::*;
+use sapho_graph::parse_config;
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -252,6 +253,24 @@ fn the_endpoint_is_the_environment_value_or_the_loopback_default() {
         ollama_base_url(Some("http://example.invalid:9".into())),
         "http://example.invalid:9"
     );
+}
+
+/// Trace: FR-055-AC-6
+#[test]
+fn an_empty_endpoint_variable_counts_as_unset_and_a_live_binding_builds_without_one() {
+    assert_eq!(
+        ollama_base_url(Some(String::new())),
+        "http://127.0.0.1:11434"
+    );
+    // Construction sends nothing, so the live path with the variable unset can be built here.
+    if std::env::var_os("OLLAMA_BASE_URL").is_none() {
+        let bindings = parse_config::<Bindings>(
+            &format!("judge: {{provider: ollama, model: m, {STRICT}}}"),
+            sapho_graph::GraphFormat::Yaml,
+        )
+        .unwrap();
+        live_bindings(&[sapho_core::BackendId::new("judge").unwrap()], &bindings).unwrap();
+    }
 }
 
 /// Trace: FR-055-AC-2, FR-055-AC-3, FR-055-AC-6, FR-045-AC-4
