@@ -194,6 +194,28 @@ impl ArtifactWriter {
             })
     }
 }
+impl ArtifactWriter {
+    /// Persist one JSON document by streaming it, so that a large report is never also held
+    /// as one serialized buffer. The size is measured first, and a document above the ceiling
+    /// is refused before anything is written.
+    pub fn finish_json<T: serde::Serialize>(
+        mut self,
+        value: &T,
+        max_bytes: usize,
+    ) -> Result<(), CliError> {
+        sapho_core::measured_json_bytes(value, max_bytes)?;
+        let path = self.path.clone();
+        let io_error = |source| CliError::Io {
+            path: path.clone(),
+            source,
+        };
+        let mut sink = std::io::BufWriter::new(&mut self.file);
+        serde_json::to_writer(&mut sink, value).map_err(|e| io_error(e.into()))?;
+        sink.flush().map_err(io_error)?;
+        drop(sink);
+        self.file.sync_all().map_err(io_error)
+    }
+}
 /// Exclusive explicit artifact write; an existing destination is preserved.
 pub fn write_new(path: &Path, bytes: &[u8], max_bytes: usize) -> Result<(), CliError> {
     ArtifactWriter::create(path)?.finish(bytes, max_bytes)

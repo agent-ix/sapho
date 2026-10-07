@@ -5,7 +5,7 @@ use crate::CliError;
 use sapho_core::{
     BackendBinding, BackendId, BackendRegistry, DistributionPolicy, ErrorCode, SaphoError,
 };
-use sapho_recording::{Recording, RecordingBackend, ReplayBackend};
+use sapho_recording::{Exchange, Recording, RecordingBackend, ReplayBackend};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -87,23 +87,20 @@ pub fn recording_bindings(
     }
     Ok((registry, recorders))
 }
-/// Infer unique model/policy identity; provider selection has no meaning for ReplayBackend.
-pub fn replay_bindings(
-    recording: &Recording,
-    explicit: Option<&Bindings>,
-    max_bytes: usize,
-) -> Result<BackendRegistry, CliError> {
-    let backend = Arc::new(ReplayBackend::new(recording, max_bytes)?);
-    let mut identities: BTreeMap<BackendId, (String, Option<String>, DistributionPolicy)> =
-        BTreeMap::new();
-    for exchange in &recording.exchanges {
+/// The model, strict expectation and policy each backend name was recorded with.
+#[derive(Default)]
+struct Identities(BTreeMap<BackendId, (String, Option<String>, DistributionPolicy)>);
+impl Identities {
+    /// Record one exchange's identity; a backend recorded with two identities is refused.
+    fn observe(&mut self, exchange: &Exchange) -> Result<(), SaphoError> {
         let request = &exchange.request;
         let identity = (
             request.model.clone(),
             request.expected_model.clone(),
             request.distribution_policy,
         );
-        if identities
+        if self
+            .0
             .get(&request.backend)
             .is_some_and(|previous| previous != &identity)
         {
@@ -111,45 +108,77 @@ pub fn replay_bindings(
                 ErrorCode::RecordingMismatch,
                 "Conflicting recorded binding identities",
             )
-            .with_context("backend", request.backend.to_string())
-            .into());
+            .with_context("backend", request.backend.to_string()));
         }
-        identities.insert(request.backend.clone(), identity);
+        self.0.insert(request.backend.clone(), identity);
+        Ok(())
     }
-    if let Some(explicit) = explicit {
-        for (id, config) in explicit {
-            let identity = (
-                config.model.clone(),
-                config.expected_model.clone(),
-                config.distribution_policy,
-            );
-            if identities
-                .get(id)
-                .is_some_and(|previous| previous != &identity)
-            {
-                return Err(SaphoError::new(
-                    ErrorCode::RecordingMismatch,
-                    "Explicit metadata differs from recording",
-                )
-                .with_context("backend", id.to_string())
-                .into());
+    /// Check explicit metadata against what was recorded and bind every identity to `backend`.
+    fn registry(
+        mut self,
+        backend: Arc<ReplayBackend>,
+        explicit: Option<&Bindings>,
+    ) -> Result<BackendRegistry, CliError> {
+        if let Some(explicit) = explicit {
+            for (id, config) in explicit {
+                let identity = (
+                    config.model.clone(),
+                    config.expected_model.clone(),
+                    config.distribution_policy,
+                );
+                if self.0.get(id).is_some_and(|previous| previous != &identity) {
+                    return Err(SaphoError::new(
+                        ErrorCode::RecordingMismatch,
+                        "Explicit metadata differs from recording",
+                    )
+                    .with_context("backend", id.to_string())
+                    .into());
+                }
+                self.0.insert(id.clone(), identity);
             }
-            identities.insert(id.clone(), identity);
         }
+        let mut registry = BackendRegistry::default();
+        for (id, (model, expected_model, distribution_policy)) in self.0 {
+            registry.register(
+                id,
+                BackendBinding {
+                    backend: backend.clone(),
+                    model,
+                    expected_model,
+                    distribution_policy,
+                },
+            )?;
+        }
+        Ok(registry)
     }
-    let mut registry = BackendRegistry::default();
-    for (id, (model, expected_model, distribution_policy)) in identities {
-        registry.register(
-            id,
-            BackendBinding {
-                backend: backend.clone(),
-                model,
-                expected_model,
-                distribution_policy,
-            },
-        )?;
+}
+/// Infer unique model/policy identity; provider selection has no meaning for ReplayBackend.
+pub fn replay_bindings(
+    recording: &Recording,
+    explicit: Option<&Bindings>,
+    max_bytes: usize,
+) -> Result<BackendRegistry, CliError> {
+    let backend = Arc::new(ReplayBackend::new(recording, max_bytes)?);
+    let mut identities = Identities::default();
+    for exchange in &recording.exchanges {
+        identities.observe(exchange)?;
     }
-    Ok(registry)
+    identities.registry(backend, explicit)
+}
+/// As [`replay_bindings`], reading the recording's JSON directly into the replay index so
+/// that a recording of many exchanges is never also held as a typed [`Recording`].
+pub fn replay_bindings_json(
+    recording: &[u8],
+    explicit: Option<&Bindings>,
+    max_bytes: usize,
+) -> Result<BackendRegistry, CliError> {
+    let mut identities = Identities::default();
+    let backend = Arc::new(ReplayBackend::from_json(
+        recording,
+        max_bytes,
+        |exchange| identities.observe(exchange),
+    )?);
+    identities.registry(backend, explicit)
 }
 impl<'de> Deserialize<'de> for BindingConfig {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {

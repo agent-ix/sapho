@@ -185,48 +185,219 @@ impl ModelBackend for RecordingBackend {
 }
 /// Offline backend with no live delegate, credential lookup or transport path.
 pub struct ReplayBackend {
-    exchanges: BTreeMap<Vec<u8>, ModelResponse>,
+    exchanges: BTreeMap<Fingerprint, Vec<u8>>,
     max_bytes: usize,
+}
+/// SHA-256 of a request's canonical JSON; the index never holds the requests themselves.
+type Fingerprint = [u8; 32];
+fn fingerprint(request: &ModelRequest, max_bytes: usize) -> Result<Fingerprint> {
+    use sha2::{Digest, Sha256};
+    Ok(Sha256::digest(bounded_json(request, max_bytes)?).into())
+}
+fn stored(response: &ModelResponse, max_bytes: usize) -> Result<Vec<u8>> {
+    bounded_json(response, max_bytes)
+}
+fn restored(bytes: &[u8]) -> Result<ModelResponse> {
+    serde_json::from_slice(bytes).map_err(|_| {
+        SaphoError::new(
+            ErrorCode::RecordingMismatch,
+            "Recorded response is unreadable",
+        )
+    })
 }
 impl ReplayBackend {
     /// Validate and index recorded requests; conflicting duplicate responses refuse loading.
     pub fn new(recording: &Recording, max_bytes: usize) -> Result<Self> {
         recording.validate()?;
         measured_json_bytes(recording, max_bytes)?;
-        let mut exchanges = BTreeMap::new();
+        let mut index = Index::new(max_bytes, true);
         for exchange in &recording.exchanges {
-            let key = bounded_json(&exchange.request, max_bytes)?;
-            if let Some(previous) = exchanges.get(&key) {
-                // Provider bodies differ between identical requests (timestamps, durations),
-                // so the retained raw exchange is not part of the answer being compared.
-                let bare = |r: &ModelResponse| ModelResponse {
-                    raw: None,
-                    ..r.clone()
-                };
-                if bare(previous) != bare(&exchange.response) {
-                    return Err(SaphoError::new(
-                        ErrorCode::RecordingMismatch,
-                        "Conflicting response for identical request",
-                    ));
-                }
+            index.insert(exchange)?;
+        }
+        Ok(index.finish())
+    }
+    /// Load a recording straight into the replay index, one exchange at a time.
+    ///
+    /// The result is the same as [`Recording::from_json`] followed by [`ReplayBackend::new`],
+    /// without ever holding the whole typed [`Recording`], so a recording of many exchanges
+    /// costs memory for its index only. `each` sees every exchange as it is read, which lets a
+    /// caller infer binding identities without a second pass.
+    pub fn from_json(
+        bytes: &[u8],
+        max_bytes: usize,
+        each: impl FnMut(&Exchange) -> Result<()>,
+    ) -> Result<Self> {
+        load(bytes, max_bytes, each, true).map(Index::finish)
+    }
+    /// Check that a recording is well formed and that every exchange is valid, exactly as
+    /// [`Recording::from_json`] does, without indexing anything. Conflicts between exchanges
+    /// are the indexing step's refusals and are not found here.
+    pub fn check_json(bytes: &[u8], max_bytes: usize) -> Result<()> {
+        load(bytes, max_bytes, |_| Ok(()), false).map(|_| ())
+    }
+}
+fn load(
+    bytes: &[u8],
+    max_bytes: usize,
+    mut each: impl FnMut(&Exchange) -> Result<()>,
+    indexed: bool,
+) -> Result<Index> {
+    {
+        if bytes.len() > max_bytes {
+            return Err(limit("Recording exceeds byte ceiling"));
+        }
+        let mismatch = |e: SaphoError| {
+            if e.code == ErrorCode::Config {
+                SaphoError::new(ErrorCode::RecordingMismatch, e.message)
             } else {
-                exchanges.insert(key, exchange.response.clone());
+                e
+            }
+        };
+        // Depth, duplicate keys and malformed JSON are refused exactly as `from_json` does.
+        sapho_core::decode_json::<serde::de::IgnoredAny>(bytes, max_bytes).map_err(mismatch)?;
+        let mut decoder = serde_json::Deserializer::from_slice(bytes);
+        decoder.disable_recursion_limit();
+        let failure = std::cell::RefCell::new(None);
+        let loaded = serde::de::Deserializer::deserialize_struct(
+            &mut decoder,
+            "Recording",
+            &["exchanges"],
+            Load {
+                index: std::cell::RefCell::new(Index::new(max_bytes, indexed)),
+                each: std::cell::RefCell::new(&mut each),
+                failure: &failure,
+            },
+        );
+        if let Some(error) = failure.into_inner() {
+            return Err(error);
+        }
+        loaded
+            .and_then(|index| decoder.end().map(|()| index))
+            .map_err(|e| mismatch(SaphoError::new(ErrorCode::Config, e.to_string())))
+    }
+}
+/// The request-keyed answers of a recording while it is being read.
+struct Index {
+    exchanges: BTreeMap<Fingerprint, Vec<u8>>,
+    max_bytes: usize,
+    /// Whether exchanges are indexed; a check only validates them.
+    indexed: bool,
+}
+impl Index {
+    fn new(max_bytes: usize, indexed: bool) -> Self {
+        Self {
+            exchanges: BTreeMap::new(),
+            max_bytes,
+            indexed,
+        }
+    }
+    fn insert(&mut self, exchange: &Exchange) -> Result<()> {
+        if !self.indexed {
+            return Ok(());
+        }
+        let key = fingerprint(&exchange.request, self.max_bytes)?;
+        if let Some(previous) = self.exchanges.get(&key) {
+            // Provider bodies differ between identical requests (timestamps, durations),
+            // so the retained raw exchange is not part of the answer being compared.
+            let bare = |r: &ModelResponse| ModelResponse {
+                raw: None,
+                ..r.clone()
+            };
+            if bare(&restored(previous)?) != bare(&exchange.response) {
+                return Err(SaphoError::new(
+                    ErrorCode::RecordingMismatch,
+                    "Conflicting response for identical request",
+                ));
+            }
+        } else {
+            self.exchanges
+                .insert(key, stored(&exchange.response, self.max_bytes)?);
+        }
+        Ok(())
+    }
+    fn finish(self) -> ReplayBackend {
+        ReplayBackend {
+            exchanges: self.exchanges,
+            max_bytes: self.max_bytes,
+        }
+    }
+}
+/// Reads the one `exchanges` member of a recording, indexing each exchange as it arrives.
+struct Load<'a, F> {
+    index: std::cell::RefCell<Index>,
+    each: std::cell::RefCell<&'a mut F>,
+    failure: &'a std::cell::RefCell<Option<SaphoError>>,
+}
+impl<'de, F: FnMut(&Exchange) -> Result<()>> serde::de::Visitor<'de> for Load<'_, F> {
+    type Value = Index;
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a recording")
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(
+        self,
+        mut map: A,
+    ) -> std::result::Result<Index, A::Error> {
+        let mut seen = false;
+        while let Some(key) = map.next_key::<String>()? {
+            if key != "exchanges" {
+                return Err(serde::de::Error::unknown_field(&key, &["exchanges"]));
+            }
+            seen = true;
+            map.next_value_seed(Exchanges(&self))?;
+        }
+        if !seen {
+            return Err(serde::de::Error::missing_field("exchanges"));
+        }
+        Ok(self.index.into_inner())
+    }
+}
+struct Exchanges<'a, 'b, F>(&'a Load<'b, F>);
+impl<'de, F: FnMut(&Exchange) -> Result<()>> serde::de::DeserializeSeed<'de>
+    for Exchanges<'_, '_, F>
+{
+    type Value = ();
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        decoder: D,
+    ) -> std::result::Result<(), D::Error> {
+        decoder.deserialize_seq(self)
+    }
+}
+impl<'de, F: FnMut(&Exchange) -> Result<()>> serde::de::Visitor<'de> for Exchanges<'_, '_, F> {
+    type Value = ();
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a sequence of exchanges")
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(
+        self,
+        mut seq: A,
+    ) -> std::result::Result<(), A::Error> {
+        while let Some(exchange) = seq.next_element::<Exchange>()? {
+            let outcome = validate_response(&exchange.request, &exchange.response)
+                .map(|_| ())
+                .map_err(|e| {
+                    SaphoError::new(ErrorCode::RecordingMismatch, "Invalid recorded exchange")
+                        .with_context("cause", format!("{:?}", e.code))
+                })
+                .and_then(|()| (self.0.each.borrow_mut())(&exchange))
+                .and_then(|()| self.0.index.borrow_mut().insert(&exchange));
+            if let Err(error) = outcome {
+                *self.0.failure.borrow_mut() = Some(error);
+                return Err(serde::de::Error::custom("Recording refused"));
             }
         }
-        Ok(Self {
-            exchanges,
-            max_bytes,
-        })
+        Ok(())
     }
 }
 #[async_trait]
 impl ModelBackend for ReplayBackend {
     async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse> {
         request.validate()?;
-        let key = bounded_json(request, self.max_bytes)?;
-        self.exchanges.get(&key).cloned().ok_or_else(|| {
+        let key = fingerprint(request, self.max_bytes)?;
+        let recorded = self.exchanges.get(&key).ok_or_else(|| {
             SaphoError::new(ErrorCode::ReplayMiss, "No exact recorded request matches")
-        })
+        })?;
+        restored(recorded)
     }
 }
 fn limit(message: &str) -> SaphoError {

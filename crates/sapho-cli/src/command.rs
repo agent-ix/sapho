@@ -5,36 +5,66 @@ use crate::args::*;
 use sapho_cli::{
     ArtifactWriter, Bindings, CliError, ExitStatus, GraphArtifact, RunReport, Runner, inspect,
     live_bindings, load_graph, plain_inputs, read_bytes, read_bytes_with_timeout,
-    recording_bindings, replay_bindings, select_format,
+    recording_bindings, replay_bindings_json, select_format,
 };
 use sapho_core::{
-    ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry, SaphoError, SourceId, ValueType,
-    bounded_json, check_ports, decode_json,
+    BackendRegistry, ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry, SaphoError,
+    SourceId, ValueType, bounded_json, check_ports, decode_json, measured_json_bytes,
 };
 use sapho_evidence::{
     Candidate, CaseOutcome, Dataset, EvidenceError, Measurement, Metric as ScoreMetric,
     RankedCandidate, Split, export_training, measure, rank,
 };
 use sapho_graph::{GraphFormat, GraphSpec, parse_config};
-use sapho_recording::{Recording, RecordingBackend};
+use sapho_recording::{Recording, RecordingBackend, ReplayBackend};
 use serde::Serialize;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use serde_json::value::RawValue;
+use std::{
+    collections::BTreeMap,
+    io::{Read, Write},
+    path::Path,
+    sync::Arc,
+};
 
+/// A finished JSON document that can be streamed to a sink any number of times.
+trait Document {
+    fn write(&self, sink: &mut dyn std::io::Write) -> std::io::Result<()>;
+}
+impl<T: Serialize> Document for T {
+    fn write(&self, sink: &mut dyn std::io::Write) -> std::io::Result<()> {
+        serde_json::to_writer(sink, self).map_err(std::io::Error::from)
+    }
+}
+/// The command result. The document is streamed to stdout rather than held as bytes, so a
+/// report of a large Dataset exists once in memory.
 pub(crate) struct Response {
-    pub(crate) bytes: Vec<u8>,
+    document: Box<dyn Document>,
     pub(crate) exit: ExitStatus,
 }
-fn respond<T: Serialize>(
-    report: &T,
+impl Response {
+    /// Write the document and its final newline to `sink`.
+    pub(crate) fn write_to(&self, sink: &mut dyn std::io::Write) -> std::io::Result<()> {
+        let mut buffered = std::io::BufWriter::new(sink);
+        self.document.write(&mut buffered)?;
+        buffered.write_all(b"\n")?;
+        buffered.flush()
+    }
+}
+fn respond<T: Serialize + 'static>(
+    report: T,
     exit: ExitStatus,
     max_bytes: usize,
     destination: Option<ArtifactWriter>,
 ) -> Result<Response, CliError> {
-    let bytes = bounded_json(report, max_bytes)?;
     if let Some(writer) = destination {
-        writer.finish(&bytes, max_bytes)?;
+        writer.finish_json(&report, max_bytes)?;
+    } else {
+        measured_json_bytes(&report, max_bytes)?;
     }
-    Ok(Response { bytes, exit })
+    Ok(Response {
+        document: Box::new(report),
+        exit,
+    })
 }
 fn claim(path: Option<&Path>) -> Result<Option<ArtifactWriter>, CliError> {
     path.map(ArtifactWriter::create).transpose()
@@ -64,16 +94,24 @@ fn dataset(path: &Path, max_bytes: usize, max_cases: usize) -> Result<Dataset, C
     data.validate(max_cases)?;
     Ok(data)
 }
-fn prepare(
+/// Bind every recorded backend to the exact replay of the recording at `path`. The recording
+/// is read straight into the replay index and is not kept as a typed document.
+fn replay_registry(
+    path: &Path,
+    metadata: &Bindings,
+    max_bytes: usize,
+) -> Result<BackendRegistry, CliError> {
+    replay_bindings_json(&read_bytes(path, max_bytes)?, Some(metadata), max_bytes)
+}
+fn prepare<F: FnOnce() -> Result<BackendRegistry, CliError>>(
     graph: &GraphSpec,
     metadata: &Bindings,
-    recording: Option<&Recording>,
-    max_bytes: usize,
+    replay: Option<F>,
 ) -> Result<(Runner, Vec<sapho_core::BackendId>), CliError> {
     let primitives = PrimitiveRegistry::default();
     let inspection = inspect(graph, &primitives)?;
-    let registry = if let Some(recording) = recording {
-        replay_bindings(recording, Some(metadata), max_bytes)?
+    let registry = if let Some(replay) = replay {
+        replay()?
     } else {
         live_bindings(&inspection.backends, metadata)?
     };
@@ -127,9 +165,10 @@ enum Invocation {
 fn invoke(run: RunArgs, invocation: Invocation) -> Result<Response, CliError> {
     let artifact = load_graph(&run.graph.graph, run.graph.format.map(GraphFormat::from))?;
     let metadata = bindings(run.bindings.as_deref())?;
-    let recording = if let Invocation::Replay(path) = &invocation {
-        Some(Recording::from_json(
-            &read_bytes(path, run.limits.max_artifact_bytes)?,
+    let replay = if let Invocation::Replay(path) = &invocation {
+        Some(replay_registry(
+            path,
+            &metadata,
             run.limits.max_artifact_bytes,
         )?)
     } else {
@@ -140,8 +179,8 @@ fn invoke(run: RunArgs, invocation: Invocation) -> Result<Response, CliError> {
         let _entered = runtime.enter();
         let primitives = PrimitiveRegistry::default();
         let inspection = inspect(&artifact.definition, &primitives)?;
-        let registry = if let Some(recording) = &recording {
-            replay_bindings(recording, Some(&metadata), run.limits.max_artifact_bytes)?
+        let registry = if let Some(replay) = replay {
+            replay
         } else {
             live_bindings(&inspection.backends, &metadata)?
         };
@@ -183,24 +222,72 @@ fn invoke(run: RunArgs, invocation: Invocation) -> Result<Response, CliError> {
             run.limits.max_artifact_bytes,
         )?;
     }
-    respond(&report, report.exit, run.limits.max_artifact_bytes, output)
+    let exit = report.exit;
+    respond(report, exit, run.limits.max_artifact_bytes, output)
 }
-#[derive(Serialize)]
+/// One evaluated case: the retained outcome for scoring and the case's finished report as JSON.
+///
+/// The report is serialized as soon as the case ends, so a large Dataset holds one compact
+/// document per case rather than every trace as live structures.
 struct CaseRun {
     id: ItemId,
-    inputs: Inputs,
-    report: RunReport,
+    outcome: CaseOutcome,
+    document: Vec<u8>,
 }
-async fn run_cases(runner: &Runner, data: &Dataset, split: Split, limits: &Limits) -> Vec<CaseRun> {
-    let mut reports = Vec::new();
+/// The per-case documents of a report, each held compressed and expanded only while it is
+/// written. The documents repeat their graph structure, so they shrink to a small fraction,
+/// which keeps the memory of a report in proportion to the Dataset rather than to its traces.
+struct Documents(Vec<Vec<u8>>);
+impl Serialize for Documents {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{Error, SerializeSeq};
+        let mut items = serializer.serialize_seq(Some(self.0.len()))?;
+        for compressed in &self.0 {
+            let mut json = Vec::new();
+            flate2::read::DeflateDecoder::new(compressed.as_slice())
+                .read_to_end(&mut json)
+                .map_err(S::Error::custom)?;
+            let raw: &RawValue = serde_json::from_slice(&json).map_err(S::Error::custom)?;
+            items.serialize_element(raw)?;
+        }
+        items.end()
+    }
+}
+fn compress(json: &[u8]) -> Result<Vec<u8>, SaphoError> {
+    let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder
+        .write_all(json)
+        .and_then(|()| encoder.finish())
+        .map_err(|e| SaphoError::new(ErrorCode::Config, e.to_string()))
+}
+#[derive(Serialize)]
+struct CaseRecord<'a> {
+    id: &'a ItemId,
+    inputs: &'a Inputs,
+    report: &'a RunReport,
+}
+async fn run_cases(
+    runner: &Runner,
+    data: &Dataset,
+    split: Split,
+    limits: &Limits,
+) -> Result<Vec<CaseRun>, CliError> {
+    let mut runs = Vec::new();
     for case in data.selected(split) {
-        reports.push(CaseRun {
+        let report = runner.run(&case.inputs, limits.run(), None).await;
+        let json = serde_json::to_vec(&CaseRecord {
+            id: &case.id,
+            inputs: &case.inputs,
+            report: &report,
+        })
+        .map_err(|e| SaphoError::new(ErrorCode::Config, e.to_string()))?;
+        runs.push(CaseRun {
             id: case.id.clone(),
-            inputs: case.inputs.clone(),
-            report: runner.run(&case.inputs, limits.run(), None).await,
+            outcome: outcome(&report),
+            document: compress(&json)?,
         });
     }
-    reports
+    Ok(runs)
 }
 /// Every model that answered during the run, as its backend reported it.
 fn models(report: &RunReport) -> Vec<ModelIdentity> {
@@ -215,32 +302,37 @@ fn models(report: &RunReport) -> Vec<ModelIdentity> {
         })
         .collect()
 }
-fn outcomes(runs: &[CaseRun]) -> BTreeMap<ItemId, CaseOutcome> {
-    runs.iter()
-        .map(|run| {
-            let outcome = match (&run.report.outputs, &run.report.error) {
-                (_, Some(error)) => CaseOutcome::Failed {
-                    error: error.clone(),
-                    models: models(&run.report),
-                },
-                (Some(outputs), None) => CaseOutcome::Completed {
-                    outputs: outputs.clone(),
-                    models: models(&run.report),
-                },
-                (None, None) => CaseOutcome::Failed {
-                    error: SaphoError::new(ErrorCode::MissingInput, "Run has no outputs"),
-                    models: models(&run.report),
-                },
-            };
-            (run.id.clone(), outcome)
-        })
-        .collect()
+fn outcome(report: &RunReport) -> CaseOutcome {
+    match (&report.outputs, &report.error) {
+        (_, Some(error)) => CaseOutcome::Failed {
+            error: error.clone(),
+            models: models(report),
+        },
+        (Some(outputs), None) => CaseOutcome::Completed {
+            outputs: outputs.clone(),
+            models: models(report),
+        },
+        (None, None) => CaseOutcome::Failed {
+            error: SaphoError::new(ErrorCode::MissingInput, "Run has no outputs"),
+            models: models(report),
+        },
+    }
+}
+/// Separate what scoring needs from the finished per-case documents, in case order.
+fn split(runs: Vec<CaseRun>) -> (BTreeMap<ItemId, CaseOutcome>, Documents) {
+    let mut outcomes = BTreeMap::new();
+    let mut documents = Vec::with_capacity(runs.len());
+    for run in runs {
+        outcomes.insert(run.id, run.outcome);
+        documents.push(run.document);
+    }
+    (outcomes, Documents(documents))
 }
 #[derive(Serialize)]
 struct MeasurementReport {
     graph: GraphArtifact,
     measurement: Measurement,
-    runs: Vec<CaseRun>,
+    runs: Documents,
 }
 fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
     let options = &args.options;
@@ -249,19 +341,13 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         options.limits.max_artifact_bytes,
         options.max_cases,
     )?;
-    let split = Split::from(args.split);
+    let selected = Split::from(args.split);
     let graph = load_graph(&args.graph.graph, args.graph.format.map(GraphFormat::from))?;
     let metadata = bindings(options.bindings.as_deref())?;
-    let recording = options
+    let replay = options
         .replay
         .as_deref()
-        .map(|path| {
-            Recording::from_json(
-                &read_bytes(path, options.limits.max_artifact_bytes)?,
-                options.limits.max_artifact_bytes,
-            )
-            .map_err(CliError::from)
-        })
+        .map(|path| replay_registry(path, &metadata, options.limits.max_artifact_bytes))
         .transpose()?;
     let runtime = runtime()?;
     let (runner, _) = {
@@ -269,17 +355,17 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         prepare(
             &graph.definition,
             &metadata,
-            recording.as_ref(),
-            options.limits.max_artifact_bytes,
+            replay.map(|registry| move || Ok(registry)),
         )?
     };
     let destination = claim(options.output.as_deref())?;
-    let runs = runtime.block_on(run_cases(&runner, &data, split, &options.limits));
+    let (outcomes, runs) =
+        split(runtime.block_on(run_cases(&runner, &data, selected, &options.limits))?);
     let measurement = measure(
         &data,
-        split,
+        selected,
         &runner.inspection().signature.outputs,
-        &outcomes(&runs),
+        &outcomes,
         options.max_cases,
     )?;
     let exit = if measurement.complete() {
@@ -288,7 +374,7 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         ExitStatus::Refused
     };
     respond(
-        &MeasurementReport {
+        MeasurementReport {
             graph,
             measurement,
             runs,
@@ -304,7 +390,7 @@ struct CandidateReport {
     path: std::path::PathBuf,
     graph: Option<GraphArtifact>,
     measurement: Option<Measurement>,
-    runs: Vec<CaseRun>,
+    runs: Documents,
     error: Option<CliError>,
 }
 #[derive(Serialize)]
@@ -336,15 +422,15 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
         return Err(EvidenceError::EmptySplit(Split::Development).into());
     }
     let metadata = bindings(options.bindings.as_deref())?;
+    // A recording that cannot be read or holds an invalid exchange refuses the command; a
+    // conflict inside it, or metadata that differs from it, is each candidate's own error.
     let recording = options
         .replay
         .as_deref()
         .map(|path| {
-            Recording::from_json(
-                &read_bytes(path, options.limits.max_artifact_bytes)?,
-                options.limits.max_artifact_bytes,
-            )
-            .map_err(CliError::from)
+            let bytes = read_bytes(path, options.limits.max_artifact_bytes)?;
+            ReplayBackend::check_json(&bytes, options.limits.max_artifact_bytes)?;
+            Ok::<_, CliError>(bytes)
         })
         .transpose()?;
     let runtime = runtime()?;
@@ -364,8 +450,15 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
                     prepare(
                         &graph.definition,
                         &metadata,
-                        recording.as_ref(),
-                        options.limits.max_artifact_bytes,
+                        recording.as_deref().map(|bytes| {
+                            || {
+                                replay_bindings_json(
+                                    bytes,
+                                    Some(&metadata),
+                                    options.limits.max_artifact_bytes,
+                                )
+                            }
+                        }),
                     )
                 };
                 match prepared {
@@ -380,7 +473,7 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
             path,
             graph,
             measurement: None,
-            runs: Vec::new(),
+            runs: Documents(Vec::new()),
             error,
         });
     }
@@ -389,21 +482,22 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
         let mut result = Vec::new();
         for runner in &prepared {
             result.push(if let Some(runner) = runner {
-                run_cases(runner, &data, Split::Development, &options.limits).await
+                run_cases(runner, &data, Split::Development, &options.limits).await?
             } else {
                 Vec::new()
             });
         }
-        result
-    });
+        Ok::<_, CliError>(result)
+    })?;
     let mut scored = Vec::new();
     for ((report, runner), runs) in reports.iter_mut().zip(prepared).zip(runs) {
         if let Some(runner) = runner {
+            let (outcomes, runs) = split(runs);
             let measurement = measure(
                 &data,
                 Split::Development,
                 &runner.inspection().signature.outputs,
-                &outcomes(&runs),
+                &outcomes,
                 options.max_cases,
             )?;
             scored.push(Candidate {
@@ -438,7 +532,7 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
         ExitStatus::Completed
     };
     respond(
-        &TuneReport {
+        TuneReport {
             dataset: data.id,
             output: args.output_name,
             metric,
@@ -535,7 +629,7 @@ fn selection(selector: Selector) -> Result<Response, CliError> {
     };
     let writer = claim(limits.output.as_deref())?;
     respond(
-        &inputs,
+        inputs,
         ExitStatus::Completed,
         limits.max_artifact_bytes,
         writer,
@@ -546,7 +640,7 @@ pub(crate) fn execute(cli: Cli) -> Result<Response, CliError> {
         Command::Validate(args) | Command::Inspect(args) => {
             let graph = load_graph(&args.graph, args.format.map(GraphFormat::from))?;
             respond(
-                &inspect(&graph.definition, &PrimitiveRegistry::default())?,
+                inspect(&graph.definition, &PrimitiveRegistry::default())?,
                 ExitStatus::Completed,
                 8 * 1_048_576,
                 None,
@@ -573,7 +667,7 @@ pub(crate) fn execute(cli: Cli) -> Result<Response, CliError> {
                 output: std::path::PathBuf,
             }
             respond(
-                &ExportReport {
+                ExportReport {
                     dataset: data.id.clone(),
                     development_cases: data.selected(Split::Development).count(),
                     output,

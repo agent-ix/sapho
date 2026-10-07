@@ -27,10 +27,7 @@ fn main() -> ExitCode {
     };
     match command::execute(cli) {
         Ok(response) => {
-            if write_primary_stdout(&response.bytes)
-                .and_then(|()| write_primary_stdout(b"\n"))
-                .is_err()
-            {
+            if response.write_to(&mut std::io::stdout().lock()).is_err() {
                 return Outcome::Refused.into();
             }
             ExitCode::from(response.exit.code())

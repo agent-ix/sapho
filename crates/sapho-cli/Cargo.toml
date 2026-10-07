@@ -39,6 +39,7 @@ thiserror.workspace = true
 clap.workspace = true
 tokio.workspace = true
 sha2.workspace = true
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 sapho-jev = { workspace = true, optional = true }
 typesafe-sdk-client = { version = "=0.6.2", optional = true }
 typesafe-sdk-config = { version = "=0.6.2", optional = true }

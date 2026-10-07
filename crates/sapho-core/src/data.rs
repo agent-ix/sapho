@@ -5,10 +5,14 @@ use crate::{
     Datum, Degree, ErrorCode, Probability, Result, SaphoError, SourceRef, Value, ValueType,
 };
 use serde::de::{DeserializeOwned, DeserializeSeed, MapAccess, SeqAccess, Visitor};
-use serde_json::{Map, Number, Value as Json};
-use std::{cell::Cell, fmt};
+use serde_json::Value as Json;
+use std::{cell::Cell, collections::BTreeSet, fmt};
 
 /// Decode JSON without duplicate-key collapse, with byte and 128-level structural ceilings.
+///
+/// The document is first checked for depth and duplicate keys by a pass that keeps no
+/// values, then decoded straight into `T`, so no generic JSON tree of the whole document is
+/// ever built and a large Dataset costs memory in proportion to its typed form only.
 pub fn decode_json<T: DeserializeOwned>(bytes: &[u8], max_bytes: usize) -> Result<T> {
     if bytes.len() > max_bytes {
         return Err(SaphoError::new(
@@ -20,7 +24,7 @@ pub fn decode_json<T: DeserializeOwned>(bytes: &[u8], max_bytes: usize) -> Resul
     let mut decoder = serde_json::Deserializer::from_slice(bytes);
     // Our seed checks depth before descending, including ignored/unknown fields.
     decoder.disable_recursion_limit();
-    let value = JsonSeed {
+    Shape {
         depth: 0,
         exhausted: &exhausted,
     }
@@ -38,18 +42,27 @@ pub fn decode_json<T: DeserializeOwned>(bytes: &[u8], max_bytes: usize) -> Resul
     decoder
         .end()
         .map_err(|e| SaphoError::new(ErrorCode::Config, e.to_string()))?;
-    serde_json::from_value(value).map_err(|e| SaphoError::new(ErrorCode::Config, e.to_string()))
+    // The depth is bounded by the check above, so the typed pass needs no limit of its own.
+    let mut typed = serde_json::Deserializer::from_slice(bytes);
+    typed.disable_recursion_limit();
+    let value = T::deserialize(&mut typed)
+        .map_err(|e| SaphoError::new(ErrorCode::Config, e.to_string()))?;
+    typed
+        .end()
+        .map_err(|e| SaphoError::new(ErrorCode::Config, e.to_string()))?;
+    Ok(value)
 }
-struct JsonSeed<'a> {
+/// Walks a document, refusing excessive depth and duplicate keys, and keeps nothing.
+struct Shape<'a> {
     depth: usize,
     exhausted: &'a Cell<bool>,
 }
-impl<'de> DeserializeSeed<'de> for JsonSeed<'_> {
-    type Value = Json;
+impl<'de> DeserializeSeed<'de> for Shape<'_> {
+    type Value = ();
     fn deserialize<D: serde::Deserializer<'de>>(
         self,
         decoder: D,
-    ) -> std::result::Result<Json, D::Error> {
+    ) -> std::result::Result<(), D::Error> {
         if self.depth >= 128 {
             self.exhausted.set(true);
             return Err(serde::de::Error::custom(
@@ -59,59 +72,54 @@ impl<'de> DeserializeSeed<'de> for JsonSeed<'_> {
         decoder.deserialize_any(self)
     }
 }
-impl<'de> Visitor<'de> for JsonSeed<'_> {
-    type Value = Json;
+impl<'de> Visitor<'de> for Shape<'_> {
+    type Value = ();
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("JSON data without duplicate keys")
     }
-    fn visit_bool<E: serde::de::Error>(self, v: bool) -> std::result::Result<Json, E> {
-        Ok(Json::Bool(v))
+    fn visit_bool<E: serde::de::Error>(self, _: bool) -> std::result::Result<(), E> {
+        Ok(())
     }
-    fn visit_i64<E: serde::de::Error>(self, v: i64) -> std::result::Result<Json, E> {
-        Ok(Json::Number(v.into()))
+    fn visit_i64<E: serde::de::Error>(self, _: i64) -> std::result::Result<(), E> {
+        Ok(())
     }
-    fn visit_u64<E: serde::de::Error>(self, v: u64) -> std::result::Result<Json, E> {
-        Ok(Json::Number(v.into()))
+    fn visit_u64<E: serde::de::Error>(self, _: u64) -> std::result::Result<(), E> {
+        Ok(())
     }
-    fn visit_f64<E: serde::de::Error>(self, v: f64) -> std::result::Result<Json, E> {
-        Number::from_f64(v)
-            .map(Json::Number)
-            .ok_or_else(|| E::custom("Non-finite JSON number"))
+    // The JSON reader refuses a number outside the finite range itself.
+    fn visit_f64<E: serde::de::Error>(self, _: f64) -> std::result::Result<(), E> {
+        Ok(())
     }
-    fn visit_str<E: serde::de::Error>(self, v: &str) -> std::result::Result<Json, E> {
-        Ok(Json::String(v.into()))
+    fn visit_str<E: serde::de::Error>(self, _: &str) -> std::result::Result<(), E> {
+        Ok(())
     }
-    fn visit_string<E: serde::de::Error>(self, v: String) -> std::result::Result<Json, E> {
-        Ok(Json::String(v))
+    fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<(), E> {
+        Ok(())
     }
-    fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Json, E> {
-        Ok(Json::Null)
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+        while seq
+            .next_element_seed(Shape {
+                depth: self.depth + 1,
+                exhausted: self.exhausted,
+            })?
+            .is_some()
+        {}
+        Ok(())
     }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Json, A::Error> {
-        let mut items = Vec::new();
-        while let Some(item) = seq.next_element_seed(JsonSeed {
-            depth: self.depth + 1,
-            exhausted: self.exhausted,
-        })? {
-            items.push(item);
-        }
-        Ok(Json::Array(items))
-    }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Json, A::Error> {
-        let mut fields = Map::new();
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+        let mut keys = BTreeSet::new();
         while let Some(key) = map.next_key::<String>()? {
-            if fields.contains_key(&key) {
+            if !keys.insert(key.clone()) {
                 return Err(serde::de::Error::custom(format!(
                     "Duplicate JSON key {key:?}"
                 )));
             }
-            let value = map.next_value_seed(JsonSeed {
+            map.next_value_seed(Shape {
                 depth: self.depth + 1,
                 exhausted: self.exhausted,
             })?;
-            fields.insert(key, value);
         }
-        Ok(Json::Object(fields))
+        Ok(())
     }
 }
 
