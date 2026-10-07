@@ -577,7 +577,25 @@ fn tune_keeps_per_candidate_errors_for_conflicting_recordings_and_differing_bind
         assert_eq!(report["error"]["kind"], "no_candidates");
         let candidates = report["candidates"].as_array().unwrap();
         assert_eq!(candidates.len(), 2);
+        // The typed loading path, which is how the command read a recording before, refuses
+        // the same inputs with the very error each candidate carries.
+        let typed =
+            sapho_recording::Recording::from_json(&std::fs::read(recording).unwrap(), 1 << 30)
+                .unwrap();
+        let metadata: Bindings = match bindings {
+            Some(path) => sapho_graph::parse_config(
+                &std::fs::read_to_string(path).unwrap(),
+                sapho_graph::GraphFormat::Yaml,
+            )
+            .unwrap(),
+            None => Bindings::new(),
+        };
+        let expected = replay_bindings(&typed, Some(&metadata), 1 << 30)
+            .err()
+            .map(|error| serde_json::to_value(&error).unwrap())
+            .expect("the typed path refuses these inputs");
         for candidate in candidates {
+            assert_eq!(candidate["error"], expected);
             assert_eq!(candidate["error"]["detail"]["code"], "recording_mismatch");
             assert!(candidate["measurement"].is_null());
         }
