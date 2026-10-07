@@ -349,15 +349,11 @@ async fn replay_read_from_json_binds_the_same_identities_and_refuses_the_same_co
         ));
     }
     // Explicit metadata that differs from the recording is refused on both paths.
-    let explicit = Bindings::from([(
-        id,
-        BindingConfig {
-            provider: Provider::Clm,
-            model: "different".into(),
-            expected_model: None,
-            distribution_policy: DistributionPolicy::Strict {},
-        },
-    )]);
+    let explicit: Bindings = serde_json::from_value(serde_json::json!({
+        "decision": {"provider": "clm", "model": "different", "distribution_policy": {"kind": "strict"}}
+    }))
+    .unwrap();
+    assert!(explicit.contains_key(&id));
     let bytes = recording.to_json(1_000_000).unwrap();
     for result in [
         replay_bindings(&recording, Some(&explicit), 1_000_000).err(),

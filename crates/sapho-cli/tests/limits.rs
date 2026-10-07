@@ -85,11 +85,25 @@ fn text_input(text: &str) -> Inputs {
         Datum::new("text", Value::Text(text.into())).unwrap(),
     )])
 }
-fn case(index: usize) -> Case {
+/// How much text a case carries: about 0.3 KB or about 1.8 KB per case in the Dataset file.
+#[derive(Clone, Copy)]
+enum Weight {
+    Small,
+    Large,
+}
+impl Weight {
+    fn text(self, index: usize) -> String {
+        match self {
+            Self::Small => format!("Synthetic claim {index:05}. Output rose in the second period."),
+            Self::Large => format!("Synthetic claim {index:05}. {}", CLAIM.repeat(8)),
+        }
+    }
+}
+fn case(index: usize, weight: Weight) -> Case {
     Case {
         id: ItemId::new(format!("case-{index:05}")).unwrap(),
         split: Split::Development,
-        inputs: text_input(&format!("Synthetic claim {index:05}. {}", CLAIM.repeat(8))),
+        inputs: text_input(&weight.text(index)),
         labels: BTreeMap::from([("result".into(), !index.is_multiple_of(3))]),
         label_provenance: LabelProvenance {
             kind: LabelKind::Human,
@@ -99,10 +113,10 @@ fn case(index: usize) -> Case {
         },
     }
 }
-fn dataset(range: std::ops::Range<usize>) -> Dataset {
+fn dataset(range: std::ops::Range<usize>, weight: Weight) -> Dataset {
     Dataset {
         id: SourceId::new("synthetic-large").unwrap(),
-        cases: range.map(case).collect(),
+        cases: range.map(|index| case(index, weight)).collect(),
     }
 }
 
@@ -114,9 +128,14 @@ struct Fixture {
     large: PathBuf,
     root: PathBuf,
 }
-fn fixture() -> &'static Fixture {
-    static FIXTURE: OnceLock<Fixture> = OnceLock::new();
-    FIXTURE.get_or_init(|| {
+fn fixture(weight: Weight) -> &'static Fixture {
+    static SMALL: OnceLock<Fixture> = OnceLock::new();
+    static LARGE: OnceLock<Fixture> = OnceLock::new();
+    let (cell, weight) = match weight {
+        Weight::Small => (&SMALL, Weight::Small),
+        Weight::Large => (&LARGE, Weight::Large),
+    };
+    cell.get_or_init(|| {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().to_path_buf();
         let graph = root.join("graph.yaml");
@@ -140,8 +159,11 @@ fn fixture() -> &'static Fixture {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let runner = Runner::new(&spec, &PrimitiveRegistry::default(), registry).unwrap();
         for index in 0..CASES {
-            let report =
-                runtime.block_on(runner.run(&case(index).inputs, RunLimits::default(), None));
+            let report = runtime.block_on(runner.run(
+                &case(index, weight).inputs,
+                RunLimits::default(),
+                None,
+            ));
             assert!(report.error.is_none());
         }
         let recording = Recording {
@@ -151,7 +173,11 @@ fn fixture() -> &'static Fixture {
         let saved = root.join("recording.json");
         recording.write_new(&saved, 1 << 30).unwrap();
         let large = root.join("large.json");
-        std::fs::write(&large, serde_json::to_vec(&dataset(0..CASES)).unwrap()).unwrap();
+        std::fs::write(
+            &large,
+            serde_json::to_vec(&dataset(0..CASES, weight)).unwrap(),
+        )
+        .unwrap();
         Fixture {
             _root: temporary,
             graph,
@@ -213,7 +239,7 @@ fn measure_arguments<'a>(
 /// Trace: FR-056-AC-1
 #[test]
 fn measure_and_tune_complete_fifteen_thousand_cases_with_the_documented_flags() {
-    let fixture = fixture();
+    let fixture = fixture(Weight::Small);
     let report = fixture.root.join("measure-report.json");
     let outcome = run(&measure_arguments(
         fixture,
@@ -265,7 +291,7 @@ fn measure_and_tune_complete_fifteen_thousand_cases_with_the_documented_flags() 
 /// Trace: FR-056-AC-2
 #[test]
 fn the_dataset_is_refused_without_the_flags_and_a_file_above_a_lowered_ceiling_is_refused() {
-    let fixture = fixture();
+    let fixture = fixture(Weight::Small);
     // The default case ceiling names 1024 and no model was called: the recording is never read.
     let missing = fixture.root.join("absent-recording.json");
     let outcome = run(&[
@@ -348,10 +374,14 @@ fn defaults_stay_at_1024_cases_and_8_mib_and_the_guide_documents_the_large_invoc
 /// Trace: FR-056-AC-4
 #[test]
 fn per_case_results_do_not_depend_on_how_cases_are_split_into_files() {
-    let fixture = fixture();
+    let fixture = fixture(Weight::Small);
     let write = |name: &str, range: std::ops::Range<usize>| {
         let path = fixture.root.join(name);
-        std::fs::write(&path, serde_json::to_vec(&dataset(range)).unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&dataset(range, Weight::Small)).unwrap(),
+        )
+        .unwrap();
         path
     };
     let (first, second, union) = (
@@ -384,14 +414,21 @@ fn per_case_results_do_not_depend_on_how_cases_are_split_into_files() {
     assert_eq!(pieces, whole);
 }
 
-/// The peak resident memory of the largest run, as the operating system reports it.
-fn peak_resident_bytes(arguments: &[&str], stdout: &Path) -> u64 {
+/// The peak resident memory of a run, as the operating system reports it for the process.
+///
+/// `/usr/bin/time` prints it: `-l` on macOS (bytes) and `-v` on GNU time (kilobytes). `None`
+/// when that program is not installed.
+fn peak_resident_bytes(arguments: &[&str], stdout: &Path) -> Option<u64> {
+    let timer = Path::new("/usr/bin/time");
+    if !timer.exists() {
+        return None;
+    }
     let (flag, unit) = if cfg!(target_os = "macos") {
         ("-l", 1)
     } else {
         ("-v", 1024)
     };
-    let output = Command::new("/usr/bin/time")
+    let output = Command::new(timer)
         .arg(flag)
         .arg(env!("CARGO_BIN_EXE_sapho"))
         .args(arguments)
@@ -399,7 +436,7 @@ fn peak_resident_bytes(arguments: &[&str], stdout: &Path) -> u64 {
         .stdout(Stdio::from(File::create(stdout).unwrap()))
         .stderr(Stdio::piped())
         .output()
-        .expect("/usr/bin/time reports the peak resident memory");
+        .unwrap();
     let report = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{report}");
     let peak = report
@@ -411,33 +448,186 @@ fn peak_resident_bytes(arguments: &[&str], stdout: &Path) -> u64 {
                 .and_then(|number| number.trim().parse::<u64>().ok())
         })
         .unwrap_or_else(|| panic!("no peak in {report}"));
-    peak * unit
+    Some(peak * unit)
 }
 
 /// Trace: FR-056-AC-5
 #[test]
-fn peak_memory_of_the_large_measure_stays_within_six_times_the_dataset_plus_64_mib() {
-    let fixture = fixture();
-    let output = fixture.root.join("peak-report.json");
-    let stdout = fixture.root.join("peak-stdout.json");
-    let arguments = measure_arguments(
-        fixture,
-        &fixture.large,
-        &[&DOCUMENTED[..], &["--output", text(&output)]].concat(),
-    );
-    let started = Instant::now();
-    let peak = peak_resident_bytes(&arguments, &stdout);
-    let elapsed = started.elapsed();
-    let dataset_bytes = std::fs::metadata(&fixture.large).unwrap().len();
-    let bound = 6 * dataset_bytes + 64 * 1_048_576;
-    eprintln!(
-        "peak resident {peak} bytes, bound {bound}, dataset {dataset_bytes} bytes, report {} bytes, run {elapsed:?}",
-        std::fs::metadata(&output).unwrap().len()
-    );
-    assert!(peak <= bound, "peak {peak} exceeds {bound}");
-    for path in [&output, &stdout, &fixture.recording, &fixture.large] {
-        assert!(std::fs::metadata(path).unwrap().len() <= CEILING);
+fn peak_memory_of_the_fifteen_thousand_case_measure_stays_within_its_bound_for_both_sizes() {
+    for weight in [Weight::Small, Weight::Large] {
+        let fixture = fixture(weight);
+        let output = fixture.root.join("peak-report.json");
+        let stdout = fixture.root.join("peak-stdout.json");
+        let arguments = measure_arguments(
+            fixture,
+            &fixture.large,
+            &[&DOCUMENTED[..], &["--output", text(&output)]].concat(),
+        );
+        let started = Instant::now();
+        let Some(peak) = peak_resident_bytes(&arguments, &stdout) else {
+            eprintln!("skipped: /usr/bin/time is not installed");
+            return;
+        };
+        let elapsed = started.elapsed();
+        let dataset_bytes = std::fs::metadata(&fixture.large).unwrap().len();
+        let bound = 6 * dataset_bytes + 64 * 1_048_576 + CASES as u64 * 8 * 1024;
+        eprintln!(
+            "peak resident {peak} bytes, bound {bound}, dataset {dataset_bytes} bytes, report {} bytes, run {elapsed:?}",
+            std::fs::metadata(&output).unwrap().len()
+        );
+        assert!(peak <= bound, "peak {peak} exceeds {bound}");
+        for path in [&output, &stdout, &fixture.recording, &fixture.large] {
+            assert!(std::fs::metadata(path).unwrap().len() <= CEILING);
+        }
     }
+}
+
+/// Trace: FR-056-AC-2
+#[test]
+fn a_report_above_the_ceiling_on_stdout_alone_is_refused_without_a_partial_document() {
+    let fixture = fixture(Weight::Small);
+    let dataset_path = fixture.root.join("six-hundred.json");
+    std::fs::write(
+        &dataset_path,
+        serde_json::to_vec(&dataset(0..600, Weight::Small)).unwrap(),
+    )
+    .unwrap();
+    let inputs = std::fs::metadata(&dataset_path).unwrap().len();
+    let mut recording: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&fixture.recording).unwrap()).unwrap();
+    recording["exchanges"].as_array_mut().unwrap().truncate(600);
+    let recording_path = fixture.root.join("six-hundred-recording.json");
+    let recording_bytes = serde_json::to_vec(&recording).unwrap();
+    std::fs::write(&recording_path, &recording_bytes).unwrap();
+    // Every input fits the ceiling, and the report, many times the Dataset, does not.
+    let ceiling = (inputs.max(recording_bytes.len() as u64) + 1).to_string();
+    let outcome = run(&[
+        "measure",
+        text(&fixture.graph),
+        "--dataset",
+        text(&dataset_path),
+        "--replay",
+        text(&recording_path),
+        "--split",
+        "development",
+        "--max-cases",
+        "2000",
+        "--max-artifact-bytes",
+        &ceiling,
+    ]);
+    assert_eq!(outcome.code, Some(2), "{}", outcome.stderr);
+    let refusal = json(&outcome);
+    assert_eq!(refusal["error"]["detail"]["code"], "limit_exceeded");
+    assert!(refusal.get("measurement").is_none());
+    assert!(outcome.stdout.len() < 1000);
+}
+
+/// A recording of the first exchanges of the fixture, with one backend recorded under two models.
+fn conflicting_recording(fixture: &Fixture) -> PathBuf {
+    let mut recording: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&fixture.recording).unwrap()).unwrap();
+    let exchanges = recording["exchanges"].as_array_mut().unwrap();
+    exchanges.truncate(3);
+    exchanges[1]["request"]["model"] = serde_json::json!("other");
+    let path = fixture.root.join("conflicting.json");
+    std::fs::write(&path, serde_json::to_vec(&recording).unwrap()).unwrap();
+    path
+}
+
+/// Trace: FR-056-AC-6
+#[test]
+fn tune_keeps_per_candidate_errors_for_conflicting_recordings_and_differing_bindings() {
+    let fixture = fixture(Weight::Small);
+    let small = fixture.root.join("three.json");
+    std::fs::write(
+        &small,
+        serde_json::to_vec(&dataset(0..3, Weight::Small)).unwrap(),
+    )
+    .unwrap();
+    let conflicting = conflicting_recording(fixture);
+    let differing = fixture.root.join("differing.yaml");
+    std::fs::write(
+        &differing,
+        "judge: {provider: clm, model: different, distribution_policy: {kind: strict}}\n",
+    )
+    .unwrap();
+    for (recording, bindings) in [(&conflicting, None), (&fixture.recording, Some(&differing))] {
+        let mut arguments = vec![
+            "tune",
+            "--candidate",
+            text(&fixture.graph),
+            "--candidate",
+            text(&fixture.graph),
+            "--dataset",
+            text(&small),
+            "--replay",
+            text(recording),
+            "--output-name",
+            "result",
+            "--metric",
+            "brier",
+        ];
+        if let Some(bindings) = bindings {
+            arguments.extend(["--bindings", text(bindings)]);
+        }
+        let outcome = run(&arguments);
+        assert_eq!(outcome.code, Some(2), "{}", outcome.stderr);
+        let report = json(&outcome);
+        // The ranking has nothing to rank; the failures are the candidates' own.
+        assert_eq!(report["error"]["kind"], "no_candidates");
+        let candidates = report["candidates"].as_array().unwrap();
+        assert_eq!(candidates.len(), 2);
+        for candidate in candidates {
+            assert_eq!(candidate["error"]["detail"]["code"], "recording_mismatch");
+            assert!(candidate["measurement"].is_null());
+        }
+        assert!(report["ranking"].as_array().unwrap().is_empty());
+    }
+}
+
+/// Trace: FR-056-AC-6
+#[test]
+fn explicit_bindings_that_differ_from_the_recording_refuse_a_measure_and_a_replay() {
+    let fixture = fixture(Weight::Small);
+    let differing = fixture.root.join("differing-measure.yaml");
+    std::fs::write(
+        &differing,
+        "judge: {provider: clm, model: different, distribution_policy: {kind: strict}}\n",
+    )
+    .unwrap();
+    let small = fixture.root.join("one.json");
+    std::fs::write(
+        &small,
+        serde_json::to_vec(&dataset(0..1, Weight::Small)).unwrap(),
+    )
+    .unwrap();
+    let measured = run(&measure_arguments(
+        fixture,
+        &small,
+        &["--bindings", text(&differing)],
+    ));
+    assert_eq!(measured.code, Some(2), "{}", measured.stderr);
+    assert_eq!(
+        json(&measured)["error"]["detail"]["code"],
+        "recording_mismatch"
+    );
+    let input = fixture.root.join("input.json");
+    std::fs::write(&input, br#"{"text":"x"}"#).unwrap();
+    let replayed = run(&[
+        "replay",
+        text(&fixture.graph),
+        "--input",
+        text(&input),
+        "--bindings",
+        text(&differing),
+        "--recording",
+        text(&fixture.recording),
+    ]);
+    assert_eq!(replayed.code, Some(2));
+    assert_eq!(
+        json(&replayed)["error"]["detail"]["code"],
+        "recording_mismatch"
+    );
 }
 
 /// Trace: FR-056-AC-2

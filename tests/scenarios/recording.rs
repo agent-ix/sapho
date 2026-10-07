@@ -235,6 +235,14 @@ async fn streamed_loading_gives_the_replay_of_typed_loading_and_refuses_the_same
     );
     // An empty recording loads, and a callback refusal ends the load with its own code.
     ReplayBackend::from_json(br#"{"exchanges":[]}"#, 100, |_| Ok(())).unwrap();
+    // A check validates without indexing: a conflict is the index's refusal, not the check's.
+    ReplayBackend::check_json(&bytes, 100_000).unwrap();
+    assert_eq!(
+        ReplayBackend::check_json(br#"{"exchanges":[{"x":1}]}"#, 100)
+            .unwrap_err()
+            .code,
+        ErrorCode::RecordingMismatch
+    );
     let refused = ReplayBackend::from_json(&bytes, 100_000, |_| {
         Err(SaphoError::new(ErrorCode::UnknownBackend, "stop"))
     });
@@ -262,6 +270,14 @@ async fn streamed_loading_gives_the_replay_of_typed_loading_and_refuses_the_same
     let mut member = document.clone();
     member["exchanges"][0]["surprise"] = serde_json::json!(1);
     let cases: Vec<(Vec<u8>, ErrorCode)> = vec![
+        (
+            br#"{"exchanges":[],"surprise":[]}"#.to_vec(),
+            ErrorCode::RecordingMismatch,
+        ),
+        (
+            br#"{"surprise":{"a":[1,2]},"exchanges":[]}"#.to_vec(),
+            ErrorCode::RecordingMismatch,
+        ),
         (
             serde_json::to_vec(&conflict).unwrap(),
             ErrorCode::RecordingMismatch,

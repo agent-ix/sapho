@@ -230,7 +230,7 @@ sapho tune --candidate GRAPH --dataset dataset.json --replay recording.json --ou
 
 A Dataset with more cases than `--max-cases` is refused with `CaseLimit` naming the limit, before any model call, and a file larger than `--max-artifact-bytes` is refused naming the limit before it is parsed. A Dataset is one file: the CLI does not shard. The per-case result of `measure` does not depend on how cases are split into files, so a caller can split a very large Dataset and combine the per-file reports from their case counts: agreement and Brier combine as case-weighted means, and calibration bins combine by adding their counts.
 
-The process holds the typed Dataset, the compressed per-case documents and the replay index (a recording is indexed as it is read, never held whole), so its peak memory stays near the size of the typed Dataset. The test suite measures the peak of the 15,000-case run and requires at most six times the Dataset file plus 64 MiB.
+The process holds the typed Dataset, the compressed per-case documents and the replay index (a recording is indexed as it is read, never held whole), so its peak memory stays near the size of the typed Dataset. Holding each case compressed costs time: the user CPU time of a very large `measure` is about 2.4 times what it was before, because each case document is compressed once and expanded three times. The test suite measures the peak of the 15,000-case run and requires at most six times the Dataset file plus 64 MiB plus 8 KiB per case, on a debug build, for Datasets of about 0.3 KB and about 1.8 KB per case.
 
 ## Tune explicit candidates
 

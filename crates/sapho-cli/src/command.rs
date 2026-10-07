@@ -16,7 +16,7 @@ use sapho_evidence::{
     RankedCandidate, Split, export_training, measure, rank,
 };
 use sapho_graph::{GraphFormat, GraphSpec, parse_config};
-use sapho_recording::{Recording, RecordingBackend};
+use sapho_recording::{Recording, RecordingBackend, ReplayBackend};
 use serde::Serialize;
 use serde_json::value::RawValue;
 use std::{
@@ -103,15 +103,15 @@ fn replay_registry(
 ) -> Result<BackendRegistry, CliError> {
     replay_bindings_json(&read_bytes(path, max_bytes)?, Some(metadata), max_bytes)
 }
-fn prepare(
+fn prepare<F: FnOnce() -> Result<BackendRegistry, CliError>>(
     graph: &GraphSpec,
     metadata: &Bindings,
-    replay: Option<&BackendRegistry>,
+    replay: Option<F>,
 ) -> Result<(Runner, Vec<sapho_core::BackendId>), CliError> {
     let primitives = PrimitiveRegistry::default();
     let inspection = inspect(graph, &primitives)?;
     let registry = if let Some(replay) = replay {
-        replay.clone()
+        replay()?
     } else {
         live_bindings(&inspection.backends, metadata)?
     };
@@ -352,7 +352,11 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
     let runtime = runtime()?;
     let (runner, _) = {
         let _entered = runtime.enter();
-        prepare(&graph.definition, &metadata, replay.as_ref())?
+        prepare(
+            &graph.definition,
+            &metadata,
+            replay.map(|registry| move || Ok(registry)),
+        )?
     };
     let destination = claim(options.output.as_deref())?;
     let (outcomes, runs) =
@@ -418,10 +422,16 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
         return Err(EvidenceError::EmptySplit(Split::Development).into());
     }
     let metadata = bindings(options.bindings.as_deref())?;
-    let replay = options
+    // A recording that cannot be read or holds an invalid exchange refuses the command; a
+    // conflict inside it, or metadata that differs from it, is each candidate's own error.
+    let recording = options
         .replay
         .as_deref()
-        .map(|path| replay_registry(path, &metadata, options.limits.max_artifact_bytes))
+        .map(|path| {
+            let bytes = read_bytes(path, options.limits.max_artifact_bytes)?;
+            ReplayBackend::check_json(&bytes, options.limits.max_artifact_bytes)?;
+            Ok::<_, CliError>(bytes)
+        })
         .transpose()?;
     let runtime = runtime()?;
     let mut prepared = Vec::new();
@@ -437,7 +447,19 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
             Ok(graph) => {
                 let prepared = {
                     let _entered = runtime.enter();
-                    prepare(&graph.definition, &metadata, replay.as_ref())
+                    prepare(
+                        &graph.definition,
+                        &metadata,
+                        recording.as_deref().map(|bytes| {
+                            || {
+                                replay_bindings_json(
+                                    bytes,
+                                    Some(&metadata),
+                                    options.limits.max_artifact_bytes,
+                                )
+                            }
+                        }),
+                    )
                 };
                 match prepared {
                     Ok((runner, _)) => (Some(graph), Some(runner), None),

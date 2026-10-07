@@ -210,7 +210,7 @@ impl ReplayBackend {
     pub fn new(recording: &Recording, max_bytes: usize) -> Result<Self> {
         recording.validate()?;
         measured_json_bytes(recording, max_bytes)?;
-        let mut index = Index::new(max_bytes);
+        let mut index = Index::new(max_bytes, true);
         for exchange in &recording.exchanges {
             index.insert(exchange)?;
         }
@@ -225,8 +225,24 @@ impl ReplayBackend {
     pub fn from_json(
         bytes: &[u8],
         max_bytes: usize,
-        mut each: impl FnMut(&Exchange) -> Result<()>,
+        each: impl FnMut(&Exchange) -> Result<()>,
     ) -> Result<Self> {
+        load(bytes, max_bytes, each, true).map(Index::finish)
+    }
+    /// Check that a recording is well formed and that every exchange is valid, exactly as
+    /// [`Recording::from_json`] does, without indexing anything. Conflicts between exchanges
+    /// are the indexing step's refusals and are not found here.
+    pub fn check_json(bytes: &[u8], max_bytes: usize) -> Result<()> {
+        load(bytes, max_bytes, |_| Ok(()), false).map(|_| ())
+    }
+}
+fn load(
+    bytes: &[u8],
+    max_bytes: usize,
+    mut each: impl FnMut(&Exchange) -> Result<()>,
+    indexed: bool,
+) -> Result<Index> {
+    {
         if bytes.len() > max_bytes {
             return Err(limit("Recording exceeds byte ceiling"));
         }
@@ -247,7 +263,7 @@ impl ReplayBackend {
             "Recording",
             &["exchanges"],
             Load {
-                index: std::cell::RefCell::new(Index::new(max_bytes)),
+                index: std::cell::RefCell::new(Index::new(max_bytes, indexed)),
                 each: std::cell::RefCell::new(&mut each),
                 failure: &failure,
             },
@@ -257,7 +273,6 @@ impl ReplayBackend {
         }
         loaded
             .and_then(|index| decoder.end().map(|()| index))
-            .map(Index::finish)
             .map_err(|e| mismatch(SaphoError::new(ErrorCode::Config, e.to_string())))
     }
 }
@@ -265,15 +280,21 @@ impl ReplayBackend {
 struct Index {
     exchanges: BTreeMap<Fingerprint, Vec<u8>>,
     max_bytes: usize,
+    /// Whether exchanges are indexed; a check only validates them.
+    indexed: bool,
 }
 impl Index {
-    fn new(max_bytes: usize) -> Self {
+    fn new(max_bytes: usize, indexed: bool) -> Self {
         Self {
             exchanges: BTreeMap::new(),
             max_bytes,
+            indexed,
         }
     }
     fn insert(&mut self, exchange: &Exchange) -> Result<()> {
+        if !self.indexed {
+            return Ok(());
+        }
         let key = fingerprint(&exchange.request, self.max_bytes)?;
         if let Some(previous) = self.exchanges.get(&key) {
             // Provider bodies differ between identical requests (timestamps, durations),
