@@ -6,11 +6,23 @@ use sapho_graph::GraphFormat;
 use sapho_runtime::RunLimits;
 use sapho_select::{Patterns, SelectionLimits};
 use std::{path::PathBuf, time::Duration};
+/// Provider help shown by `--help`; the guide carries the same facts at length.
+const BINDINGS_HELP: &str = "\
+Bindings (--bindings FILE): one entry per graph backend, with provider jev, clm or ollama.
+Each entry takes model, expected_model and distribution_policy.
+The ollama provider (a build with the ollama feature) also takes think (default false),
+num_ctx (default 32768), num_predict (default 512) and timeout_seconds (default 600).
+It needs no credential. The server URL is read from OLLAMA_BASE_URL only (default
+http://127.0.0.1:11434) and may name a non-local host, in which case prompts and state leave
+this machine. timeout_seconds bounds each request and --timeout-secs bounds each whole run,
+and the earlier deadline wins; raise --timeout-secs to at least timeout_seconds when a cold
+model must load. No deadline is retried.";
 #[derive(Parser)]
 #[command(
     name = "sapho",
     version,
-    about = "Typed configurable logic graphs: evaluate, record, measure and tune"
+    about = "Typed configurable logic graphs: evaluate, record, measure and tune",
+    after_help = BINDINGS_HELP
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]

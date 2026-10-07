@@ -23,8 +23,11 @@ mod bindings;
 mod error;
 mod host;
 mod io;
+#[cfg(feature = "ollama")]
+pub use bindings::ollama_base_url;
 pub use bindings::{
-    BindingConfig, Bindings, Provider, live_bindings, recording_bindings, replay_bindings,
+    BindingConfig, Bindings, OllamaOptions, Provider, live_bindings, recording_bindings,
+    replay_bindings,
 };
 pub use error::CliError;
 pub use host::{ExitStatus, Inspection, RunReport, Runner, inspect, plain_inputs};

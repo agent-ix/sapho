@@ -434,6 +434,7 @@ fn conflicting_recorded_or_explicit_binding_metadata_is_refused_without_live_loo
             model: "other".into(),
             expected_model: None,
             distribution_policy: DistributionPolicy::Strict {},
+            ollama: None,
         },
     )]);
     let one = Recording {

@@ -2151,6 +2151,7 @@ dependencies = [
  "sapho-evidence",
  "sapho-graph",
  "sapho-jev",
+ "sapho-ollama",
  "sapho-recording",
  "sapho-runtime",
  "sapho-select",
