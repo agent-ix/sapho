@@ -131,7 +131,46 @@ Replay works with either inferred identity or explicit CLM metadata and never re
 
 CLM calls use a 30-second queue/HTTP/decode deadline, a 1 MiB request ceiling, an 8 MiB response ceiling and four simultaneous requests per adapter. Runtime's separate limits still apply. There are no retries or redirects. Boolean criteria map to `true`/`false`; question and option order are preserved. Reported confidence is retained independently of probability: CLM defines it as top probability minus the mean of the others. Usage retains `input_tokens`, `output_tokens` and optional `billing_units` separately. Raw distributions remain unchanged under strict or approximate-complete policy.
 
-OpenAI Decisions integration awaits its official preview wire contract. The current CLI offers Jev and CLM; no substitute API is presented as Decisions.
+## Bind Ollama explicitly
+
+Use an already running [Ollama](https://ollama.com) server; Sapho never starts a server or pulls a model. The provider needs no credential and reads no secret store.
+
+```sh
+cargo install --path crates/sapho-cli --locked --features ollama
+```
+
+```yaml
+judge:
+  provider: ollama
+  model: qwen3:30b
+  distribution_policy: {kind: strict}
+```
+
+An `ollama` entry takes the members every entry has (`model`, which is required, `expected_model` and `distribution_policy`) and four of its own, with these defaults:
+
+| Member | Default | Meaning |
+|---|---:|---|
+| `think` | `false` | Let the model think before it answers; typed questions need `false` |
+| `num_ctx` | 32768 | Context size in tokens; a prompt that does not fit is refused, never shortened |
+| `num_predict` | 512 | Tokens reserved for the answer; it must be below `num_ctx` |
+| `timeout_seconds` | 600 | Bound on each single request to the server |
+
+The default `num_predict` suits typed questions, whose answers are a few tokens; a binding that extracts records needs a larger value. The members go to the backend unchanged, so its own refusals (a zero value, an empty model, `think: true` for questions) are the ones you see, each before a request is sent. The model identity is the model name and the weights digest the server reports, and a recording carries both; a bindings entry cannot carry a digest, an `endpoint`, a `url` or an `api_key`.
+
+Set `OLLAMA_BASE_URL` to the server (default `http://127.0.0.1:11434`; an empty value counts as unset). The URL is read from the environment only, never from a bindings document, a graph or a recording, and a URL the adapter refuses (anything but `http` or `https`, or one with embedded credentials, a query or a fragment) is refused before a request. The variable may name a non-local host. That is your choice: prompts and state then leave this machine, and a recording does not say which host answered, since it holds the model name and weights digest and never a URL. To show that a run stayed local, keep the environment with the run.
+
+```sh
+OLLAMA_BASE_URL=http://127.0.0.1:11434 sapho record examples/graphs/multilayer.yaml --input INPUT.json --bindings bindings.yaml --recording saved.json --timeout-secs 600
+sapho replay examples/graphs/multilayer.yaml --input INPUT.json --bindings bindings.yaml --recording saved.json
+```
+
+Only a required binding that calls a model live (`run`, `record`, and `measure` or `tune` without `--replay`) builds the backend. `validate`, `inspect`, `replay` and replay-backed `measure` and `tune` read no environment variable and touch no network.
+
+Two deadlines apply. `timeout_seconds` bounds each request to the server, and the run limit `--timeout-secs` (default 60) bounds the whole evaluation of a case. Whichever comes first ends the call with the deadline error of its layer, and neither is raised implicitly. A first request that loads a large model can take longer than 60 seconds, so when the model is cold raise `--timeout-secs` to at least the binding's `timeout_seconds`. The CLI never retries a deadline.
+
+Default tests run against a loopback double of the server. A live check against a real server runs only when you ask for it: `SAPHO_LIVE_OLLAMA=MODEL cargo test -p sapho-cli --features ollama live_server_smoke`.
+
+OpenAI Decisions integration awaits its official preview wire contract. The current CLI offers Jev, CLM and Ollama; no substitute API is presented as Decisions.
 
 ## Record and replay
 

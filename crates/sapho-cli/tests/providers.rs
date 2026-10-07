@@ -10,6 +10,10 @@ use std::{
     process::Command,
     sync::atomic::{AtomicUsize, Ordering},
 };
+const STRICT: &str = "distribution_policy: {kind: strict}";
+fn parse(yaml: &str) -> sapho_core::Result<Bindings> {
+    sapho_graph::parse_config(yaml, sapho_graph::GraphFormat::Yaml)
+}
 struct Store {
     calls: AtomicUsize,
     result: std::result::Result<Option<SecretValue>, SecretError>,
@@ -141,6 +145,27 @@ fn provider_models_are_explicit_except_the_clm_alias() {
         assert!(serde_json::from_value::<BindingConfig>(value).is_err());
     }
 }
+/// Trace: FR-045-AC-4
+#[test]
+fn ollama_needs_no_credential_and_never_touches_the_secret_store() {
+    let native = Store {
+        calls: AtomicUsize::new(0),
+        result: Err(SecretError::Locked),
+    };
+    let store = SecretStore::new(&native);
+    assert_eq!(Provider::Ollama.credential_environment(), None);
+    assert!(
+        resolve_credential(Provider::Ollama, &store, None, None)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        resolve_credential(Provider::Ollama, &store, None, Some("synthetic".into()))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(native.calls.load(Ordering::SeqCst), 0);
+}
 /// Trace: FR-045-AC-2
 #[test]
 fn unused_live_metadata_does_not_prepare_any_provider() {
@@ -151,6 +176,7 @@ fn unused_live_metadata_does_not_prepare_any_provider() {
             model: "clm-latest".into(),
             expected_model: None,
             distribution_policy: DistributionPolicy::Strict {},
+            ollama: None,
         },
     )]);
     live_bindings(&[], &bindings).unwrap();
@@ -167,6 +193,7 @@ fn missing_clm_feature_refuses_without_credentials() {
             model: "clm-latest".into(),
             expected_model: None,
             distribution_policy: DistributionPolicy::Strict {},
+            ollama: None,
         },
     )]);
     assert!(matches!(
@@ -221,6 +248,7 @@ async fn explicit_clm_replay_checks_only_model_and_policy_without_guessing_provi
             model: request.model.clone(),
             expected_model: None,
             distribution_policy: request.distribution_policy,
+            ollama: None,
         },
     )]);
     for explicit in [None, Some(&bindings)] {
@@ -302,6 +330,7 @@ fn production_roundtrip(provider: Provider) {
     let (model, provider_name, endpoint_env) = match provider {
         Provider::Clm => ("clm-latest", "clm", "CLM_BASE_URL"),
         Provider::Jev => ("jev-latest", "jev", "TYPESAFE_BASE_URL"),
+        Provider::Ollama => return,
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
@@ -363,7 +392,10 @@ fn production_roundtrip(provider: Provider) {
     let recorded = Command::new(env!("CARGO_BIN_EXE_sapho"))
         .env_clear()
         .env(endpoint_env, endpoint)
-        .env(provider.credential_environment(), "synthetic-credential")
+        .env(
+            provider.credential_environment().unwrap(),
+            "synthetic-credential",
+        )
         .env("TYPESAFE_LOG_LEVEL", "debug")
         .arg("record")
         .arg(&graph)
@@ -438,4 +470,175 @@ fn production_cli_clm_records_then_replays_after_service_shutdown_with_poisoned_
 #[test]
 fn production_cli_jev_uses_shared_credentials_and_suppresses_sdk_debug_bodies() {
     production_roundtrip(Provider::Jev);
+}
+
+/// Trace: FR-055-AC-1
+#[test]
+fn ollama_binding_loads_with_the_cli_defaults_and_refuses_unknown_members_and_providers() {
+    let bindings = parse(
+        "judge: {provider: ollama, model: \"qwen3:30b\", distribution_policy: {kind: strict}}",
+    )
+    .unwrap();
+    let judge = &bindings[&BackendId::new("judge").unwrap()];
+    assert_eq!(judge.provider, Provider::Ollama);
+    assert_eq!(judge.model, "qwen3:30b");
+    assert_eq!(
+        judge.ollama,
+        Some(OllamaOptions {
+            think: false,
+            num_ctx: 32768,
+            num_predict: 512,
+            timeout_seconds: 600,
+        })
+    );
+    let explicit = parse(
+        "judge: {provider: ollama, model: m, think: true, num_ctx: 4096, num_predict: 64, timeout_seconds: 5, distribution_policy: {kind: strict}}",
+    )
+    .unwrap();
+    assert_eq!(
+        explicit[&BackendId::new("judge").unwrap()].ollama,
+        Some(OllamaOptions {
+            think: true,
+            num_ctx: 4096,
+            num_predict: 64,
+            timeout_seconds: 5,
+        })
+    );
+    for (member, line) in [
+        ("surprise", "surprise: 1"),
+        ("endpoint", "endpoint: \"http://example.invalid\""),
+        ("api_key", "api_key: synthetic"),
+        ("digest", "digest: abc"),
+        ("url", "url: \"http://example.invalid\""),
+    ] {
+        let error = parse(&format!(
+            "judge: {{provider: ollama, model: m, {line}, distribution_policy: {{kind: strict}}}}"
+        ))
+        .unwrap_err();
+        assert!(
+            error.to_string().contains(member) || format!("{error:?}").contains(member),
+            "{member}: {error}"
+        );
+    }
+    let error =
+        parse("judge: {provider: foo, model: m, distribution_policy: {kind: strict}}").unwrap_err();
+    assert!(format!("{error:?}").contains("foo"), "{error:?}");
+    // The generation members belong to this provider alone.
+    for provider in ["jev", "clm"] {
+        for member in [
+            "think: true",
+            "num_ctx: 4096",
+            "num_predict: 8",
+            "timeout_seconds: 5",
+        ] {
+            assert!(
+                parse(&format!(
+                    "judge: {{provider: {provider}, model: m, {member}, distribution_policy: {{kind: strict}}}}"
+                ))
+                .is_err(),
+                "{provider} {member}"
+            );
+        }
+    }
+    // The model is required, and is not defaulted as it is for CLM.
+    assert!(parse("judge: {provider: ollama, distribution_policy: {kind: strict}}").is_err());
+}
+
+/// Trace: FR-055-AC-1
+#[test]
+fn each_generation_member_reaches_the_binding_independently() {
+    for (member, expected) in [
+        (
+            "think: true",
+            OllamaOptions {
+                think: true,
+                ..OllamaOptions::default()
+            },
+        ),
+        (
+            "num_ctx: 100",
+            OllamaOptions {
+                num_ctx: 100,
+                ..OllamaOptions::default()
+            },
+        ),
+        (
+            "num_predict: 7",
+            OllamaOptions {
+                num_predict: 7,
+                ..OllamaOptions::default()
+            },
+        ),
+        (
+            "timeout_seconds: 3",
+            OllamaOptions {
+                timeout_seconds: 3,
+                ..OllamaOptions::default()
+            },
+        ),
+    ] {
+        let bindings = parse(&format!(
+            "judge: {{provider: ollama, model: m, {member}, distribution_policy: {{kind: strict}}}}"
+        ))
+        .unwrap();
+        assert_eq!(
+            bindings[&BackendId::new("judge").unwrap()].ollama,
+            Some(expected)
+        );
+    }
+    let round_trip = serde_json::to_value(
+        parse(&format!("judge: {{provider: ollama, model: m, {STRICT}}}")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(round_trip["judge"]["num_ctx"], 32768);
+    assert!(
+        serde_json::to_value(parse(&format!("judge: {{provider: clm, {STRICT}}}")).unwrap())
+            .unwrap()["judge"]
+            .get("num_ctx")
+            .is_none()
+    );
+}
+
+/// Trace: FR-055-AC-8
+#[test]
+fn help_and_guide_list_the_provider_its_members_the_variable_and_the_timeout_rule() {
+    let help = Command::new(env!("CARGO_BIN_EXE_sapho"))
+        .arg("--help")
+        .env_clear()
+        .output()
+        .unwrap();
+    let help = String::from_utf8(help.stdout).unwrap();
+    let guide = include_str!("../../../docs/cli-guide.md");
+    for surface in [help.as_str(), guide] {
+        for needle in [
+            "ollama",
+            "model",
+            "expected_model",
+            "distribution_policy",
+            "think",
+            "num_ctx",
+            "num_predict",
+            "timeout_seconds",
+            "OLLAMA_BASE_URL",
+            "--timeout-secs",
+        ] {
+            assert!(surface.contains(needle), "missing {needle}");
+        }
+        assert!(
+            surface.contains("non-local host") || surface.contains("another host"),
+            "states that a non-local host is allowed"
+        );
+    }
+}
+
+/// Trace: FR-055-AC-9, FR-045-AC-4
+#[cfg(not(feature = "ollama"))]
+#[test]
+fn a_build_without_ollama_support_refuses_a_required_binding_before_any_access() {
+    let id = BackendId::new("judge").unwrap();
+    let bindings = parse(&format!("judge: {{provider: ollama, model: m, {STRICT}}}")).unwrap();
+    assert!(matches!(
+        live_bindings(&[id], &bindings),
+        Err(CliError::Feature(Provider::Ollama))
+    ));
 }

@@ -123,8 +123,12 @@ judge:
   distribution_policy: {kind: strict}
 ```
 
-`provider` is `jev` or `clm`. Jev requires an explicit nonempty `model`; CLM
-may omit it and defaults to `clm-latest`. `expected_model` optionally requires
+`provider` is `jev`, `clm` or `ollama`. Jev and Ollama require an explicit
+nonempty `model`; CLM may omit it and defaults to `clm-latest`. An `ollama`
+entry also takes `think` (false), `num_ctx` (32768), `num_predict` (512) and
+`timeout_seconds` (600); its server URL comes from `OLLAMA_BASE_URL` (default
+`http://127.0.0.1:11434`, a non-local host allowed) and it needs no credential
+([guide](cli-guide.md#bind-ollama-explicitly)). `expected_model` optionally requires
 an exact actual response identity. `distribution_policy` is required: strict,
 or `{kind: approximate, max_mass_error: 0.02}` with a positive allowance at
 most 0.05. Graphs/bindings do not contain credentials or endpoints.

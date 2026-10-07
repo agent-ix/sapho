@@ -17,6 +17,30 @@ pub enum Provider {
     Jev,
     /// Host-configured CLM System One service.
     Clm,
+    /// A running Ollama server; the URL comes from `OLLAMA_BASE_URL`, never from a document.
+    Ollama,
+}
+/// Generation members of an `ollama` binding; the defaults are the CLI's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct OllamaOptions {
+    /// Whether the model thinks before answering; typed questions need `false`.
+    pub think: bool,
+    /// Context size in tokens.
+    pub num_ctx: u64,
+    /// Tokens reserved for the answer.
+    pub num_predict: u64,
+    /// Bound on each single request to the server, in seconds.
+    pub timeout_seconds: u64,
+}
+impl Default for OllamaOptions {
+    fn default() -> Self {
+        Self {
+            think: false,
+            num_ctx: 32768,
+            num_predict: 512,
+            timeout_seconds: 600,
+        }
+    }
 }
 /// One declared binding; no credential or endpoint fields are accepted.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -30,6 +54,9 @@ pub struct BindingConfig {
     pub expected_model: Option<String>,
     /// Explicit complete-distribution interpretation policy.
     pub distribution_policy: DistributionPolicy,
+    /// Generation members; present exactly for provider `ollama`.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub ollama: Option<OllamaOptions>,
 }
 /// Named binding metadata document in YAML or JSON.
 pub type Bindings = BTreeMap<BackendId, BindingConfig>;
@@ -133,6 +160,10 @@ impl<'de> Deserialize<'de> for BindingConfig {
             model: Option<String>,
             expected_model: Option<String>,
             distribution_policy: DistributionPolicy,
+            think: Option<bool>,
+            num_ctx: Option<u64>,
+            num_predict: Option<u64>,
+            timeout_seconds: Option<u64>,
         }
         let wire = Wire::deserialize(decoder)?;
         let model = match (wire.provider, wire.model) {
@@ -140,11 +171,33 @@ impl<'de> Deserialize<'de> for BindingConfig {
             (Provider::Clm, None) => sapho_systemone::CLM_DEFAULT_MODEL.to_owned(),
             _ => return Err(serde::de::Error::custom("A nonempty model is required")),
         };
+        let given = [
+            ("think", wire.think.is_some()),
+            ("num_ctx", wire.num_ctx.is_some()),
+            ("num_predict", wire.num_predict.is_some()),
+            ("timeout_seconds", wire.timeout_seconds.is_some()),
+        ];
+        let ollama = if wire.provider == Provider::Ollama {
+            let default = OllamaOptions::default();
+            Some(OllamaOptions {
+                think: wire.think.unwrap_or(default.think),
+                num_ctx: wire.num_ctx.unwrap_or(default.num_ctx),
+                num_predict: wire.num_predict.unwrap_or(default.num_predict),
+                timeout_seconds: wire.timeout_seconds.unwrap_or(default.timeout_seconds),
+            })
+        } else if let Some((member, _)) = given.iter().find(|(_, present)| *present) {
+            return Err(serde::de::Error::custom(format!(
+                "Member {member} belongs to provider ollama"
+            )));
+        } else {
+            None
+        };
         Ok(Self {
             provider: wire.provider,
             model,
             expected_model: wire.expected_model,
             distribution_policy: wire.distribution_policy,
+            ollama,
         })
     }
 }
@@ -172,10 +225,52 @@ pub fn live_bindings(
         let backend: Arc<dyn sapho_core::ModelBackend> = match binding.provider {
             Provider::Jev => prepare_jev()?,
             Provider::Clm => prepare_clm()?,
+            Provider::Ollama => prepare_ollama(binding)?,
         };
         registry.register(id.clone(), binding.attach(backend))?;
     }
     Ok(registry)
+}
+/// The Ollama server URL: the `OLLAMA_BASE_URL` value when set and nonempty, else the
+/// loopback default. An empty value counts as unset.
+#[cfg(feature = "ollama")]
+pub fn ollama_base_url(environment: Option<String>) -> String {
+    crate::resolve_endpoint(
+        None,
+        environment.filter(|value| !value.is_empty()),
+        sapho_ollama::DEFAULT_BASE_URL,
+    )
+}
+/// Build the Ollama backend for one required binding; no credential or secret store is used.
+#[cfg(feature = "ollama")]
+fn prepare_ollama(binding: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    use sapho_ollama::{Limits, OllamaBackend, Server, Settings};
+    let options = binding.ollama.unwrap_or_default();
+    let environment = std::env::var("OLLAMA_BASE_URL")
+        .map(Some)
+        .or_else(|error| match error {
+            std::env::VarError::NotPresent => Ok(None),
+            std::env::VarError::NotUnicode(_) => Err(CliError::ProviderConfiguration),
+        })?;
+    let endpoint = ollama_base_url(environment);
+    let limits = Limits {
+        timeout: std::time::Duration::from_secs(options.timeout_seconds),
+        ..Limits::default()
+    };
+    let server = Server::new(&endpoint, limits).map_err(SaphoError::from)?;
+    let settings = Settings {
+        model: binding.model.clone(),
+        think: options.think,
+        num_ctx: options.num_ctx,
+        num_predict: options.num_predict,
+    };
+    OllamaBackend::new(server, settings)
+        .map(|backend| Arc::new(backend) as Arc<dyn sapho_core::ModelBackend>)
+        .map_err(|error| SaphoError::from(error).into())
+}
+#[cfg(not(feature = "ollama"))]
+fn prepare_ollama(_: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    Err(CliError::Feature(Provider::Ollama))
 }
 #[cfg(any(feature = "jev", feature = "clm"))]
 fn credential(provider: Provider) -> Result<Option<ix_cli_kit::secrets::SecretValue>, CliError> {
@@ -183,7 +278,7 @@ fn credential(provider: Provider) -> Result<Option<ix_cli_kit::secrets::SecretVa
         provider,
         &ix_cli_kit::secrets::SecretStore::system(),
         None,
-        std::env::var_os(provider.credential_environment()),
+        provider.credential_environment().and_then(std::env::var_os),
     )
 }
 #[cfg(feature = "clm")]

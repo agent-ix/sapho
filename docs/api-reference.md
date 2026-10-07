@@ -341,7 +341,9 @@ Use `sapho-cli` when your Rust host needs stock reporting and exit policy:
 - `Bindings`, `BindingConfig`, `Provider` describe supported stock providers.
   `live_bindings` prepares only required providers; `recording_bindings` wraps
   required bindings; `replay_bindings` infers or verifies exact identities.
-  `Provider::credential_environment()` identifies its environment key.
+  `Provider::credential_environment()` identifies its environment key, and is
+  `None` for `Provider::Ollama`, which needs no credential; its generation
+  members are `BindingConfig::ollama` (`OllamaOptions`).
 - `resolve_credential` accepts an explicit secret, environment snapshot and
   SecretStore, resolving in that order. `resolve_endpoint` resolves explicit,
   environment and default values. These are synchronous host configuration.

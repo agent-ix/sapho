@@ -6,17 +6,20 @@ use ix_cli_kit::secrets::{AppScope, CredentialBackend, SecretKey, SecretStore, S
 use std::ffi::OsString;
 
 impl Provider {
-    /// Host environment variable for this live provider's credential.
-    pub const fn credential_environment(self) -> &'static str {
+    /// Host environment variable for this live provider's credential; `None` for a
+    /// provider that needs no credential.
+    pub const fn credential_environment(self) -> Option<&'static str> {
         match self {
-            Self::Jev => "TYPESAFE_API_KEY",
-            Self::Clm => "CLM_API_KEY",
+            Self::Jev => Some("TYPESAFE_API_KEY"),
+            Self::Clm => Some("CLM_API_KEY"),
+            Self::Ollama => None,
         }
     }
-    fn credential_key(self) -> &'static str {
+    const fn credential_key(self) -> Option<&'static str> {
         match self {
-            Self::Jev => "jev-api-key",
-            Self::Clm => "clm-api-key",
+            Self::Jev => Some("jev-api-key"),
+            Self::Clm => Some("clm-api-key"),
+            Self::Ollama => None,
         }
     }
 }
@@ -28,11 +31,16 @@ pub fn resolve_credential<B: CredentialBackend>(
     explicit: Option<SecretValue>,
     environment: Option<OsString>,
 ) -> Result<Option<SecretValue>, CliError> {
+    let (Some(environment_name), Some(key_name)) =
+        (provider.credential_environment(), provider.credential_key())
+    else {
+        return Ok(None);
+    };
     let scope = AppScope::try_from("agent-ix/sapho").map_err(CliError::from)?;
-    let key = SecretKey::try_from(provider.credential_key()).map_err(CliError::from)?;
+    let key = SecretKey::try_from(key_name).map_err(CliError::from)?;
     let resolved = store.resolve_from(
         explicit,
-        environment.map(|value| (provider.credential_environment(), value)),
+        environment.map(|value| (environment_name, value)),
         &scope,
         &key,
     )?;
