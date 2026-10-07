@@ -119,4 +119,4 @@ All approved acquisition and graph-skill behavior is specified before implementa
 
 The authoritative TypeSafe SDK is a package dependency. Native domain adapters and private evidence are supplied from their owning repositories, never copied into Sapho.
 
-CLM and shared CLI foundations are specified in [CLM](modules/clm/spec.md), [provider credentials](modules/cli/functional/FR-045.md), and [CLI foundations](modules/cli/functional/FR-046.md). [Decisions contract acquisition](modules/clm/functional/FR-047.md) remains an external prerequisite; no wire schema is assumed.
+CLM and shared CLI foundations are specified in [CLM](modules/clm/spec.md), [provider credentials](modules/cli/functional/FR-045.md), [CLI foundations](modules/cli/functional/FR-046.md), the [Ollama provider](modules/cli/functional/FR-055.md) and the [large-Dataset ceilings](modules/cli/functional/FR-056.md). [Decisions contract acquisition](modules/clm/functional/FR-047.md) remains an external prerequisite; no wire schema is assumed.

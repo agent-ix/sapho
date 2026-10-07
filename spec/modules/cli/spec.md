@@ -27,6 +27,8 @@ Owning component: `sapho-cli`. See the [workspace boundaries](../../spec.md).
 
 - [FR-045](functional/FR-045.md): host provider credentials
 - [FR-046](functional/FR-046.md): shared CLI foundations
+- [FR-055](functional/FR-055.md): the `ollama` provider for local models
+- [FR-056](functional/FR-056.md): explicit ceilings for Datasets of about fifteen thousand cases
 
 ## References
 
