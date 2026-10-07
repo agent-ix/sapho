@@ -284,6 +284,91 @@ async fn explicit_clm_replay_checks_only_model_and_policy_without_guessing_provi
         matches!(replay_bindings(&recording, Some(&bindings), 1_048_576), Err(CliError::Engine(error)) if error.code == ErrorCode::RecordingMismatch)
     );
 }
+/// Trace: FR-045-AC-3, FR-056-AC-5
+#[tokio::test]
+async fn replay_read_from_json_binds_the_same_identities_and_refuses_the_same_conflicts() {
+    let exchange = |model: &str, text: &str| {
+        let request = ModelRequest {
+            backend: BackendId::new("decision").unwrap(),
+            model: model.into(),
+            expected_model: None,
+            distribution_policy: DistributionPolicy::Strict {},
+            state: Value::Record(BTreeMap::from([("text".into(), Value::Text(text.into()))])),
+            questions: vec![NamedQuestion {
+                id: "q".into(),
+                question: Question::Boolean {
+                    instructions: "Synthetic?".into(),
+                    yes: "True".into(),
+                    no: "False".into(),
+                },
+            }],
+        };
+        let response = ModelResponse {
+            model: model.into(),
+            digest: None,
+            raw: None,
+            answers: BTreeMap::from([(
+                "q".into(),
+                Answer::Boolean {
+                    probability: Probability::new(0.7).unwrap(),
+                },
+            )]),
+            usage: None,
+        };
+        Exchange { request, response }
+    };
+    let recording = Recording {
+        exchanges: vec![exchange("m", "one"), exchange("m", "two")],
+    };
+    let bytes = recording.to_json(1_000_000).unwrap();
+    let typed = replay_bindings(&recording, None, 1_000_000).unwrap();
+    let streamed = replay_bindings_json(&bytes, None, 1_000_000).unwrap();
+    let id = BackendId::new("decision").unwrap();
+    for (typed, streamed) in [(&typed, &streamed)] {
+        let (a, b) = (typed.get(&id).unwrap(), streamed.get(&id).unwrap());
+        assert_eq!((&a.model, &a.expected_model), (&b.model, &b.expected_model));
+        for exchange in &recording.exchanges {
+            assert_eq!(
+                a.backend.infer(&exchange.request).await.unwrap(),
+                b.backend.infer(&exchange.request).await.unwrap()
+            );
+        }
+    }
+    // One backend recorded under two models is refused on both paths.
+    let conflicting = Recording {
+        exchanges: vec![exchange("m", "one"), exchange("other", "two")],
+    };
+    let bytes = conflicting.to_json(1_000_000).unwrap();
+    for result in [
+        replay_bindings(&conflicting, None, 1_000_000).err(),
+        replay_bindings_json(&bytes, None, 1_000_000).err(),
+    ] {
+        assert!(matches!(
+            result,
+            Some(CliError::Engine(error)) if error.code == ErrorCode::RecordingMismatch
+        ));
+    }
+    // Explicit metadata that differs from the recording is refused on both paths.
+    let explicit = Bindings::from([(
+        id,
+        BindingConfig {
+            provider: Provider::Clm,
+            model: "different".into(),
+            expected_model: None,
+            distribution_policy: DistributionPolicy::Strict {},
+        },
+    )]);
+    let bytes = recording.to_json(1_000_000).unwrap();
+    for result in [
+        replay_bindings(&recording, Some(&explicit), 1_000_000).err(),
+        replay_bindings_json(&bytes, Some(&explicit), 1_000_000).err(),
+    ] {
+        assert!(matches!(
+            result,
+            Some(CliError::Engine(error)) if error.code == ErrorCode::RecordingMismatch
+        ));
+    }
+}
 /// Trace: FR-046-AC-2
 #[test]
 fn built_version_agrees_and_host_endpoint_uses_shared_precedence() {

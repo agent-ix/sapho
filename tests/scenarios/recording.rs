@@ -191,6 +191,129 @@ async fn saved_exchanges_are_bounded_and_exclusive_file_writes_do_not_overwrite(
         ErrorCode::RecordingMismatch
     );
 }
+/// Trace: FR-028-AC-1, FR-028-AC-3, FR-056-AC-5
+#[tokio::test]
+async fn streamed_loading_gives_the_replay_of_typed_loading_and_refuses_the_same_recordings() {
+    let live = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        answer: 0.8,
+    });
+    let recorder = Arc::new(RecordingBackend::new(live, 100_000).unwrap());
+    engine(
+        &ask_graph(None),
+        &PrimitiveRegistry::default(),
+        bindings(recorder.clone()),
+    )
+    .run(&Inputs::new(), limits())
+    .await
+    .unwrap();
+    let saved = recorder.snapshot().unwrap();
+    let bytes = saved.to_json(100_000).unwrap();
+    let request = saved.exchanges[0].request.clone();
+    let mut seen = Vec::new();
+    let streamed = ReplayBackend::from_json(&bytes, 100_000, |exchange| {
+        seen.push(exchange.request.clone());
+        Ok(())
+    })
+    .unwrap();
+    let typed =
+        ReplayBackend::new(&Recording::from_json(&bytes, 100_000).unwrap(), 100_000).unwrap();
+    assert_eq!(seen, vec![request.clone()]);
+    assert_eq!(
+        streamed.infer(&request).await.unwrap(),
+        typed.infer(&request).await.unwrap()
+    );
+    assert_eq!(
+        streamed.infer(&request).await.unwrap(),
+        saved.exchanges[0].response
+    );
+    let mut other = request.clone();
+    other.model.push_str("-changed");
+    assert_eq!(
+        streamed.infer(&other).await.unwrap_err().code,
+        ErrorCode::ReplayMiss
+    );
+    // An empty recording loads, and a callback refusal ends the load with its own code.
+    ReplayBackend::from_json(br#"{"exchanges":[]}"#, 100, |_| Ok(())).unwrap();
+    let refused = ReplayBackend::from_json(&bytes, 100_000, |_| {
+        Err(SaphoError::new(ErrorCode::UnknownBackend, "stop"))
+    });
+    assert_eq!(refused.err().unwrap().code, ErrorCode::UnknownBackend);
+
+    // Every refusal of the typed path is a refusal of the streamed path with the same code.
+    let mut conflict = saved.clone();
+    let mut changed = saved.exchanges[0].clone();
+    changed.response.answers.insert(
+        "q".into(),
+        Answer::Boolean {
+            probability: probability(0.2),
+        },
+    );
+    conflict.exchanges.push(changed);
+    let mut invalid = saved.clone();
+    invalid.exchanges[0].response.answers.clear();
+    let mut identical = saved.clone();
+    identical.exchanges.push(saved.exchanges[0].clone());
+    ReplayBackend::from_json(&identical.to_json(100_000).unwrap(), 100_000, |_| Ok(())).unwrap();
+    let text = |value: &serde_json::Value| serde_json::to_vec(value).unwrap();
+    let document = serde_json::to_value(&saved).unwrap();
+    let mut unknown = document.clone();
+    unknown["surprise"] = serde_json::json!(1);
+    let mut member = document.clone();
+    member["exchanges"][0]["surprise"] = serde_json::json!(1);
+    let cases: Vec<(Vec<u8>, ErrorCode)> = vec![
+        (
+            serde_json::to_vec(&conflict).unwrap(),
+            ErrorCode::RecordingMismatch,
+        ),
+        (
+            serde_json::to_vec(&invalid).unwrap(),
+            ErrorCode::RecordingMismatch,
+        ),
+        (text(&unknown), ErrorCode::RecordingMismatch),
+        (text(&member), ErrorCode::RecordingMismatch),
+        (b"{}".to_vec(), ErrorCode::RecordingMismatch),
+        (b"[]".to_vec(), ErrorCode::RecordingMismatch),
+        (b"not json".to_vec(), ErrorCode::RecordingMismatch),
+        (
+            [bytes.clone(), b" 1".to_vec()].concat(),
+            ErrorCode::RecordingMismatch,
+        ),
+        (
+            br#"{"exchanges":[],"exchanges":[]}"#.to_vec(),
+            ErrorCode::RecordingMismatch,
+        ),
+        (
+            br#"{"exchanges":{"a":1}}"#.to_vec(),
+            ErrorCode::RecordingMismatch,
+        ),
+    ];
+    for (document, code) in cases {
+        let typed =
+            Recording::from_json(&document, 100_000).and_then(|r| ReplayBackend::new(&r, 100_000));
+        let streamed = ReplayBackend::from_json(&document, 100_000, |_| Ok(()));
+        assert_eq!(
+            typed.err().unwrap().code,
+            code,
+            "{}",
+            String::from_utf8_lossy(&document)
+        );
+        assert_eq!(
+            streamed.err().unwrap().code,
+            code,
+            "{}",
+            String::from_utf8_lossy(&document)
+        );
+    }
+    ReplayBackend::from_json(&bytes, bytes.len(), |_| Ok(())).unwrap();
+    assert_eq!(
+        ReplayBackend::from_json(&bytes, bytes.len() - 1, |_| Ok(()))
+            .err()
+            .unwrap()
+            .code,
+        ErrorCode::LimitExceeded
+    );
+}
 /// Trace: FR-028-AC-2
 #[tokio::test]
 async fn exact_matching_includes_option_order_model_state_and_backend() {

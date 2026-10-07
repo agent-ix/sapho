@@ -27,7 +27,7 @@ mod io;
 pub use bindings::ollama_base_url;
 pub use bindings::{
     BindingConfig, Bindings, OllamaOptions, Provider, live_bindings, recording_bindings,
-    replay_bindings,
+    replay_bindings, replay_bindings_json,
 };
 pub use error::CliError;
 pub use host::{ExitStatus, Inspection, RunReport, Runner, inspect, plain_inputs};

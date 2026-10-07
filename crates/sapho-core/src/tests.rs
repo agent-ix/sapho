@@ -792,6 +792,81 @@ fn strict_json_and_nested_occurrences_retain_identity_and_sources() {
     );
 }
 
+/// Trace: FR-032-AC-3, FR-056-AC-5
+#[test]
+fn typed_json_decoding_is_strict_without_building_a_generic_tree() {
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Shape {
+        name: String,
+        items: Vec<Inner>,
+    }
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Inner {
+        weight: f64,
+    }
+    let decoded: Shape = decode_json(
+        br#" {"name":"a","items":[{"weight":0.25},{"weight":1e2}]} "#,
+        1000,
+    )
+    .unwrap();
+    assert_eq!(
+        decoded,
+        Shape {
+            name: "a".into(),
+            items: vec![Inner { weight: 0.25 }, Inner { weight: 100.0 }],
+        }
+    );
+    let refused = |bytes: &[u8]| decode_json::<Shape>(bytes, 1000).unwrap_err().code;
+    // A duplicate key anywhere is refused, even inside a nested typed member.
+    assert_eq!(
+        refused(br#"{"name":"a","items":[{"weight":1,"weight":2}]}"#),
+        ErrorCode::Config
+    );
+    assert_eq!(
+        refused(br#"{"name":"a","name":"b","items":[]}"#),
+        ErrorCode::Config
+    );
+    // Type, unknown-member and trailing-content refusals keep their code.
+    assert_eq!(refused(br#"{"name":1,"items":[]}"#), ErrorCode::Config);
+    assert_eq!(
+        refused(br#"{"name":"a","items":[],"extra":1}"#),
+        ErrorCode::Config
+    );
+    assert_eq!(refused(br#"{"name":"a","items":[]} {}"#), ErrorCode::Config);
+    assert_eq!(refused(br#"{"name":"a","items":[]"#), ErrorCode::Config);
+    assert_eq!(
+        refused(br#"{"name":"a","items":[{"weight":1e999}]}"#),
+        ErrorCode::Config
+    );
+    // Containers nested 128 deep pass and 129 is a limit refusal, for ignored members too.
+    let nested = |levels: usize| "[".repeat(levels) + &"]".repeat(levels);
+    assert!(decode_json::<serde_json::Value>(nested(128).as_bytes(), 1000).is_ok());
+    assert_eq!(
+        decode_json::<serde::de::IgnoredAny>(nested(129).as_bytes(), 1000)
+            .unwrap_err()
+            .code,
+        ErrorCode::LimitExceeded
+    );
+    let mapped = |levels: usize| r#"{"a":"#.repeat(levels) + "0" + &"}".repeat(levels);
+    assert!(decode_json::<serde_json::Value>(mapped(127).as_bytes(), 10_000).is_ok());
+    assert_eq!(
+        decode_json::<serde_json::Value>(mapped(128).as_bytes(), 10_000)
+            .unwrap_err()
+            .code,
+        ErrorCode::LimitExceeded
+    );
+    assert!(decode_json::<serde_json::Value>(b"{}", 2).is_ok());
+    let hidden = format!(r#"{{"name":"a","items":[],"extra":{}}}"#, nested(200));
+    assert_eq!(
+        decode_json::<serde_json::Value>(hidden.as_bytes(), 10_000)
+            .unwrap_err()
+            .code,
+        ErrorCode::LimitExceeded
+    );
+}
+
 /// Trace: FR-032-AC-1, FR-041-AC-2
 #[test]
 fn plain_question_and_answer_inputs_validate_their_full_typed_contract() {

@@ -217,6 +217,21 @@ Boolean outputs report TP/TN/FP/FN and agreement with supplied labels. Probabili
 
 For model graphs, provide explicit `--bindings` for live evaluation or `--replay saved.json` for exact offline evaluation. Each case has its own declared RunLimits. Label provenance records your declaration of each label's kind (`model`, `agent`, `human` or `deterministic_check`), source and reference; Sapho does not certify that a label is true, and measure never scores a model against labels whose source is that same model.
 
+## Evaluate a large Dataset
+
+The case and byte ceilings are safety bounds, so their defaults stay at 1024 cases (`--max-cases`) and 8 MiB (`--max-artifact-bytes`, which also bounds the Dataset file). A Dataset of about fifteen thousand labelled cases is evaluated by raising both ceilings explicitly, so you choose the larger limit knowingly and nothing is silently cropped or retried. For a Dataset of up to 20,000 cases:
+
+```sh
+sapho measure GRAPH --dataset dataset.json --replay recording.json --split development --max-cases 20000 --max-artifact-bytes 1073741824 --output report.json
+sapho tune --candidate GRAPH --dataset dataset.json --replay recording.json --output-name NAME --metric brier --max-cases 20000 --max-artifact-bytes 1073741824 --output tuning.json
+```
+
+`--max-cases` and `--max-artifact-bytes` are accepted by `measure`, `tune` and `export-training`. The artifact ceiling bounds each file separately: the Dataset file, the recording and the report are each limited to it, so choose a value (1073741824 is 1 GiB) at least as large as the biggest of them. The report holds the complete trace of every case, so it is much larger than the Dataset; the 15,000-case test Dataset of claim-sized text, a file of 29 MB, gives a report of 178 MB.
+
+A Dataset with more cases than `--max-cases` is refused with `CaseLimit` naming the limit, before any model call, and a file larger than `--max-artifact-bytes` is refused naming the limit before it is parsed. A Dataset is one file: the CLI does not shard. The per-case result of `measure` does not depend on how cases are split into files, so a caller can split a very large Dataset and combine the per-file reports from their case counts: agreement and Brier combine as case-weighted means, and calibration bins combine by adding their counts.
+
+The process holds the typed Dataset, the compressed per-case documents and the replay index (a recording is indexed as it is read, never held whole), so its peak memory stays near the size of the typed Dataset. The test suite measures the peak of the 15,000-case run and requires at most six times the Dataset file plus 64 MiB.
+
 ## Tune explicit candidates
 
 Author bounded graph variants, then compare their development results:
