@@ -51,7 +51,15 @@ struct Double {
 }
 impl Double {
     fn start(delay: Duration) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        Self::on(TcpListener::bind("127.0.0.1:0").unwrap(), delay)
+    }
+    /// A double on the default loopback address, or `None` when something else holds it.
+    fn on_default() -> Option<Self> {
+        TcpListener::bind("127.0.0.1:11434")
+            .ok()
+            .map(|listener| Self::on(listener, Duration::ZERO))
+    }
+    fn on(listener: TcpListener, delay: Duration) -> Self {
         listener.set_nonblocking(true).unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let paths = Arc::new(Mutex::new(Vec::new()));
@@ -485,10 +493,24 @@ fn backend_refusals_surface_before_any_request_reaches_the_server() {
 
 /// Trace: FR-055-AC-6
 #[test]
-fn a_refused_endpoint_is_refused_before_any_request_without_echoing_it() {
+fn the_default_loopback_url_serves_an_absent_or_empty_variable_and_bad_values_send_nothing() {
+    let Some(default) = Double::on_default() else {
+        eprintln!("skipped: the default loopback port is in use");
+        return;
+    };
     let workspace = Workspace::new("");
-    let secretive = "http://user:synthetic-password@127.0.0.1:9";
-    for value in [secretive, "ftp://127.0.0.1:9", "not-a-url"] {
+    // Absent and empty both reach the double listening at the default address.
+    let absent = workspace.record(&[], &[]);
+    assert!(absent.status.success(), "{}", text(&absent));
+    let reached = default.generates();
+    assert_eq!(reached, 1);
+    std::fs::remove_file(workspace.file("recording.json")).unwrap();
+    let empty = workspace.record(&[("OLLAMA_BASE_URL", "")], &[]);
+    assert!(empty.status.success(), "{}", text(&empty));
+    assert_eq!(default.generates(), 2);
+    std::fs::remove_file(workspace.file("recording.json")).unwrap();
+    let before = default.requests().len();
+    for value in ["not a url", "http://user:pw@host/"] {
         let output = workspace.record(&[("OLLAMA_BASE_URL", value)], &[]);
         assert_eq!(output.status.code(), Some(2), "{}", text(&output));
         let refusal = json(&output);
@@ -498,9 +520,9 @@ fn a_refused_endpoint_is_refused_before_any_request_without_echoing_it() {
             "invalid_base_url"
         );
         let shown = text(&output);
-        assert!(!shown.contains("synthetic-password"));
-        assert!(!shown.contains(value));
+        assert!(!shown.contains("pw@host") && !shown.contains("not a url"));
     }
+    assert_eq!(default.requests().len(), before);
 }
 
 /// Trace: FR-055-AC-7

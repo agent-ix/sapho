@@ -631,7 +631,7 @@ fn help_and_guide_list_the_provider_its_members_the_variable_and_the_timeout_rul
     }
 }
 
-/// Trace: FR-055-AC-1, FR-045-AC-4
+/// Trace: FR-055-AC-9, FR-045-AC-4
 #[cfg(not(feature = "ollama"))]
 #[test]
 fn a_build_without_ollama_support_refuses_a_required_binding_before_any_access() {
