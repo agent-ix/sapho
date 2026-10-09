@@ -326,7 +326,7 @@ async fn context_refusal_carries_the_three_numbers_as_context_fields() {
 
 /// Trace: FR-054-AC-7, FR-052-AC-1
 #[tokio::test]
-async fn the_response_validates_under_both_policies_and_carries_the_digest() {
+async fn the_response_validates_under_both_policies_and_carries_the_model_name() {
     let _serial = serial().await;
     let tokens = vec![
         fill("{\""),
@@ -348,10 +348,8 @@ async fn the_response_validates_under_both_policies_and_carries_the_digest() {
         let request = ask(vec![choice("c", &["alpha", "beta", "gamma"])], policy);
         let response = backend.infer(&request).await.unwrap();
         validate_response(&request, &response).unwrap();
-        assert_eq!(
-            response.digest.as_deref(),
-            Some(format!("sha256:{BLOB}").as_str())
-        );
+        assert_eq!(response.model, MODEL);
+        assert_eq!(response.digest, None);
         let usage = response.usage.unwrap();
         assert_eq!((usage.input_tokens, usage.output_tokens), (48, 8));
     }

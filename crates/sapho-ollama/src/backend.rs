@@ -11,7 +11,6 @@ use sapho_core::{
     RawExchange, TooLarge,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
 
 /// What a binding fixes for every call: the model and its explicit generation limits.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,7 +32,6 @@ pub struct Settings {
 pub struct OllamaBackend {
     pub(crate) server: Server,
     pub(crate) settings: Settings,
-    weights: OnceLock<String>,
 }
 
 #[derive(Serialize)]
@@ -141,11 +139,7 @@ impl OllamaBackend {
         if settings.num_predict >= settings.num_ctx {
             return Err(refused("num_predict_not_below_num_ctx"));
         }
-        Ok(Self {
-            server,
-            settings,
-            weights: OnceLock::new(),
-        })
+        Ok(Self { server, settings })
     }
 
     pub(crate) fn too_large(&self, reported: Option<u64>) -> ExtractError {
@@ -198,24 +192,17 @@ impl OllamaBackend {
             )
         })?;
         self.server.check_request(&request)?;
-        let (digest, reply) = self
+        let reply = self
             .server
             .exclusive(async {
-                let digest =
-                    identity::resolve(&self.server, &self.settings.model, &self.weights).await?;
-                let reply = self.server.post("api/generate", &request).await?;
-                Ok((digest, reply))
+                identity::ensure_installed(&self.server, &self.settings.model).await?;
+                self.server.post("api/generate", &request).await
             })
             .await?;
-        self.accept(reply, &request, digest)
+        self.accept(reply, &request)
     }
 
-    fn accept(
-        &self,
-        reply: Reply,
-        request: &str,
-        digest: String,
-    ) -> Result<Generated, ExtractError> {
+    fn accept(&self, reply: Reply, request: &str) -> Result<Generated, ExtractError> {
         if !reply.success() {
             // The body is read only to recognise the server's context refusal.
             if reply.status == 400
@@ -289,7 +276,7 @@ impl OllamaBackend {
             raw,
             model: ModelIdentity {
                 name: parsed.model,
-                digest: Some(digest),
+                digest: None,
             },
         })
     }

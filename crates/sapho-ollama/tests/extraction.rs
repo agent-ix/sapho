@@ -539,10 +539,7 @@ async fn success_carries_identity_usage_and_the_exact_bytes() {
         .await
         .unwrap();
     assert_eq!(response.model.name, MODEL);
-    assert_eq!(
-        response.model.digest.as_deref(),
-        Some(format!("sha256:{BLOB}").as_str())
-    );
+    assert_eq!(response.model.digest, None);
     assert_eq!(response.usage.input_tokens, Some(48));
     assert_eq!(response.usage.output_tokens, Some(8));
     assert_eq!(response.usage.elapsed_ms, Some(5990));
@@ -566,7 +563,7 @@ async fn an_unknown_model_is_refused_before_any_generate() {
 
 /// Trace: FR-052-AC-4
 #[tokio::test]
-async fn changed_weights_and_a_different_model_name_are_mismatches() {
+async fn changed_description_does_not_claim_identity_and_a_different_name_is_refused() {
     let _serial = serial().await;
     let calls = std::sync::atomic::AtomicUsize::new(0);
     let fake = Fake::start(move |r| match r.path.as_str() {
@@ -579,12 +576,10 @@ async fn changed_weights_and_a_different_model_name_are_mismatches() {
     .await;
     let binding = backend(&fake, MODEL);
     extract(&binding, &request("one")).await.unwrap();
-    let error = extract(&binding, &request("two")).await.unwrap_err();
-    assert_eq!(
-        (error.code, error.reason),
-        (ErrorCode::ModelMismatch, Some("weights_changed"))
-    );
-    assert_eq!(fake.generates().len(), 1, "no generate for the second call");
+    let second = extract(&binding, &request("two")).await.unwrap();
+    assert_eq!(second.model.name, MODEL);
+    assert_eq!(second.model.digest, None);
+    assert_eq!(fake.generates().len(), 2);
 
     let renamed = serving(generated("another:tag", r#"{"label":"ok"}"#)).await;
     let error = failing(&renamed, "item").await;
@@ -597,7 +592,7 @@ async fn changed_weights_and_a_different_model_name_are_mismatches() {
 
 /// Trace: FR-052-AC-7
 #[tokio::test]
-async fn external_retag_between_show_and_generate_leaves_only_a_pre_request_observation() {
+async fn external_retag_between_show_and_generate_leaves_only_the_response_name() {
     let _serial = serial().await;
     let serving_other_weights = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let changed = serving_other_weights.clone();
@@ -619,43 +614,34 @@ async fn external_retag_between_show_and_generate_leaves_only_a_pre_request_obse
     let response = extract(&backend(&fake, MODEL), &request("one"))
         .await
         .unwrap();
-    assert_eq!(response.model.digest, Some(format!("sha256:{BLOB}")));
+    assert_eq!(response.model.digest, None);
     assert_eq!(response.model.name, MODEL);
     assert!(serving_other_weights.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(fake.generates().len(), 1);
-    assert_eq!(
-        Server::new(&fake.url, limits())
-            .unwrap()
-            .weights_digest(MODEL)
-            .await
-            .unwrap(),
-        "sha256:bb22"
-    );
-    // The reply has no answering-weights digest, so these observations cannot
-    // distinguish a stable tag from a show-to-generate external retag.
+    assert!(response.raw.request.contains(MODEL));
+    // The name-only reply cannot distinguish a stable tag from an external retag.
 }
 
 /// Trace: FR-052-AC-5
 #[tokio::test]
-async fn tags_sharing_one_weights_blob_share_a_digest() {
+async fn distinct_tags_keep_distinct_response_names() {
     let _serial = serial().await;
     let fake = Fake::start(tagged(["tag-a", "tag-b"])).await;
-    let mut digests = Vec::new();
+    let mut names = Vec::new();
     for tag in ["tag-a", "tag-b"] {
         let req = ExtractRequest {
             model: tag.into(),
             ..request("item")
         };
-        digests.push(
+        names.push(
             extract(&backend(&fake, tag), &req)
                 .await
                 .unwrap()
                 .model
-                .digest,
+                .name,
         );
     }
-    assert_eq!(digests[0], digests[1]);
-    assert!(digests[0].is_some());
+    assert_eq!(names, ["tag-a", "tag-b"]);
 }
 
 /// Trace: FR-049-AC-6

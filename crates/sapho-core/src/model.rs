@@ -425,7 +425,7 @@ pub struct Usage {
 pub struct ModelResponse {
     /// Actual resolved model identity.
     pub model: String,
-    /// Digest of the actual model's weights, when the provider reports one.
+    /// Legacy optional provider metadata; presence alone does not attest answering weights.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,
     /// The exact request and response bodies (never headers or URLs), when the provider exposes them.

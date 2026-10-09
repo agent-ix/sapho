@@ -7,7 +7,6 @@ use crate::{
 };
 use sapho_core::{ErrorCode, ExtractError, ModelIdentity, RawExchange};
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
 
 /// Inputs per request unless the host chooses another maximum.
 pub const DEFAULT_MAX_INPUTS: usize = 32;
@@ -38,7 +37,7 @@ struct ErrorBody {
 pub struct Embeddings {
     /// Finite vectors of equal length.
     pub vectors: Vec<Vec<f64>>,
-    /// The response model name and the pre-request weights digest observation.
+    /// The response model name; Ollama does not attest answering weights.
     pub model: ModelIdentity,
     /// Prompt tokens, when the server reported them.
     pub input_tokens: Option<u64>,
@@ -52,7 +51,6 @@ pub struct OllamaEmbedder {
     server: Server,
     model: String,
     max_inputs: usize,
-    weights: OnceLock<String>,
 }
 impl OllamaEmbedder {
     /// Bind an embedding model; `Config` for an empty model or a zero maximum.
@@ -73,7 +71,6 @@ impl OllamaEmbedder {
             server,
             model,
             max_inputs,
-            weights: OnceLock::new(),
         })
     }
 
@@ -102,11 +99,11 @@ impl OllamaEmbedder {
             )
         })?;
         self.server.check_request(&request)?;
-        let (digest, reply) = self
+        let reply = self
             .server
             .exclusive(async {
-                let digest = identity::resolve(&self.server, &self.model, &self.weights).await?;
-                Ok((digest, self.server.post("api/embed", &request).await?))
+                identity::ensure_installed(&self.server, &self.model).await?;
+                self.server.post("api/embed", &request).await
             })
             .await?;
         if !reply.success() {
@@ -158,7 +155,7 @@ impl OllamaEmbedder {
             vectors: parsed.embeddings,
             model: ModelIdentity {
                 name: parsed.model,
-                digest: Some(digest),
+                digest: None,
             },
             input_tokens: parsed.prompt_eval_count,
             raw,

@@ -48,12 +48,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let started = Instant::now();
         match extract(&backend, &extract_request(item)).await {
             Ok(r) => println!(
-                "extract {item}: {:.2}s wall, {:?} ms server, in {:?} out {:?} tokens, digest {:?}, value {}",
+                "extract {item}: {:.2}s wall, {:?} ms server, in {:?} out {:?} tokens, model {}, value {}",
                 started.elapsed().as_secs_f64(),
                 r.usage.elapsed_ms,
                 r.usage.input_tokens,
                 r.usage.output_tokens,
-                r.model.digest,
+                r.model.name,
                 r.value
             ),
             Err(e) => println!(

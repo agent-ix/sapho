@@ -32,7 +32,7 @@ The response contains actual model identity, an optional digest of the actual mo
 
 | ID | Criteria | Verification |
 |----|----------|--------------|
-| FR-005-AC-1 | A valid mixed response preserves expected score, option probabilities, distribution completeness, actual model identity and, when present, the model weights digest. | Test (TC-005) |
+| FR-005-AC-1 | A valid mixed response preserves expected score, option probabilities, distribution completeness and the reported model name. | Test (TC-005) |
 | FR-005-AC-2 | Missing/extra IDs, mismatched types, unknown labels, invalid mass and non-finite values return InvalidAnswer or MissingAnswer. | Test (TC-005) |
 | FR-005-AC-3 | A partial or unavailable distribution remains distinguishable and never becomes a zero-valued complete distribution. | Test (TC-005) |
 | FR-005-AC-4 | Approximate policy accepts complete Choice and Score totals0.99 and1.01 at inclusive configured bounds, retains raw values and exposes mass/scale and Approximate state; Strict, out-of-bound/zero full mass, invalid policy and malformed labels/types/unit values refuse with diagnostic context. Partial excess mass still refuses. | Test (TC-005) |
