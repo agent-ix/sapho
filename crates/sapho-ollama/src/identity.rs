@@ -22,15 +22,8 @@ fn weights_digest(modelfile: &str) -> Option<String> {
         .then(|| format!("sha256:{blob}"))
 }
 
-/// Read the model's current weights digest and hold it to the first one `pinned` saw.
-///
-/// An unknown model is `Config`; a digest that differs from the pinned one is
-/// `ModelMismatch`, so a model replaced mid-run never answers under the old identity.
-pub(crate) async fn resolve(
-    server: &Server,
-    model: &str,
-    pinned: &OnceLock<String>,
-) -> Result<String, ExtractError> {
+/// Read the current digest within an already held request permit.
+async fn read_digest(server: &Server, model: &str) -> Result<String, ExtractError> {
     let body = serde_json::to_string(&serde_json::json!({ "model": model })).map_err(|_| {
         failure(
             ErrorCode::Config,
@@ -49,7 +42,7 @@ pub(crate) async fn resolve(
     if !reply.success() {
         return Err(reply.status_error());
     }
-    let digest = serde_json::from_str::<Description>(reply.success_text()?)
+    serde_json::from_str::<Description>(reply.success_text()?)
         .ok()
         .and_then(|d| weights_digest(&d.modelfile))
         .ok_or_else(|| {
@@ -58,7 +51,29 @@ pub(crate) async fn resolve(
                 "digest_unavailable",
                 "The model description names no weights blob",
             )
-        })?;
+        })
+}
+
+impl Server {
+    /// Look up the model's current weights digest through this server, without pinning it.
+    ///
+    /// This uses the server's URL, headers, request ceiling, response ceiling, shared request
+    /// permit and timeout. A later lookup may return a different digest if the model changes.
+    pub async fn weights_digest(&self, model: &str) -> Result<String, ExtractError> {
+        self.exclusive(read_digest(self, model)).await
+    }
+}
+
+/// Read the model's current weights digest and hold it to the first one `pinned` saw.
+///
+/// An unknown model is `Config`; a digest that differs from the pinned one is
+/// `ModelMismatch`, so a model replaced mid-run never answers under the old identity.
+pub(crate) async fn resolve(
+    server: &Server,
+    model: &str,
+    pinned: &OnceLock<String>,
+) -> Result<String, ExtractError> {
+    let digest = read_digest(server, model).await?;
     if pinned.get_or_init(|| digest.clone()) != &digest {
         return Err(failure(
             ErrorCode::ModelMismatch,
