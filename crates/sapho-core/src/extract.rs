@@ -238,10 +238,10 @@ pub async fn extract(
         error
     };
     let value: Value = serde_json::from_slice(&exchange.answer)
-        .map_err(|_| invalid("not_json", "Answer is not JSON", None))?;
+        .map_err(|_| invalid(crate::reason::NOT_JSON, "Answer is not JSON", None))?;
     if let Some(violation) = validator.iter_errors(&value).next() {
         return Err(invalid(
-            "schema_violation",
+            crate::reason::SCHEMA_VIOLATION,
             "Answer violates the schema",
             Some(violation.instance_path().to_string()),
         ));

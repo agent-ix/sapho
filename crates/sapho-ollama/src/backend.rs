@@ -222,8 +222,12 @@ impl OllamaBackend {
                 .with_reason(reason)
                 .with_raw(raw.clone())
         };
-        let parsed: GenerateReply = serde_json::from_str(text)
-            .map_err(|_| invalid("malformed_response", "Response is not a generate response"))?;
+        let parsed: GenerateReply = serde_json::from_str(text).map_err(|_| {
+            invalid(
+                sapho_core::reason::MALFORMED_RESPONSE,
+                "Response is not a generate response",
+            )
+        })?;
         let usage = ExtractUsage {
             input_tokens: parsed.prompt_eval_count,
             output_tokens: parsed.eval_count,
@@ -237,7 +241,7 @@ impl OllamaBackend {
             return Err(with_usage(
                 failure(
                     ErrorCode::ModelMismatch,
-                    "name_mismatch",
+                    sapho_core::reason::NAME_MISMATCH,
                     "The response names a different model",
                 )
                 .with_raw(raw),
@@ -253,19 +257,19 @@ impl OllamaBackend {
         }
         if !parsed.done {
             return Err(with_usage(invalid(
-                "malformed_response",
+                sapho_core::reason::MALFORMED_RESPONSE,
                 "Response is not complete",
             )));
         }
         if parsed.done_reason.as_deref() == Some("length") {
             return Err(with_usage(invalid(
-                "output_truncated",
+                sapho_core::reason::OUTPUT_TRUNCATED,
                 "The answer stopped at the output limit",
             )));
         }
         if parsed.response.is_empty() {
             return Err(with_usage(invalid(
-                "empty_response",
+                sapho_core::reason::EMPTY_RESPONSE,
                 "The response text is empty",
             )));
         }

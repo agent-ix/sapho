@@ -28,6 +28,7 @@ mod error;
 mod extract;
 mod model;
 mod ports;
+pub mod reason;
 mod value;
 pub use data::{decode_json, decode_plain};
 pub use distribution::{DistributionAdjustment, DistributionPolicy};
