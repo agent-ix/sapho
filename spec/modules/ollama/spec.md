@@ -15,7 +15,7 @@ implementation_language: rust
 
 ### In Scope
 
-The [Extractor](../core/functional/FR-048.md) and ModelBackend implementations over Ollama's generate endpoint, the latter deriving answer probabilities from answer-token log-probabilities; explicit generation settings per binding; server-side refusal of prompts longer than the context, and the reported token count after a call; a `TooLarge` outcome; one request in flight per process; model identity, digest, usage and raw exchange bytes on every response; embeddings over Ollama's embed endpoint; host-configured endpoint, timeout and byte ceilings.
+The [Extractor](../core/functional/FR-048.md) and ModelBackend implementations over Ollama's generate endpoint, the latter deriving answer probabilities from answer-token log-probabilities; explicit generation settings per binding; server-side refusal of prompts longer than the context, and the reported token count after a call; a `TooLarge` outcome; one request in flight per process; the response model name, usage and raw exchange bytes on every response; embeddings over Ollama's embed endpoint; host-configured endpoint, timeout and byte ceilings.
 
 ### Out of Scope
 

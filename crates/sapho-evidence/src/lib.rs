@@ -98,20 +98,15 @@ pub struct LabelProvenance {
     pub kind: LabelKind,
     /// Who made them; for kind `model`, the model identity the backend reported for the answer.
     pub source: String,
-    /// For kind `model`, the digest of the weights that answered.
+    /// Legacy caller metadata, retained for reading existing Dataset files; not used to infer source independence.
     pub model_digest: Option<String>,
     /// Where the labels came from.
     pub reference: String,
 }
 impl LabelProvenance {
-    /// True when `identity` is the model that made these labels, by name or by weights digest.
+    /// True when the declared model name matches the response model name.
     fn made_by(&self, identity: &ModelIdentity) -> bool {
-        self.kind == LabelKind::Model
-            && (self.source == identity.name
-                || self
-                    .model_digest
-                    .as_ref()
-                    .is_some_and(|digest| identity.digest.as_ref() == Some(digest)))
+        self.kind == LabelKind::Model && self.source == identity.name
     }
 }
 /// One independently curated case; model recordings cannot deserialize into this schema.

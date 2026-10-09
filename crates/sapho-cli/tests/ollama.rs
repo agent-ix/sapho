@@ -283,7 +283,7 @@ fn an_empty_endpoint_variable_counts_as_unset_and_a_live_binding_builds_without_
 
 /// Trace: FR-055-AC-2, FR-055-AC-3, FR-055-AC-6, FR-045-AC-4
 #[test]
-fn record_against_the_double_then_replay_measure_offline_with_the_digest_from_the_server() {
+fn record_against_the_double_then_replay_measure_offline_with_the_response_name() {
     let workspace = Workspace::new("");
     let double = Double::start(Duration::ZERO);
     let environment = [("OLLAMA_BASE_URL", double.url.as_str())];
@@ -313,12 +313,7 @@ fn record_against_the_double_then_replay_measure_offline_with_the_digest_from_th
     assert!(!exchanges.is_empty());
     for exchange in exchanges {
         assert_eq!(exchange["response"]["model"], MODEL);
-        assert!(
-            exchange["response"]["digest"]
-                .as_str()
-                .unwrap()
-                .contains(BLOB)
-        );
+        assert!(exchange["response"]["digest"].is_null());
         assert!(exchange["response"]["raw"].is_object());
     }
     // The endpoint is in no document and no diagnostic.

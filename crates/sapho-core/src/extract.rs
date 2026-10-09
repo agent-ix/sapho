@@ -56,13 +56,13 @@ pub struct ExtractUsage {
     pub generation_ms: Option<u64>,
 }
 
-/// The model that answered: its reported name and, when known, the digest of its weights.
+/// The response's reported model name and legacy optional provider metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelIdentity {
     /// Model name as the provider reported it.
     pub name: String,
-    /// Weights digest, `sha256:<hex>` for providers that report one.
+    /// Legacy optional provider metadata; presence alone does not attest answering weights.
     pub digest: Option<String>,
 }
 

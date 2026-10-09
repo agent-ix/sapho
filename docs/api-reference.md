@@ -254,10 +254,10 @@ Your host supplies actual per-case outputs or failures.
 
 | API | Use |
 |---|---|
-| `Case`, `Dataset`, `Split`, `LabelProvenance`, `LabelKind` | Identified typed inputs, Boolean output labels, label provenance (kind `model`, `agent`, `human` or `deterministic_check`, a nonblank source and reference, and for models an optional weights digest), development/held-out partition. Dataset `validate(max_cases)` checks all cases; `selected(split)` iterates a partition. |
+| `Case`, `Dataset`, `Split`, `LabelProvenance`, `LabelKind` | Identified typed inputs, Boolean output labels, label provenance (kind `model`, `agent`, `human` or `deterministic_check`, a nonblank source and reference), development/held-out partition. Dataset `validate(max_cases)` checks all cases; `selected(split)` iterates a partition. |
 | `CaseOutcome` | Completed Inputs or Failed SaphoError, each with the models that answered during the case, keyed by ItemId. |
 | `measure(dataset, split, schemas, outcomes, max_cases)` | Return Measurement with per-output coverage and predictions against supplied labels. |
-| `Measurement::complete()` | No failed or unscored labels; inspect selected count and denominators as well. `Measurement.self_source` lists cases whose model-made labels came from a model that also answered them (by name or weights digest); they are scored on no output and counted in no label total. |
+| `Measurement::complete()` | No failed or unscored labels; inspect selected count and denominators as well. `Measurement.self_source` lists cases whose declared model source name equals a response model name; they are scored on no output and counted in no label total. Other names do not prove independent sources. |
 | `OutputMeasurement`, `Prediction`, `UnscoredReason` | Labelled/scored/unscored/failed counts; retained values, provenance, missing/unsupported/type mismatch reasons and errors. |
 | `Metrics`, `Confusion` | Boolean agreement and TP/TN/FP/FN; Probability Brier; Unsupported schemas. No metrics for Degree. |
 | `Candidate`, `Metric`, `rank` | Rank complete development measurements for one output. Agreement descends, Brier ascends; stable ties. |
@@ -322,11 +322,10 @@ against its JSON Schema) and `ModelBackend` (one request per question block,
 with probabilities derived from the answer tokens' log-probabilities; needs
 `think: false`, at most ten Score levels, and answer values that begin with
 different bytes). Prompts are never shortened: the server counts tokens, and a
-prompt that does not fit is `TooLarge` with the counts. Every response carries
-the weights digest observed at `/api/show` before the call. Ollama does not
-attest the answering weights in generate or embed replies. Treat the digest as
-answering-weights provenance only while model writes to that server are
-exclusively controlled throughout the exchange. `OllamaEmbedder`
+prompt that does not fit is `TooLarge` with the counts. The adapter checks model
+availability before the call and records the response model name and raw bodies.
+Ollama does not attest the answering weights in generate or embed replies.
+`OllamaEmbedder`
 calls `/api/embed` through the same permit. `ScriptedExtractor` in core is the
 test double for hosts that depend on `Extractor`. The
 [live check](../crates/sapho-ollama/examples/live_smoke.rs) is run on demand

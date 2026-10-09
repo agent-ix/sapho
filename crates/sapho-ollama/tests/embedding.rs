@@ -44,10 +44,7 @@ async fn embed_sends_ordered_inputs_without_truncation_and_returns_vectors_in_or
     assert_eq!(sent.json()["truncate"], false);
     assert_eq!(sent.json()["model"], MODEL);
     assert_eq!(result.vectors, [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]);
-    assert_eq!(
-        result.model.digest.as_deref(),
-        Some(format!("sha256:{BLOB}").as_str())
-    );
+    assert_eq!(result.model.digest, None);
     assert_eq!(result.input_tokens, Some(11));
     assert_eq!(result.raw.request, sent.text());
 }

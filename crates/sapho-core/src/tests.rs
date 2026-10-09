@@ -928,9 +928,9 @@ fn plain_question_and_answer_inputs_validate_their_full_typed_contract() {
         ErrorCode::TypeMismatch
     );
 }
-/// Trace: FR-005-AC-1
+/// Legacy serialized response compatibility; no source identity is inferred.
 #[test]
-fn weights_digest_is_preserved_validated_over_and_optional() {
+fn legacy_provider_metadata_remains_optional_in_serialized_responses() {
     let mut with_digest = response(Answer::Choice {
         selected: "z".into(),
         confidence: p(0.7),

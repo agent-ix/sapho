@@ -322,10 +322,7 @@ fn a_model_is_never_scored_against_its_own_labels() {
         Value::Boolean(true),
     ];
     let report = measure_boolean(&data, &answered_by("judge:30b", Some("sha256:aa"), &values));
-    assert_eq!(
-        report.self_source,
-        [data.cases[0].id.clone(), data.cases[1].id.clone()]
-    );
+    assert_eq!(report.self_source, [data.cases[0].id.clone()]);
     let result = &report.outputs["result"];
     assert_eq!(
         (
@@ -334,10 +331,10 @@ fn a_model_is_never_scored_against_its_own_labels() {
             result.unscored,
             result.failed
         ),
-        (1, 1, 0, 0)
+        (2, 2, 0, 0)
     );
-    assert_eq!(report.predictions.len(), 1);
-    assert_eq!(report.predictions[0].case, data.cases[2].id);
+    assert_eq!(report.predictions.len(), 2);
+    assert_eq!(report.predictions[0].case, data.cases[1].id);
     assert_eq!(report.selected_cases, 3);
     assert!(report.complete());
 
@@ -350,7 +347,7 @@ fn a_model_is_never_scored_against_its_own_labels() {
     assert!(report.self_source.is_empty());
     assert_eq!(report.outputs["result"].scored, 1);
 
-    // A digest match under a different model name is also excluded when the run failed.
+    // Legacy metadata does not turn a different model name into a source match.
     let mut failed = outcomes(&values[..1]);
     failed.insert(
         data.cases[1].id.clone(),
@@ -363,6 +360,6 @@ fn a_model_is_never_scored_against_its_own_labels() {
         },
     );
     let report = measure_boolean(&data, &failed);
-    assert_eq!(report.self_source, [data.cases[1].id.clone()]);
-    assert_eq!(report.outputs["result"].failed, 1);
+    assert!(report.self_source.is_empty());
+    assert!(report.outputs["result"].failed >= 1);
 }

@@ -1,29 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
-//! Model identity: the weights digest observed at `/api/show` before each request (FR-052).
+//! Check model availability before sending an inference request (FR-052).
 use crate::http::{Server, failure};
 use sapho_core::{ErrorCode, ExtractError};
-use serde::Deserialize;
-use std::sync::OnceLock;
 
-#[derive(Deserialize)]
-struct Description {
-    modelfile: String,
-}
-
-/// The digest of the weights named by the `FROM` line, as `sha256:<hex>`.
-fn weights_digest(modelfile: &str) -> Option<String> {
-    let source = modelfile
-        .lines()
-        .find_map(|line| line.strip_prefix("FROM "))?
-        .trim();
-    let blob = source.rsplit(['/', '\\']).next()?.strip_prefix("sha256-")?;
-    (!blob.is_empty() && blob.bytes().all(|b| b.is_ascii_hexdigit()))
-        .then(|| format!("sha256:{blob}"))
-}
-
-/// Read the current digest within an already held request permit.
-async fn read_digest(server: &Server, model: &str) -> Result<String, ExtractError> {
+/// An unknown model is refused before generate or embed. The description is not
+/// treated as evidence of which weights will answer a later request.
+pub(crate) async fn ensure_installed(server: &Server, model: &str) -> Result<(), ExtractError> {
     let body = serde_json::to_string(&serde_json::json!({ "model": model })).map_err(|_| {
         failure(
             ErrorCode::Config,
@@ -42,64 +25,5 @@ async fn read_digest(server: &Server, model: &str) -> Result<String, ExtractErro
     if !reply.success() {
         return Err(reply.status_error());
     }
-    serde_json::from_str::<Description>(reply.success_text()?)
-        .ok()
-        .and_then(|d| weights_digest(&d.modelfile))
-        .ok_or_else(|| {
-            failure(
-                ErrorCode::BackendFailed,
-                "digest_unavailable",
-                "The model description names no weights blob",
-            )
-        })
-}
-
-impl Server {
-    /// Look up the model's current weights digest through this server, without pinning it.
-    ///
-    /// This uses the server's URL, headers, request ceiling, response ceiling, shared request
-    /// permit and timeout. A later lookup may return a different digest if the model changes.
-    pub async fn weights_digest(&self, model: &str) -> Result<String, ExtractError> {
-        self.exclusive(read_digest(self, model)).await
-    }
-}
-
-/// Read the model's pre-request weights digest and hold it to the first one `pinned` saw.
-///
-/// An unknown model is `Config`; a digest that differs from the pinned one is
-/// `ModelMismatch`. An external retag between show and inference is not detectable
-/// from Ollama's name-only inference response; exact attribution needs exclusive
-/// model-write control for the duration of the exchange.
-pub(crate) async fn resolve(
-    server: &Server,
-    model: &str,
-    pinned: &OnceLock<String>,
-) -> Result<String, ExtractError> {
-    let digest = read_digest(server, model).await?;
-    if pinned.get_or_init(|| digest.clone()) != &digest {
-        return Err(failure(
-            ErrorCode::ModelMismatch,
-            "weights_changed",
-            "The model's weights changed during the run",
-        ));
-    }
-    Ok(digest)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::weights_digest;
-
-    #[test]
-    fn digest_comes_from_the_from_blob_only() {
-        let file = "# comment\nFROM /root/.ollama/models/blobs/sha256-58574f2e\nTEMPLATE x\n";
-        assert_eq!(weights_digest(file).as_deref(), Some("sha256:58574f2e"));
-        assert_eq!(
-            weights_digest("FROM C:\\m\\blobs\\sha256-ab12").as_deref(),
-            Some("sha256:ab12")
-        );
-        assert_eq!(weights_digest("FROM qwen3:30b"), None);
-        assert_eq!(weights_digest("FROM /blobs/sha256-zz"), None);
-        assert_eq!(weights_digest("TEMPLATE x"), None);
-    }
+    Ok(())
 }
