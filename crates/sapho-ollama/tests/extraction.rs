@@ -236,7 +236,11 @@ async fn reply_leaving_no_room_for_the_answer_is_too_large_not_truncated() {
     crowded["prompt_eval_count"] = json!(900);
     crowded["done_reason"] = json!("length");
     let fake = Fake::start(move |r| match r.path.as_str() {
-        "/api/show" => description(BLOB),
+        "/api/show" => description(if changed.load(std::sync::atomic::Ordering::SeqCst) {
+            "bb22"
+        } else {
+            BLOB
+        }),
         _ if r.json()["prompt"] == "crowded" => Reply::ok(crowded.clone()),
         _ => Reply::ok(generated(MODEL, r#"{"label":"ok"}"#)),
     })
@@ -593,6 +597,42 @@ async fn changed_weights_and_a_different_model_name_are_mismatches() {
         (ErrorCode::ModelMismatch, Some("name_mismatch"))
     );
     assert!(error.raw.is_some());
+}
+
+/// Trace: FR-052-AC-7
+#[tokio::test]
+async fn external_retag_between_show_and_generate_leaves_only_a_pre_request_observation() {
+    let _serial = serial().await;
+    let serving_other_weights = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let changed = serving_other_weights.clone();
+    let fake = Fake::start(move |r| match r.path.as_str() {
+        "/api/show" => description(BLOB),
+        // The scripted server changes the tag to other weights before answering,
+        // while the response still reports the original model name.
+        "/api/generate" => {
+            changed.store(true, std::sync::atomic::Ordering::SeqCst);
+            Reply::ok(generated(MODEL, r#"{"label":"ok"}"#))
+        }
+        _ => panic!("unexpected path"),
+    })
+    .await;
+    let response = extract(&backend(&fake, MODEL), &request("one"))
+        .await
+        .unwrap();
+    assert_eq!(response.model.digest, Some(format!("sha256:{BLOB}")));
+    assert_eq!(response.model.name, MODEL);
+    assert!(serving_other_weights.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(fake.generates().len(), 1);
+    assert_eq!(
+        Server::new(&fake.url, limits())
+            .unwrap()
+            .weights_digest(MODEL)
+            .await
+            .unwrap(),
+        "sha256:bb22"
+    );
+    // The reply has no answering-weights digest, so these observations cannot
+    // distinguish a stable tag from a show-to-generate external retag.
 }
 
 /// Trace: FR-052-AC-5

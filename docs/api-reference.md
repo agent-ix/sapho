@@ -323,7 +323,10 @@ with probabilities derived from the answer tokens' log-probabilities; needs
 `think: false`, at most ten Score levels, and answer values that begin with
 different bytes). Prompts are never shortened: the server counts tokens, and a
 prompt that does not fit is `TooLarge` with the counts. Every response carries
-the weights digest read from `/api/show` before the call. `OllamaEmbedder`
+the weights digest observed at `/api/show` before the call. Ollama does not
+attest the answering weights in generate or embed replies. Treat the digest as
+answering-weights provenance only while model writes to that server are
+exclusively controlled throughout the exchange. `OllamaEmbedder`
 calls `/api/embed` through the same permit. `ScriptedExtractor` in core is the
 test double for hosts that depend on `Extractor`. The
 [live check](../crates/sapho-ollama/examples/live_smoke.rs) is run on demand
