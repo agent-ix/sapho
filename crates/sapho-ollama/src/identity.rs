@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
-//! Model identity: the weights digest read from `/api/show` before each request (FR-052).
+//! Model identity: the weights digest observed at `/api/show` before each request (FR-052).
 use crate::http::{Server, failure};
 use sapho_core::{ErrorCode, ExtractError};
 use serde::Deserialize;
@@ -64,10 +64,12 @@ impl Server {
     }
 }
 
-/// Read the model's current weights digest and hold it to the first one `pinned` saw.
+/// Read the model's pre-request weights digest and hold it to the first one `pinned` saw.
 ///
 /// An unknown model is `Config`; a digest that differs from the pinned one is
-/// `ModelMismatch`, so a model replaced mid-run never answers under the old identity.
+/// `ModelMismatch`. An external retag between show and inference is not detectable
+/// from Ollama's name-only inference response; exact attribution needs exclusive
+/// model-write control for the duration of the exchange.
 pub(crate) async fn resolve(
     server: &Server,
     model: &str,

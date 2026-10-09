@@ -38,7 +38,7 @@ struct ErrorBody {
 pub struct Embeddings {
     /// Finite vectors of equal length.
     pub vectors: Vec<Vec<f64>>,
-    /// The model that answered, with its weights digest.
+    /// The response model name and the pre-request weights digest observation.
     pub model: ModelIdentity,
     /// Prompt tokens, when the server reported them.
     pub input_tokens: Option<u64>,
