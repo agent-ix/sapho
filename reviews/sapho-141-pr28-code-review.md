@@ -30,9 +30,20 @@ FAIL at the reviewed SHA. The focused cargo test cannot compile. The changed tes
 - No applicable AssuranceProfile found. No CI workflow change, vendored artifact, production unsafe or new production panic surface in the diff.
 - `cargo test -p sapho-ollama --test extraction external_retag_between_show_and_generate_leaves_only_a_pre_request_observation` exited 101 with E0425 at extraction.rs:239.
 
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-003 | medium | Native runbook asks for an expected weights digest but lacks a command that reads the `FROM` blob | docs/ollama-provenance.md:47-58 |
+
 ## Dispositions
 
 | FND | outcome | sha/reason |
 | --- | --- | --- |
 | FND-001 | fixed | 16f3404de31231b5122cd89ecd89fc7f285645bd |
 | FND-002 | fixed | 16f3404de31231b5122cd89ecd89fc7f285645bd |
+| FND-003 | fixed | 06e26c09c25382a6ed0fadc8e920a687b9eba93e |
+
+## Native macOS runbook re-review
+
+At `06e26c09c25382a6ed0fadc8e920a687b9eba93e`, only `docs/ollama-provenance.md` changed after the earlier review-only head. The runbook now obtains the `FROM` weights blob with a read-only `ollama show --modelfile` call. The separate native server preflight records loopback binding, a read-only APFS-cloned model store, the exact `FROM` blob and a Metal-capable startup; it records no inference. Host processes with the operator's filesystem authority remain in the trust boundary. This is procedure and preflight evidence, not completed-run answering-weight provenance. `python3 scripts/check_docs.py` and `git diff --check` pass.
