@@ -443,7 +443,6 @@ impl ModelBackend for OllamaBackend {
         };
         Ok(ModelResponse {
             model: generated.model.name,
-            digest: generated.model.digest,
             raw: Some(generated.raw),
             answers,
             usage,

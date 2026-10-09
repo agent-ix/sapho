@@ -153,10 +153,7 @@ impl OllamaEmbedder {
         }
         Ok(Embeddings {
             vectors: parsed.embeddings,
-            model: ModelIdentity {
-                name: parsed.model,
-                digest: None,
-            },
+            model: ModelIdentity { name: parsed.model },
             input_tokens: parsed.prompt_eval_count,
             raw,
         })

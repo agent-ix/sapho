@@ -34,10 +34,7 @@ fn completion(answer: &str) -> Completion {
             ..ExtractUsage::default()
         },
         raw: raw(),
-        model: ModelIdentity {
-            name: "m".into(),
-            digest: Some("sha256:abc".into()),
-        },
+        model: ModelIdentity { name: "m".into() },
     }
 }
 fn too_large() -> ExtractError {

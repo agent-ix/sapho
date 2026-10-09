@@ -358,7 +358,6 @@ async fn exact_matching_includes_option_order_model_state_and_backend() {
     };
     let response = ModelResponse {
         model: "model-1".into(),
-        digest: None,
         raw: None,
         answers: BTreeMap::from([(
             "q".into(),
@@ -461,7 +460,6 @@ async fn approximate_graph_preserves_raw_trace_and_recording_and_replay_policy_i
         async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse> {
             Ok(ModelResponse {
                 model: request.model.clone(),
-                digest: None,
                 raw: None,
                 usage: None,
                 answers: BTreeMap::from([(

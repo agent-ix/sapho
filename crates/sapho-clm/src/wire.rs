@@ -117,7 +117,6 @@ pub(crate) fn decode(
     }
     Ok(ModelResponse {
         model: response.model,
-        digest: None,
         raw: None,
         answers,
         usage: Some(Usage {

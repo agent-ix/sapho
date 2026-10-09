@@ -221,7 +221,6 @@ async fn explicit_clm_replay_checks_only_model_and_policy_without_guessing_provi
     };
     let response = ModelResponse {
         model: "clm-latest".into(),
-        digest: None,
         raw: None,
         answers: BTreeMap::from([(
             "q".into(),
@@ -305,7 +304,6 @@ async fn replay_read_from_json_binds_the_same_identities_and_refuses_the_same_co
         };
         let response = ModelResponse {
             model: model.into(),
-            digest: None,
             raw: None,
             answers: BTreeMap::from([(
                 "q".into(),

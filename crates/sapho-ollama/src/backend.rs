@@ -274,10 +274,7 @@ impl OllamaBackend {
             logprobs: parsed.logprobs,
             usage,
             raw,
-            model: ModelIdentity {
-                name: parsed.model,
-                digest: None,
-            },
+            model: ModelIdentity { name: parsed.model },
         })
     }
 }

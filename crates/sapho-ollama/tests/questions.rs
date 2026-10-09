@@ -349,7 +349,6 @@ async fn the_response_validates_under_both_policies_and_carries_the_model_name()
         let response = backend.infer(&request).await.unwrap();
         validate_response(&request, &response).unwrap();
         assert_eq!(response.model, MODEL);
-        assert_eq!(response.digest, None);
         let usage = response.usage.unwrap();
         assert_eq!((usage.input_tokens, usage.output_tokens), (48, 8));
     }

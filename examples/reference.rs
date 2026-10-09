@@ -260,7 +260,6 @@ impl ModelBackend for TutorialBackend {
         }
         Ok(ModelResponse {
             model: request.model.clone(),
-            digest: None,
             raw: None,
             answers,
             usage: None,

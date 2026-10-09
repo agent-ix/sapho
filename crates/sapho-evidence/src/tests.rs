@@ -272,18 +272,11 @@ fn training_export_keeps_only_curated_development_rows_and_refuses_limits() {
     assert!(serde_json::from_str::<Dataset>("{\"exchanges\":[]}").is_err());
 }
 
-fn answered_by(
-    name: &str,
-    digest: Option<&str>,
-    values: &[Value],
-) -> BTreeMap<ItemId, CaseOutcome> {
+fn answered_by(name: &str, values: &[Value]) -> BTreeMap<ItemId, CaseOutcome> {
     let mut outcomes = outcomes(values);
     for outcome in outcomes.values_mut() {
         if let CaseOutcome::Completed { models, .. } = outcome {
-            models.push(ModelIdentity {
-                name: name.into(),
-                digest: digest.map(Into::into),
-            });
+            models.push(ModelIdentity { name: name.into() });
         }
     }
     outcomes
@@ -308,11 +301,7 @@ fn model_labels_are_scored_when_another_model_answers() {
     data.validate(100).unwrap();
     let report = measure_boolean(
         &data,
-        &answered_by(
-            "judge:30b",
-            None,
-            &[Value::Boolean(true), Value::Boolean(true)],
-        ),
+        &answered_by("judge:30b", &[Value::Boolean(true), Value::Boolean(true)]),
     );
     assert!(report.self_source.is_empty());
     assert_eq!(report.outputs["result"].labelled, 2);
@@ -333,7 +322,7 @@ fn a_model_is_never_scored_against_its_own_labels() {
         Value::Boolean(false),
         Value::Boolean(true),
     ];
-    let report = measure_boolean(&data, &answered_by("judge:30b", Some("sha256:aa"), &values));
+    let report = measure_boolean(&data, &answered_by("judge:30b", &values));
     assert_eq!(report.self_source, [data.cases[0].id.clone()]);
     let result = &report.outputs["result"];
     assert_eq!(
@@ -354,12 +343,12 @@ fn a_model_is_never_scored_against_its_own_labels() {
     let human_only = dataset(&[true]);
     let report = measure_boolean(
         &human_only,
-        &answered_by("reviewer-1", None, &[Value::Boolean(true)]),
+        &answered_by("reviewer-1", &[Value::Boolean(true)]),
     );
     assert!(report.self_source.is_empty());
     assert_eq!(report.outputs["result"].scored, 1);
 
-    // Legacy metadata does not turn a different model name into a source match.
+    // A different model name does not make the failed case self-sourced.
     let mut failed = outcomes(&values[..1]);
     failed.insert(
         data.cases[1].id.clone(),
@@ -367,7 +356,6 @@ fn a_model_is_never_scored_against_its_own_labels() {
             error: SaphoError::new(ErrorCode::BackendFailed, "down"),
             models: vec![ModelIdentity {
                 name: "judge:other-tag".into(),
-                digest: Some("sha256:aa".into()),
             }],
         },
     );

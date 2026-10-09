@@ -199,7 +199,6 @@ impl ModelBackend for Scripted {
         }
         Ok(ModelResponse {
             model: request.model.clone(),
-            digest: None,
             raw: Some(RawExchange {
                 request: serde_json::to_string(request).unwrap(),
                 response: format!("{{\"created_at\":\"call {index}\"}}"),
@@ -393,7 +392,6 @@ fn error_objects_hold_code_message_and_context_only() {
 fn conflicting_recorded_or_explicit_binding_metadata_is_refused_without_live_lookup() {
     let response = ModelResponse {
         model: "synthetic".into(),
-        digest: None,
         raw: None,
         answers: BTreeMap::new(),
         usage: None,

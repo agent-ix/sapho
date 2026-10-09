@@ -55,7 +55,6 @@ impl ModelBackend for Scripted {
     async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse> {
         let response = ModelResponse {
             model: request.model.clone(),
-            digest: None,
             raw: None,
             answers: request
                 .questions
