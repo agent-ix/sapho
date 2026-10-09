@@ -20,7 +20,7 @@ build:
 clean:
 	$(CARGO) clean
 deny:
-	$(CARGO) deny --workspace --all-features --locked check
+	bash policy/run-cargo-deny.sh sapho
 audit-unsafe:
 	bash scripts/check_unsafe_comments.sh
 docs:

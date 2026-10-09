@@ -30,4 +30,4 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
-      - run: cargo deny --workspace --all-features --locked check
+      - run: bash policy/run-cargo-deny.sh sapho
