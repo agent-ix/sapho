@@ -108,7 +108,6 @@ fn case(index: usize, weight: Weight) -> Case {
         label_provenance: LabelProvenance {
             kind: LabelKind::Human,
             source: "curator".into(),
-            model_digest: None,
             reference: "synthetic label".into(),
         },
     }

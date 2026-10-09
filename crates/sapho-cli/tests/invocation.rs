@@ -463,7 +463,6 @@ fn curator(reference: &str) -> LabelProvenance {
     LabelProvenance {
         kind: LabelKind::Human,
         source: "curator".into(),
-        model_digest: None,
         reference: reference.into(),
     }
 }
@@ -651,7 +650,6 @@ async fn real_measure_tune_export_use_selected_labels_and_never_evaluate_heldout
     own.cases[0].label_provenance = LabelProvenance {
         kind: LabelKind::Model,
         source: "synthetic".into(),
-        model_digest: None,
         reference: "own earlier answer".into(),
     };
     std::fs::write(&dataset, serde_json::to_vec(&own).unwrap()).unwrap();

@@ -7,9 +7,24 @@ fn provenance(kind: LabelKind, source: &str) -> LabelProvenance {
     LabelProvenance {
         kind,
         source: source.into(),
-        model_digest: None,
         reference: "original source".into(),
     }
+}
+
+#[test]
+fn current_evidence_has_no_model_digest_member() {
+    let current = provenance(LabelKind::Model, "reported-model");
+    let value = serde_json::to_value(&current).unwrap();
+    assert!(value.get("model_digest").is_none());
+    assert_eq!(
+        serde_json::from_value::<LabelProvenance>(value).unwrap(),
+        current
+    );
+    let with_digest = serde_json::json!({
+        "kind": "model", "source": "reported-model", "model_digest": "sha256:old",
+        "reference": "original source"
+    });
+    assert!(serde_json::from_value::<LabelProvenance>(with_digest).is_err());
 }
 fn dataset(labels: &[bool]) -> Dataset {
     Dataset {
@@ -105,7 +120,7 @@ fn boolean_counts_have_exact_denominators_and_case_evidence() {
         Err(EvidenceError::MissingProvenance(_))
     ));
     let unknown_kind = serde_json::json!({
-        "kind": "oracle", "source": "x", "model_digest": null, "reference": "y"
+        "kind": "oracle", "source": "x", "reference": "y"
     });
     assert!(serde_json::from_value::<LabelProvenance>(unknown_kind).is_err());
 }
@@ -312,10 +327,7 @@ fn model_labels_are_scored_when_another_model_answers() {
 fn a_model_is_never_scored_against_its_own_labels() {
     let mut data = dataset(&[true, false, true]);
     data.cases[0].label_provenance = provenance(LabelKind::Model, "judge:30b");
-    data.cases[1].label_provenance = LabelProvenance {
-        model_digest: Some("sha256:aa".into()),
-        ..provenance(LabelKind::Model, "labeler:renamed")
-    };
+    data.cases[1].label_provenance = provenance(LabelKind::Model, "labeler:renamed");
     let values = [
         Value::Boolean(true),
         Value::Boolean(false),
