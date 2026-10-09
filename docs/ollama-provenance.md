@@ -13,17 +13,20 @@ for `GenerateResponse` and `EmbedResponse`.
 For a run that attributes answers to exact weights, give the runner exclusive
 model-write control over a dedicated Ollama instance for the **whole run**.
 The following Compose shape puts only the runner and Ollama on a private
-network and publishes no Ollama port. Supply a runner image with Sapho and the
-desired input mounted separately; prepare the model volume before starting the
-measured run. Use an Ollama image pinned to an image digest for a reproducible
-deployment.
+network and publishes no Ollama port. The model directory is mounted read-only
+at the only configured Ollama model path. Supply a runner image with Sapho and
+the desired input mounted separately; prepare a dedicated model directory
+before starting the measured run and prevent other host writers from changing
+it. Use an Ollama image pinned to an image digest for a reproducible deployment.
 
 ```yaml
 services:
   ollama:
     image: ollama/ollama@sha256:<verified-image-digest>
+    environment:
+      OLLAMA_MODELS: /models
     volumes:
-      - ollama-models:/root/.ollama
+      - ./verified-models:/models:ro
     networks: [pilot]
   runner:
     image: <runner-image-at-verified-digest>
@@ -34,8 +37,6 @@ services:
 networks:
   pilot:
     internal: true
-volumes:
-  ollama-models:
 ```
 
 Before recording, inspect the deployed state and save the output with the
@@ -44,13 +45,15 @@ private run:
 ```sh
 docker compose ps --format json
 docker inspect "$(docker compose ps -q ollama)" --format '{{json .NetworkSettings.Ports}} {{json .NetworkSettings.Networks}} {{.Image}}'
+docker inspect "$(docker compose ps -q ollama)" --format '{{json .Mounts}}'
 docker network inspect YOUR_PROJECT_pilot --format '{{json .Containers}} {{json .Internal}}'
 ```
 
-Check that Ollama has no published host port, the network is internal, and
-only the intended runner and Ollama containers are attached. Restrict Docker
-daemon and volume access to the pilot operator for the run; an administrator
-with that access can still retag or replace the model. Record the operator,
+Check that Ollama has no published host port, the network is internal, only
+the intended runner and Ollama containers are attached, and the `/models`
+mount has `RW: false`. Restrict Docker daemon and host model-directory write
+access to the pilot operator for the run; an administrator with that access
+can still replace the model. Record the operator,
 instance/container ID, image digest, model name, `/api/show` weights digest,
 start/end times, network inspection, and any model-write action. Stop the run
 and withhold an exact-weight provenance claim if the access boundary or event

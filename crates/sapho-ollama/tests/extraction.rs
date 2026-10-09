@@ -236,11 +236,7 @@ async fn reply_leaving_no_room_for_the_answer_is_too_large_not_truncated() {
     crowded["prompt_eval_count"] = json!(900);
     crowded["done_reason"] = json!("length");
     let fake = Fake::start(move |r| match r.path.as_str() {
-        "/api/show" => description(if changed.load(std::sync::atomic::Ordering::SeqCst) {
-            "bb22"
-        } else {
-            BLOB
-        }),
+        "/api/show" => description(BLOB),
         _ if r.json()["prompt"] == "crowded" => Reply::ok(crowded.clone()),
         _ => Reply::ok(generated(MODEL, r#"{"label":"ok"}"#)),
     })
@@ -606,7 +602,11 @@ async fn external_retag_between_show_and_generate_leaves_only_a_pre_request_obse
     let serving_other_weights = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let changed = serving_other_weights.clone();
     let fake = Fake::start(move |r| match r.path.as_str() {
-        "/api/show" => description(BLOB),
+        "/api/show" => description(if changed.load(std::sync::atomic::Ordering::SeqCst) {
+            "bb22"
+        } else {
+            BLOB
+        }),
         // The scripted server changes the tag to other weights before answering,
         // while the response still reports the original model name.
         "/api/generate" => {
