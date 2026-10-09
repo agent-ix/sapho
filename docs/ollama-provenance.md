@@ -47,13 +47,15 @@ Before inference, save the following read-only checks with the private run:
 ```sh
 ollama --version
 OLLAMA_HOST=127.0.0.1:11435 ollama list
+OLLAMA_HOST=127.0.0.1:11435 ollama show qwen3:30b --modelfile
 lsof -nP -iTCP:11435 -sTCP:LISTEN
 stat -f '%Sp %Su %N' /path/to/pilot-instance/models
 ```
 
 Check that the dedicated process alone listens on the chosen port, it binds
 only `127.0.0.1`, the model directory is distinct from the shared store and
-has no write permission, the expected tag/digest is present, and the startup
+has no write permission, the expected tag is present and the `FROM` line in
+`ollama show --modelfile` identifies the expected weights blob, and the startup
 log reports Metal rather than CPU inference compute. Route Sapho to this
 server with `OLLAMA_BASE_URL=http://127.0.0.1:11435`. The loopback address
 alone does not prevent another local process from sending requests; the
