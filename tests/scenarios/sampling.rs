@@ -308,7 +308,10 @@ async fn one_sample_keeps_legacy_ports_request_and_trace_json() {
     .run(&Inputs::new(), limits())
     .await
     .unwrap();
-    assert!(matches!(result.outputs["result"].value, Value::Answers(_)));
+    assert_eq!(
+        serde_json::to_string(&result.outputs).unwrap(),
+        include_str!("../fixtures/sampling-legacy-output.json").trim_end()
+    );
     let trace = serde_json::to_string(&result.trace).unwrap();
     // Frozen bytes captured from origin/main e77b81e's one-call Ask, before sampling.
     assert_eq!(
@@ -316,6 +319,10 @@ async fn one_sample_keeps_legacy_ports_request_and_trace_json() {
         include_str!("../fixtures/sampling-legacy-trace.json").trim_end()
     );
     let recording = recorder.snapshot().unwrap();
+    assert_eq!(
+        serde_json::to_string(&recording).unwrap(),
+        include_str!("../fixtures/sampling-legacy-recording.json").trim_end()
+    );
     assert_eq!(
         serde_json::to_string(&recording.exchanges[0].request).unwrap(),
         include_str!("../fixtures/sampling-legacy-request.json").trim_end()
