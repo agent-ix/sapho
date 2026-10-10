@@ -36,6 +36,7 @@ A Rust embedding application or the Sapho CLI host supplies inputs, graph config
 | [logic](modules/logic/spec.md) | `sapho-runtime` | Crisp logic and heuristic degree operations |
 | [systemone](modules/systemone/spec.md) | `sapho-systemone` | Shared source-free request translation into SDK-owned wire types |
 | [clm](modules/clm/spec.md) | `sapho-clm` | Host-configured bounded CLM backend adapter |
+| [decisions](modules/decisions/spec.md) | `sapho-decisions` | Verified OpenAI Decisions API adapter for finite typed questions |
 | [jev](modules/jev/spec.md) | `sapho-jev` | Hosted Jev backend adapter |
 | [recording](modules/recording/spec.md) | `sapho-recording` | Exact recording and offline replay |
 | [ollama](modules/ollama/spec.md) | `sapho-ollama` | Host-configured Ollama extraction, typed-question and embedding adapter |
@@ -56,12 +57,13 @@ flowchart TD
  jev --> systemone[sapho-systemone]
  clm[sapho-clm] --> core
  clm --> systemone
+ decisions[sapho-decisions] --> core
  systemone --> core
  recording[sapho-recording] --> core
  ollama[sapho-ollama] --> core
 ```
 
-The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev` and `clm` features are disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording, Jev and Ollama need no runtime dependency. `sapho-ollama` depends only on core among workspace crates. Jev and CLM depend on `sapho-systemone` for their identical request translation and shared CLM model alias; systemone depends only on core among workspace crates and uses SDK-owned request/question types.
+The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev`, `clm` and draft `decisions` features are disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording, Jev, Ollama and Decisions need no runtime dependency. `sapho-ollama` and draft `sapho-decisions` depend only on core among workspace crates. Jev and CLM depend on `sapho-systemone` for their identical request translation and shared CLM model alias; systemone depends only on core among workspace crates and uses SDK-owned request/question types.
 
 ## Public Contract
 
@@ -119,4 +121,4 @@ All approved acquisition and graph-skill behavior is specified before implementa
 
 The authoritative TypeSafe SDK is a package dependency. Native domain adapters and private evidence are supplied from their owning repositories, never copied into Sapho.
 
-CLM and shared CLI foundations are specified in [CLM](modules/clm/spec.md), [provider credentials](modules/cli/functional/FR-045.md), [CLI foundations](modules/cli/functional/FR-046.md), the [Ollama provider](modules/cli/functional/FR-055.md) and the [large-Dataset ceilings](modules/cli/functional/FR-056.md). [Decisions contract acquisition](modules/clm/functional/FR-047.md) remains an external prerequisite; no wire schema is assumed.
+CLM and shared CLI foundations are specified in [CLM](modules/clm/spec.md), [provider credentials](modules/cli/functional/FR-045.md), [CLI foundations](modules/cli/functional/FR-046.md), the [Ollama provider](modules/cli/functional/FR-055.md) and the [large-Dataset ceilings](modules/cli/functional/FR-056.md). The dated [Decisions contract assessment](modules/clm/functional/FR-047.md) and draft [Decisions adapter](modules/decisions/spec.md) use the official public beta wire contract; live acceptance remains unverified while account quota/access is unavailable.
