@@ -154,6 +154,24 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
         panic!("map")
     };
     assert_eq!(map.case_count, 20);
+    assert_eq!(map.dataset_id.as_str(), "curated");
+    assert_eq!(map.split, "development");
+    assert_eq!(map.method, "isotonic-pava-linear-v1");
+    assert_eq!(map.raw_output, "raw_support");
+    assert_eq!(map.fit_binding.as_str(), "fast_a");
+    assert_eq!(
+        map.fit_graph_semantic_identity,
+        sapho_graph::graph_semantic_identity(&GraphSpec::parse(raw_graph()).unwrap()).unwrap()
+    );
+    assert!(
+        map.fit_cases_digest
+            .starts_with("dataset-development-v1:sha256:")
+    );
+    assert!(
+        map.fit_observation_digest
+            .starts_with("calibration-observations-v1:sha256:")
+    );
+    assert!(map.map_id.starts_with("calibration-v1:sha256:"));
     assert_eq!(map.fit_actual_model, "model-a");
     assert_eq!(
         map.knots
@@ -544,6 +562,18 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
     );
     let changed_report: serde_json::Value =
         serde_json::from_slice(&changed_measure.stdout).unwrap();
+    let asks = |value: &serde_json::Value| {
+        value["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|case| case["report"]["trace"]["nodes"].as_array().unwrap().iter())
+            .filter(|node| node["operation"]["kind"] == "ask")
+            .map(|node| node["model"].clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(asks(&report), asks(&changed_report));
+    assert_ne!(report["graph"]["source"], changed_report["graph"]["source"]);
     assert_ne!(
         report["measurement"]["outputs"]["calibrated_support"]["metrics"]["brier"],
         changed_report["measurement"]["outputs"]["calibrated_support"]["metrics"]["brier"]
