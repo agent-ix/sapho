@@ -242,6 +242,16 @@ Author bounded graph variants, then compare their development results:
 sapho tune --candidate examples/graphs/review.yaml --candidate examples/graphs/review-conservative.yaml --dataset examples/data/review-dataset.json --output-name needs_review --metric agreement --output tuning.json
 ```
 
+To generate literal-only variants, use `sweep` with a base graph and a JSON grid:
+
+```sh
+sapho sweep base.yaml --grid grid.json --output-dir new-candidates
+```
+
+For example, `grid.json` can contain `{"axes":[{"id":"cutoff","values":[0.6,0.7,0.8]},{"id":"weights","values":[[0.25,0.75],[0.5,0.5]]}]}`. Each ID must identify one literal Datum in the graph. Sweep accepts Probability values and numeric lists of the base list's length. It writes `candidate-0000.json` onward in grid order, with the last axis changing fastest, and a `sweep-manifest.json` containing exact input and candidate byte digests. The destination must be new. Sweep validates the whole grid before creating it and reads no dataset or recording.
+
+The default ceiling is 16 candidates. `sweep --max-candidates N` accepts 1 through 256; `tune` needs its own explicit `--max-candidates N` above 16. Pass generated files to `tune` as explicit `--candidate` arguments in manifest order. Downstream-only literal changes can reuse an exact recording; changes to model request data require a new recording.
+
 The CLI keeps each candidate definition, case evidence and metrics. It ranks Boolean agreement highest or Probability Brier lowest; ties retain candidate order. Every development case must carry and score the chosen output label without failure to rank. Replay-incompatible or incomplete candidates cannot win. `--max-candidates` defaults to 16. No rankable candidate, no development cases or an exceeded ceiling is a refusal. The CLI never edits graphs, labels or recordings, and never evaluates held-out cases during tune.
 
 Use the separate explicit held-out `measure` invocation after choosing a candidate. Changing a model request requires new captured evidence; replay never approximates a match.
