@@ -742,7 +742,6 @@ impl ModelBackend for Invalid {
     async fn infer(&self, r: &ModelRequest) -> Result<ModelResponse> {
         Ok(ModelResponse {
             model: r.model.clone(),
-            digest: None,
             raw: None,
             answers: BTreeMap::new(),
             usage: None,
@@ -779,7 +778,6 @@ impl ModelBackend for Concurrent {
         self.active.fetch_sub(1, Ordering::SeqCst);
         Ok(ModelResponse {
             model: r.model.clone(),
-            digest: None,
             raw: None,
             answers: BTreeMap::from([(
                 "q".into(),

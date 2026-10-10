@@ -98,8 +98,6 @@ pub struct LabelProvenance {
     pub kind: LabelKind,
     /// Who made them; for kind `model`, the model identity the backend reported for the answer.
     pub source: String,
-    /// Legacy caller metadata, retained for reading existing Dataset files; not used to infer source independence.
-    pub model_digest: Option<String>,
     /// Where the labels came from.
     pub reference: String,
 }

@@ -118,7 +118,7 @@ impl Server {
         if body.len() > self.limits.request_bytes {
             return Err(failure(
                 ErrorCode::LimitExceeded,
-                "request_too_large",
+                sapho_core::reason::REQUEST_TOO_LARGE,
                 "Request exceeds the byte ceiling",
             ));
         }
@@ -135,7 +135,7 @@ impl Server {
             let _permit = IN_FLIGHT.acquire().await.map_err(|_| {
                 failure(
                     ErrorCode::BackendFailed,
-                    "permit_closed",
+                    sapho_core::reason::PERMIT_CLOSED,
                     "Request permit unavailable",
                 )
             })?;
@@ -146,7 +146,7 @@ impl Server {
             .map_err(|_| {
                 failure(
                     ErrorCode::DeadlineExceeded,
-                    "timeout",
+                    sapho_core::reason::TIMEOUT,
                     "Ollama call timed out",
                 )
             })?
@@ -156,7 +156,7 @@ impl Server {
         let unreachable = || {
             failure(
                 ErrorCode::BackendFailed,
-                "connection_failed",
+                sapho_core::reason::CONNECTION_FAILED,
                 "Ollama request failed",
             )
         };
@@ -177,7 +177,7 @@ impl Server {
             if bytes.len().saturating_add(chunk.len()) > self.limits.response_bytes {
                 return Err(failure(
                     ErrorCode::LimitExceeded,
-                    "response_too_large",
+                    sapho_core::reason::RESPONSE_TOO_LARGE,
                     "Response exceeds the byte ceiling",
                 ));
             }
@@ -211,13 +211,13 @@ impl Reply {
         if self.status == 404 {
             failure(
                 ErrorCode::BackendFailed,
-                "model_not_found",
+                sapho_core::reason::MODEL_NOT_FOUND,
                 "The server does not know the model",
             )
         } else {
             failure(
                 ErrorCode::BackendFailed,
-                "http_status",
+                sapho_core::reason::HTTP_STATUS,
                 "Ollama answered with an error status",
             )
         }
@@ -229,7 +229,7 @@ impl Reply {
         self.text().ok_or_else(|| {
             failure(
                 ErrorCode::InvalidAnswer,
-                "malformed_response",
+                sapho_core::reason::MALFORMED_RESPONSE,
                 "The response body is not valid UTF-8",
             )
             .with_usage(self.elapsed_only())

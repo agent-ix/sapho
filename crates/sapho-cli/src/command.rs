@@ -298,7 +298,6 @@ fn models(report: &RunReport) -> Vec<ModelIdentity> {
         .filter_map(|node| node.model.as_ref()?.response.as_ref())
         .map(|response| ModelIdentity {
             name: response.model.clone(),
-            digest: response.digest.clone(),
         })
         .collect()
 }

@@ -7,9 +7,24 @@ fn provenance(kind: LabelKind, source: &str) -> LabelProvenance {
     LabelProvenance {
         kind,
         source: source.into(),
-        model_digest: None,
         reference: "original source".into(),
     }
+}
+
+#[test]
+fn current_evidence_has_no_model_digest_member() {
+    let current = provenance(LabelKind::Model, "reported-model");
+    let value = serde_json::to_value(&current).unwrap();
+    assert!(value.get("model_digest").is_none());
+    assert_eq!(
+        serde_json::from_value::<LabelProvenance>(value).unwrap(),
+        current
+    );
+    let with_digest = serde_json::json!({
+        "kind": "model", "source": "reported-model", "model_digest": "sha256:old",
+        "reference": "original source"
+    });
+    assert!(serde_json::from_value::<LabelProvenance>(with_digest).is_err());
 }
 fn dataset(labels: &[bool]) -> Dataset {
     Dataset {
@@ -105,7 +120,7 @@ fn boolean_counts_have_exact_denominators_and_case_evidence() {
         Err(EvidenceError::MissingProvenance(_))
     ));
     let unknown_kind = serde_json::json!({
-        "kind": "oracle", "source": "x", "model_digest": null, "reference": "y"
+        "kind": "oracle", "source": "x", "reference": "y"
     });
     assert!(serde_json::from_value::<LabelProvenance>(unknown_kind).is_err());
 }
@@ -257,18 +272,11 @@ fn training_export_keeps_only_curated_development_rows_and_refuses_limits() {
     assert!(serde_json::from_str::<Dataset>("{\"exchanges\":[]}").is_err());
 }
 
-fn answered_by(
-    name: &str,
-    digest: Option<&str>,
-    values: &[Value],
-) -> BTreeMap<ItemId, CaseOutcome> {
+fn answered_by(name: &str, values: &[Value]) -> BTreeMap<ItemId, CaseOutcome> {
     let mut outcomes = outcomes(values);
     for outcome in outcomes.values_mut() {
         if let CaseOutcome::Completed { models, .. } = outcome {
-            models.push(ModelIdentity {
-                name: name.into(),
-                digest: digest.map(Into::into),
-            });
+            models.push(ModelIdentity { name: name.into() });
         }
     }
     outcomes
@@ -293,11 +301,7 @@ fn model_labels_are_scored_when_another_model_answers() {
     data.validate(100).unwrap();
     let report = measure_boolean(
         &data,
-        &answered_by(
-            "judge:30b",
-            None,
-            &[Value::Boolean(true), Value::Boolean(true)],
-        ),
+        &answered_by("judge:30b", &[Value::Boolean(true), Value::Boolean(true)]),
     );
     assert!(report.self_source.is_empty());
     assert_eq!(report.outputs["result"].labelled, 2);
@@ -312,16 +316,13 @@ fn model_labels_are_scored_when_another_model_answers() {
 fn a_model_is_never_scored_against_its_own_labels() {
     let mut data = dataset(&[true, false, true]);
     data.cases[0].label_provenance = provenance(LabelKind::Model, "judge:30b");
-    data.cases[1].label_provenance = LabelProvenance {
-        model_digest: Some("sha256:aa".into()),
-        ..provenance(LabelKind::Model, "labeler:renamed")
-    };
+    data.cases[1].label_provenance = provenance(LabelKind::Model, "labeler:renamed");
     let values = [
         Value::Boolean(true),
         Value::Boolean(false),
         Value::Boolean(true),
     ];
-    let report = measure_boolean(&data, &answered_by("judge:30b", Some("sha256:aa"), &values));
+    let report = measure_boolean(&data, &answered_by("judge:30b", &values));
     assert_eq!(report.self_source, [data.cases[0].id.clone()]);
     let result = &report.outputs["result"];
     assert_eq!(
@@ -342,12 +343,12 @@ fn a_model_is_never_scored_against_its_own_labels() {
     let human_only = dataset(&[true]);
     let report = measure_boolean(
         &human_only,
-        &answered_by("reviewer-1", None, &[Value::Boolean(true)]),
+        &answered_by("reviewer-1", &[Value::Boolean(true)]),
     );
     assert!(report.self_source.is_empty());
     assert_eq!(report.outputs["result"].scored, 1);
 
-    // Legacy metadata does not turn a different model name into a source match.
+    // A different model name does not make the failed case self-sourced.
     let mut failed = outcomes(&values[..1]);
     failed.insert(
         data.cases[1].id.clone(),
@@ -355,7 +356,6 @@ fn a_model_is_never_scored_against_its_own_labels() {
             error: SaphoError::new(ErrorCode::BackendFailed, "down"),
             models: vec![ModelIdentity {
                 name: "judge:other-tag".into(),
-                digest: Some("sha256:aa".into()),
             }],
         },
     );

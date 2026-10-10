@@ -391,7 +391,7 @@ impl ModelBackend for OllamaBackend {
             .ok_or_else(|| {
                 failure(
                     ErrorCode::Config,
-                    "logprobs_unavailable",
+                    sapho_core::reason::LOGPROBS_UNAVAILABLE,
                     "The server returned no log-probabilities",
                 )
             })
@@ -399,7 +399,7 @@ impl ModelBackend for OllamaBackend {
         let text = generated.response.as_bytes();
         if tokens.iter().flat_map(|t| t.bytes.iter()).ne(text.iter()) {
             return Err(from(invalid(
-                "logprobs_mismatch",
+                sapho_core::reason::LOGPROBS_MISMATCH,
                 "Token bytes differ from the response text",
             )));
         }
@@ -407,7 +407,7 @@ impl ModelBackend for OllamaBackend {
             .filter(|found| found.len() == plan.len())
             .ok_or_else(|| {
                 invalid(
-                    "answer_malformed",
+                    sapho_core::reason::ANSWER_MALFORMED,
                     "The answer is not one string per question",
                 )
             })
@@ -417,19 +417,39 @@ impl ModelBackend for OllamaBackend {
             let member = found
                 .iter()
                 .find(|m| m.key == q.id)
-                .ok_or_else(|| invalid("answer_malformed", "A question has no answer"))
+                .ok_or_else(|| {
+                    invalid(
+                        sapho_core::reason::ANSWER_MALFORMED,
+                        "A question has no answer",
+                    )
+                })
                 .map_err(from)?;
             let selected = allowed
                 .iter()
                 .position(|a| a.value == member.value)
-                .ok_or_else(|| invalid("answer_not_allowed", "The answer is not an allowed value"))
+                .ok_or_else(|| {
+                    invalid(
+                        sapho_core::reason::ANSWER_NOT_ALLOWED,
+                        "The answer is not an allowed value",
+                    )
+                })
                 .map_err(from)?;
             let (token, inside) = locate(tokens, member.start)
-                .ok_or_else(|| invalid("logprobs_mismatch", "No token holds the answer"))
+                .ok_or_else(|| {
+                    invalid(
+                        sapho_core::reason::LOGPROBS_MISMATCH,
+                        "No token holds the answer",
+                    )
+                })
                 .map_err(from)?;
             let m = masses(token, inside, selected, allowed);
             let value = answer(&q.question, allowed, selected, &m)
-                .ok_or_else(|| invalid("logprobs_mismatch", "Probabilities are not usable"))
+                .ok_or_else(|| {
+                    invalid(
+                        sapho_core::reason::LOGPROBS_MISMATCH,
+                        "Probabilities are not usable",
+                    )
+                })
                 .map_err(from)?;
             answers.insert(q.id.clone(), value);
         }
@@ -443,7 +463,6 @@ impl ModelBackend for OllamaBackend {
         };
         Ok(ModelResponse {
             model: generated.model.name,
-            digest: generated.model.digest,
             raw: Some(generated.raw),
             answers,
             usage,

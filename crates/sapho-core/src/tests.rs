@@ -42,7 +42,6 @@ fn request(q: Vec<NamedQuestion>) -> ModelRequest {
 fn response(a: Answer) -> ModelResponse {
     ModelResponse {
         model: "model-1".into(),
-        digest: None,
         raw: None,
         answers: BTreeMap::from([("q".into(), a)]),
         usage: None,
@@ -928,31 +927,19 @@ fn plain_question_and_answer_inputs_validate_their_full_typed_contract() {
         ErrorCode::TypeMismatch
     );
 }
-/// Legacy serialized response compatibility; no source identity is inferred.
+/// Unsupported model metadata cannot masquerade as a recorded identity.
 #[test]
-fn legacy_provider_metadata_remains_optional_in_serialized_responses() {
-    let mut with_digest = response(Answer::Choice {
+fn response_rejects_unreported_model_digest() {
+    let response = response(Answer::Choice {
         selected: "z".into(),
         confidence: p(0.7),
         probabilities: Some(BTreeMap::from([("z".into(), p(0.7)), ("a".into(), p(0.3))])),
     });
-    with_digest.digest = Some("sha256:58574f".into());
-    validate_response(&request(vec![choice()]), &with_digest).unwrap();
-    let json = serde_json::to_value(&with_digest).unwrap();
-    assert_eq!(json["digest"], "sha256:58574f");
-    assert_eq!(
-        serde_json::from_value::<ModelResponse>(json).unwrap(),
-        with_digest
-    );
-    with_digest.digest = None;
-    let json = serde_json::to_value(&with_digest).unwrap();
+    validate_response(&request(vec![choice()]), &response).unwrap();
+    let mut json = serde_json::to_value(&response).unwrap();
     assert!(json.get("digest").is_none());
-    assert_eq!(
-        serde_json::from_value::<ModelResponse>(json)
-            .unwrap()
-            .digest,
-        None
-    );
+    json["digest"] = serde_json::json!("sha256:58574f");
+    assert!(serde_json::from_value::<ModelResponse>(json).is_err());
 }
 /// Trace: FR-006-AC-4, FR-048-AC-7
 #[test]

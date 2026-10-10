@@ -539,7 +539,6 @@ async fn success_carries_identity_usage_and_the_exact_bytes() {
         .await
         .unwrap();
     assert_eq!(response.model.name, MODEL);
-    assert_eq!(response.model.digest, None);
     assert_eq!(response.usage.input_tokens, Some(48));
     assert_eq!(response.usage.output_tokens, Some(8));
     assert_eq!(response.usage.elapsed_ms, Some(5990));
@@ -578,7 +577,6 @@ async fn changed_description_does_not_claim_identity_and_a_different_name_is_ref
     extract(&binding, &request("one")).await.unwrap();
     let second = extract(&binding, &request("two")).await.unwrap();
     assert_eq!(second.model.name, MODEL);
-    assert_eq!(second.model.digest, None);
     assert_eq!(fake.generates().len(), 2);
 
     let renamed = serving(generated("another:tag", r#"{"label":"ok"}"#)).await;
@@ -614,7 +612,6 @@ async fn external_retag_between_show_and_generate_leaves_only_the_response_name(
     let response = extract(&backend(&fake, MODEL), &request("one"))
         .await
         .unwrap();
-    assert_eq!(response.model.digest, None);
     assert_eq!(response.model.name, MODEL);
     assert!(serving_other_weights.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(fake.generates().len(), 1);

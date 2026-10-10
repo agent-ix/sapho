@@ -134,29 +134,26 @@ impl OllamaEmbedder {
             )
             .with_raw(raw.clone())
         };
-        let parsed: EmbedReply =
-            serde_json::from_str(text).map_err(|_| invalid("malformed_response"))?;
+        let parsed: EmbedReply = serde_json::from_str(text)
+            .map_err(|_| invalid(sapho_core::reason::MALFORMED_RESPONSE))?;
         if parsed.model != self.model {
             return Err(failure(
                 ErrorCode::ModelMismatch,
-                "name_mismatch",
+                sapho_core::reason::NAME_MISMATCH,
                 "The response names a different model",
             )
             .with_raw(raw));
         }
         let width = parsed.embeddings.first().map_or(0, Vec::len);
         if parsed.embeddings.len() != inputs.len() {
-            return Err(invalid("vector_count"));
+            return Err(invalid(sapho_core::reason::VECTOR_COUNT));
         }
         if width == 0 || parsed.embeddings.iter().any(|v| v.len() != width) {
-            return Err(invalid("vector_length"));
+            return Err(invalid(sapho_core::reason::VECTOR_LENGTH));
         }
         Ok(Embeddings {
             vectors: parsed.embeddings,
-            model: ModelIdentity {
-                name: parsed.model,
-                digest: None,
-            },
+            model: ModelIdentity { name: parsed.model },
             input_tokens: parsed.prompt_eval_count,
             raw,
         })

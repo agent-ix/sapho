@@ -55,7 +55,6 @@ impl ModelBackend for Scripted {
     async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse> {
         let response = ModelResponse {
             model: request.model.clone(),
-            digest: None,
             raw: None,
             answers: request
                 .questions
@@ -108,7 +107,6 @@ fn case(index: usize, weight: Weight) -> Case {
         label_provenance: LabelProvenance {
             kind: LabelKind::Human,
             source: "curator".into(),
-            model_digest: None,
             reference: "synthetic label".into(),
         },
     }

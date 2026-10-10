@@ -313,7 +313,7 @@ fn record_against_the_double_then_replay_measure_offline_with_the_response_name(
     assert!(!exchanges.is_empty());
     for exchange in exchanges {
         assert_eq!(exchange["response"]["model"], MODEL);
-        assert!(exchange["response"]["digest"].is_null());
+        assert!(exchange["response"].get("digest").is_none());
         assert!(exchange["response"]["raw"].is_object());
     }
     // The endpoint is in no document and no diagnostic.

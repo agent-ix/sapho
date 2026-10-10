@@ -499,7 +499,6 @@ impl ModelBackend for SemanticDouble {
         };
         Ok(ModelResponse {
             model: r.model.clone(),
-            digest: None,
             raw: None,
             answers: BTreeMap::from([(q.id.clone(), answer)]),
             usage: None,

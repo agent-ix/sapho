@@ -56,14 +56,12 @@ pub struct ExtractUsage {
     pub generation_ms: Option<u64>,
 }
 
-/// The response's reported model name and legacy optional provider metadata.
+/// The model name reported by the provider.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelIdentity {
     /// Model name as the provider reported it.
     pub name: String,
-    /// Legacy optional provider metadata; presence alone does not attest answering weights.
-    pub digest: Option<String>,
 }
 
 /// What an [`Extractor`] hands back before the core has checked the answer.
@@ -240,10 +238,10 @@ pub async fn extract(
         error
     };
     let value: Value = serde_json::from_slice(&exchange.answer)
-        .map_err(|_| invalid("not_json", "Answer is not JSON", None))?;
+        .map_err(|_| invalid(crate::reason::NOT_JSON, "Answer is not JSON", None))?;
     if let Some(violation) = validator.iter_errors(&value).next() {
         return Err(invalid(
-            "schema_violation",
+            crate::reason::SCHEMA_VIOLATION,
             "Answer violates the schema",
             Some(violation.instance_path().to_string()),
         ));

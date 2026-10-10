@@ -38,7 +38,6 @@ async fn availability_check_uses_configured_headers_and_request_bounds() {
     let backend = OllamaBackend::new(server, settings("model:1", false, 4096, 512)).unwrap();
     let result = extract(&backend, &request("model:1")).await.unwrap();
     assert_eq!(result.model.name, "model:1");
-    assert_eq!(result.model.digest, None);
     assert_eq!(fake.total(), 2);
 }
 
