@@ -698,6 +698,22 @@ later logic. A default false or zero is your rule's policy, not the meaning
 of absence. The built-in operation takes inputs `value: Optional(T)` and
 `default: T`, and returns `result: T`.
 
+For mutually exclusive guarded branches, use [`merge_present` in the
+three-backend router](../examples/graphs/router.yaml). It accepts 2–32
+same-type `Optional(T)` operands and returns the one present `T`. Zero or
+multiple present operands produce `InvalidValue`; even false, zero and empty
+values count as present. The router compares an input risk feature with
+explicit low/high thresholds. Supply a profile with `low < high`, and change
+those thresholds to adapt the routing policy. The router does not fit a
+model or measure model quality. Configure its `tier_a`, `tier_b` and `tier_c`
+backend IDs in the host, outside graph literals.
+
+The [fast/expert escalation graph](../examples/graphs/escalation.yaml) has a
+different call pattern: it always calls `fast`, then calls `expert` only
+when the fast answer lies in its explicit uncertainty band. It uses
+`coalesce` for both Answers and model Text. A confident case makes one call;
+an escalated case makes two.
+
 For a PR invocation, your adapter gathers code units and review context once,
 runs the graph and formats findings for the review. For an editor or per-edit
 invocation, it selects affected units and calls the same engine. The host

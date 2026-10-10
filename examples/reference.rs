@@ -84,7 +84,7 @@ fn operation_case(operation: &Operation) -> &'static str {
         | Operation::Pairs
         | Operation::Join { .. }
         | Operation::Collect => "collections",
-        Operation::Coalesce => "guards",
+        Operation::Coalesce | Operation::MergePresent {} => "guards",
         Operation::Code { .. } => "native",
         Operation::Questions { .. } | Operation::Ask { .. } | Operation::Probability { .. } => {
             "questions"

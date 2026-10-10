@@ -49,6 +49,62 @@
           }
         }
       }
+    },
+    {
+      "id": "disabled",
+      "operation": {
+        "kind": "not"
+      },
+      "inputs": {
+        "value": {
+          "kind": "input",
+          "name": "enabled"
+        }
+      }
+    },
+    {
+      "id": "fallback_present",
+      "operation": {
+        "kind": "not"
+      },
+      "guard": {
+        "kind": "node",
+        "node": "disabled",
+        "port": "result"
+      },
+      "inputs": {
+        "value": {
+          "kind": "literal",
+          "value": {
+            "id": "false",
+            "value": {
+              "kind": "boolean",
+              "value": false
+            }
+          },
+          "value_type": {
+            "kind": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "id": "merged",
+      "operation": {
+        "kind": "merge_present"
+      },
+      "inputs": {
+        "conditional": {
+          "kind": "node",
+          "node": "conditional",
+          "port": "result"
+        },
+        "fallback": {
+          "kind": "node",
+          "node": "fallback_present",
+          "port": "result"
+        }
+      }
     }
   ],
   "outputs": {
@@ -60,6 +116,11 @@
     "decision": {
       "kind": "node",
       "node": "fallback",
+      "port": "result"
+    },
+    "merged": {
+      "kind": "node",
+      "node": "merged",
       "port": "result"
     }
   },
