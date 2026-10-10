@@ -974,7 +974,7 @@ async fn shadow_only_producer_runs_after_decision_and_cannot_abort_it() {
 }
 /// Trace: FR-058-AC-4, FR-058-AC-6, IT-008-SC-07
 #[tokio::test]
-async fn shadow_only_data_and_deadline_limits_preserve_completed_decision() {
+async fn shadow_only_data_limit_preserves_completed_decision() {
     let mut spec = shadow_graph();
     spec.nodes
         .iter_mut()
@@ -1051,6 +1051,48 @@ async fn shadow_only_data_and_deadline_limits_preserve_completed_decision() {
         ErrorCode::LimitExceeded
     );
     assert_eq!(challenger.calls.load(Ordering::SeqCst), 0);
+}
+/// Real elapsed-time behavior runs in the dedicated timing lane to keep the
+/// default suite independent of host scheduling before the decision phase.
+/// Trace: FR-058-AC-4, FR-058-AC-6, IT-008-SC-07
+#[tokio::test]
+#[ignore = "dedicated wall-clock timing lane"]
+async fn shadow_only_deadline_preserves_completed_decision() {
+    let mut spec = shadow_graph();
+    spec.nodes
+        .iter_mut()
+        .find(|n| n.id.as_str() == "shadow")
+        .unwrap()
+        .inputs
+        .insert(
+            "questions".into(),
+            Binding::Node {
+                node: NodeId::new("shadow_questions").unwrap(),
+                port: "result".into(),
+                path: vec![],
+            },
+        );
+    spec.nodes.push(NodeSpec {
+        id: NodeId::new("shadow_questions").unwrap(),
+        operation: Operation::Code {
+            primitive: PrimitiveId::new("fixture.questions").unwrap(),
+            params: BTreeMap::new(),
+        },
+        inputs: BTreeMap::new(),
+        guard: None,
+    });
+    let challenger = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        fail_at: None,
+    });
+    let bindings = shadow_backends(
+        Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        }),
+        challenger.clone(),
+    );
+    let input = text_input("budget");
     let mut slow_primitives = PrimitiveRegistry::default();
     slow_primitives
         .register(
@@ -1073,7 +1115,7 @@ async fn shadow_only_data_and_deadline_limits_preserve_completed_decision() {
 }
 /// Trace: FR-058-AC-2, FR-058-AC-4, FR-060-AC-2, IT-008-SC-04
 #[tokio::test]
-async fn shadow_timeout_and_malformed_answer_keep_decision_and_raw_evidence() {
+async fn malformed_shadow_answer_keeps_decision_and_raw_evidence() {
     let spec = shadow_graph();
     let input = text_input("timeout case");
     let champion = || {
@@ -1090,27 +1132,6 @@ async fn shadow_timeout_and_malformed_answer_keep_decision_and_raw_evidence() {
     .unwrap()
     .run(&input, RunLimits::default(), None)
     .await;
-    let slow = Runner::new(
-        &spec,
-        &PrimitiveRegistry::default(),
-        shadow_backends(champion(), Arc::new(SlowShadow)),
-    )
-    .unwrap();
-    let limits = RunLimits {
-        duration: std::time::Duration::from_millis(100),
-        ..RunLimits::default()
-    };
-    let timeout = slow.run(&input, limits, None).await;
-    assert_eq!(timeout.exit, baseline.exit);
-    assert_eq!(timeout.outputs, baseline.outputs);
-    assert_eq!(
-        timeout.trace.shadows[0].status,
-        sapho_runtime::NodeStatus::Failed
-    );
-    assert_eq!(
-        timeout.trace.shadows[0].error.as_ref().unwrap().code,
-        ErrorCode::DeadlineExceeded
-    );
     let malformed = Runner::new(
         &spec,
         &PrimitiveRegistry::default(),
@@ -1135,6 +1156,54 @@ async fn shadow_timeout_and_malformed_answer_keep_decision_and_raw_evidence() {
             .unwrap()
             .raw
             .is_some()
+    );
+}
+/// Real backend timeout runs separately from the deterministic default suite.
+/// Trace: FR-058-AC-2, FR-058-AC-4, IT-008-SC-04
+#[tokio::test]
+#[ignore = "dedicated wall-clock timing lane"]
+async fn shadow_backend_deadline_keeps_decision() {
+    let spec = shadow_graph();
+    let input = text_input("timeout case");
+    let champion = || {
+        Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        })
+    };
+    let baseline = Runner::new(
+        &multilayer(),
+        &PrimitiveRegistry::default(),
+        backend(champion()),
+    )
+    .unwrap()
+    .run(&input, RunLimits::default(), None)
+    .await;
+    let slow = Runner::new(
+        &spec,
+        &PrimitiveRegistry::default(),
+        shadow_backends(champion(), Arc::new(SlowShadow)),
+    )
+    .unwrap();
+    let timeout = slow
+        .run(
+            &input,
+            RunLimits {
+                duration: std::time::Duration::from_millis(100),
+                ..RunLimits::default()
+            },
+            None,
+        )
+        .await;
+    assert_eq!(timeout.exit, baseline.exit);
+    assert_eq!(timeout.outputs, baseline.outputs);
+    assert_eq!(
+        timeout.trace.shadows[0].status,
+        sapho_runtime::NodeStatus::Failed
+    );
+    assert_eq!(
+        timeout.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::DeadlineExceeded
     );
 }
 /// Trace: FR-057-AC-2, FR-057-AC-3, FR-057-AC-4, FR-057-AC-5, IT-008-SC-01, IT-008-SC-06
