@@ -8,13 +8,14 @@ use std::{
     collections::BTreeMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
 
 struct Indexed {
     probabilities: Vec<f64>,
+    models: Vec<&'static str>,
     requests: Mutex<Vec<ModelRequest>>,
 }
 #[async_trait]
@@ -27,7 +28,7 @@ impl ModelBackend for Indexed {
             .get(index)
             .ok_or_else(|| SaphoError::new(ErrorCode::BackendFailed, "Sample absent"))?;
         Ok(ModelResponse {
-            model: "model-1".into(),
+            model: self.models[index].into(),
             raw: None,
             usage: None,
             answers: BTreeMap::from([(
@@ -38,6 +39,21 @@ impl ModelBackend for Indexed {
             )]),
         })
     }
+}
+fn varying_model_binding(backend: Arc<dyn ModelBackend>) -> BackendRegistry {
+    let mut registry = BackendRegistry::default();
+    registry
+        .register(
+            BackendId::new("judge").unwrap(),
+            BackendBinding {
+                backend,
+                model: "requested".into(),
+                expected_model: None,
+                distribution_policy: DistributionPolicy::Strict {},
+            },
+        )
+        .unwrap();
+    registry
 }
 fn sampled_graph(count: u64) -> GraphSpec {
     let mut spec = ask_graph(None);
@@ -122,6 +138,7 @@ fn scripted(reverse_failures: bool, stall_second: bool) -> Arc<Scripted> {
 async fn three_identical_content_requests_keep_distinct_indexed_recordings_and_lists() {
     let live = Arc::new(Indexed {
         probabilities: vec![0.8, 0.2, 0.9],
+        models: vec!["model-a", "model-b", "model-c"],
         requests: Mutex::new(Vec::new()),
     });
     let recorder = Arc::new(RecordingBackend::new(live.clone(), 1_000_000).unwrap());
@@ -143,7 +160,7 @@ async fn three_identical_content_requests_keep_distinct_indexed_recordings_and_l
     let result = engine(
         &spec,
         &PrimitiveRegistry::default(),
-        bindings(recorder.clone()),
+        varying_model_binding(recorder.clone()),
     )
     .run(&Inputs::new(), limits())
     .await
@@ -162,6 +179,40 @@ async fn three_identical_content_requests_keep_distinct_indexed_recordings_and_l
         models.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
         ["0", "1", "2"]
     );
+    let answer_by_id = answers
+        .iter()
+        .map(|datum| (datum.id.as_str(), &datum.value))
+        .collect::<BTreeMap<_, _>>();
+    let paired = models
+        .iter()
+        .map(|datum| {
+            (
+                datum.id.as_str(),
+                &datum.value,
+                answer_by_id[datum.id.as_str()],
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paired
+            .iter()
+            .map(|(id, model, _)| (*id, *model))
+            .collect::<Vec<_>>(),
+        [
+            ("0", &Value::Text("model-a".into())),
+            ("1", &Value::Text("model-b".into())),
+            ("2", &Value::Text("model-c".into())),
+        ]
+    );
+    for (index, (_, _, answer)) in paired.iter().enumerate() {
+        let Value::Answers(by_question) = answer else {
+            panic!("sample answer")
+        };
+        let Answer::Boolean { probability } = by_question.values["q"] else {
+            panic!("boolean sample")
+        };
+        assert_eq!(probability.get(), [0.8, 0.2, 0.9][index]);
+    }
     assert_eq!(
         result.outputs["disagreement"].value,
         Value::Degree(Degree::new(1.0 / 3.0).unwrap())
@@ -210,10 +261,14 @@ async fn three_identical_content_requests_keep_distinct_indexed_recordings_and_l
     );
     let loaded = Recording::from_json(&recording.to_json(1_000_000).unwrap(), 1_000_000).unwrap();
     let replay = Arc::new(ReplayBackend::new(&loaded, 1_000_000).unwrap());
-    let replayed = engine(&spec, &PrimitiveRegistry::default(), bindings(replay))
-        .run(&Inputs::new(), limits())
-        .await
-        .unwrap();
+    let replayed = engine(
+        &spec,
+        &PrimitiveRegistry::default(),
+        varying_model_binding(replay),
+    )
+    .run(&Inputs::new(), limits())
+    .await
+    .unwrap();
     assert_eq!(replayed.outputs, result.outputs);
     let mut conflict = loaded.clone();
     let mut changed = conflict.exchanges[1].clone();
@@ -241,6 +296,7 @@ async fn one_sample_keeps_legacy_ports_request_and_trace_json() {
     );
     let live = Arc::new(Indexed {
         probabilities: vec![0.8],
+        models: vec!["model-1"],
         requests: Mutex::new(Vec::new()),
     });
     let recorder = Arc::new(RecordingBackend::new(live, 1_000_000).unwrap());
@@ -254,8 +310,16 @@ async fn one_sample_keeps_legacy_ports_request_and_trace_json() {
     .unwrap();
     assert!(matches!(result.outputs["result"].value, Value::Answers(_)));
     let trace = serde_json::to_string(&result.trace).unwrap();
-    assert!(!trace.contains("samples"));
+    // Frozen bytes captured from origin/main e77b81e's one-call Ask, before sampling.
+    assert_eq!(
+        trace,
+        include_str!("../fixtures/sampling-legacy-trace.json").trim_end()
+    );
     let recording = recorder.snapshot().unwrap();
+    assert_eq!(
+        serde_json::to_string(&recording.exchanges[0].request).unwrap(),
+        include_str!("../fixtures/sampling-legacy-request.json").trim_end()
+    );
     assert_eq!(recording.exchanges[0].request.sample_index, None);
     assert!(
         !String::from_utf8(recording.to_json(1_000_000).unwrap())
@@ -278,6 +342,7 @@ async fn one_sample_keeps_legacy_ports_request_and_trace_json() {
 async fn request_budget_refuses_before_dispatch_and_later_replay_index_misses() {
     let live = Arc::new(Indexed {
         probabilities: vec![0.8, 0.2, 0.9],
+        models: vec!["model-1"; 3],
         requests: Mutex::new(Vec::new()),
     });
     let recorder = Arc::new(RecordingBackend::new(live.clone(), 1_000_000).unwrap());
@@ -497,7 +562,7 @@ fn sibling_graph() -> GraphSpec {
         .insert("second".into(), output("ask2", "answers"));
     graph
 }
-fn sibling_bindings(backend: Arc<Scripted>) -> BackendRegistry {
+fn sibling_bindings(backend: Arc<dyn ModelBackend>) -> BackendRegistry {
     let mut registry = bindings(backend.clone());
     registry
         .register(
@@ -511,6 +576,99 @@ fn sibling_bindings(backend: Arc<Scripted>) -> BackendRegistry {
         )
         .unwrap();
     registry
+}
+
+struct FailFirstOnce {
+    failed: AtomicBool,
+    seen: Mutex<Vec<ModelRequest>>,
+}
+
+#[async_trait]
+impl ModelBackend for FailFirstOnce {
+    async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse> {
+        self.seen.lock().unwrap().push(request.clone());
+        if request.backend.as_str() == "judge"
+            && request.sample_index == Some(0)
+            && !self.failed.swap(true, Ordering::SeqCst)
+        {
+            return Err(SaphoError::new(
+                ErrorCode::BackendFailed,
+                "First Ask failed",
+            ));
+        }
+        Ok(ModelResponse {
+            model: "model-1".into(),
+            raw: None,
+            usage: None,
+            answers: BTreeMap::from([(
+                "q".into(),
+                Answer::Boolean {
+                    probability: Probability::new(0.8)?,
+                },
+            )]),
+        })
+    }
+}
+
+/// Trace: FR-076-AC-7, IT-014-SC-08
+#[tokio::test]
+async fn first_reserved_ask_failure_releases_undispatched_sibling_reservation() {
+    let backend = Arc::new(FailFirstOnce {
+        failed: AtomicBool::new(false),
+        seen: Mutex::new(Vec::new()),
+    });
+    let mut limit = limits();
+    limit.concurrency = 2;
+    limit.model_requests = 6;
+    let fail = engine(
+        &sibling_graph(),
+        &PrimitiveRegistry::default(),
+        sibling_bindings(backend.clone()),
+    )
+    .run(&Inputs::new(), limit.clone())
+    .await
+    .unwrap_err();
+    assert_eq!(fail.error.code, ErrorCode::BackendFailed);
+    assert_eq!(
+        fail.trace
+            .nodes
+            .iter()
+            .find(|node| node.path.last().is_some_and(|id| id == "ask2"))
+            .unwrap()
+            .samples
+            .as_ref()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(backend.seen.lock().unwrap().len(), 2);
+    assert!(
+        backend
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|request| request.backend.as_str() == "judge")
+    );
+
+    let result = engine(
+        &sibling_graph(),
+        &PrimitiveRegistry::default(),
+        sibling_bindings(backend.clone()),
+    )
+    .run(&Inputs::new(), limit)
+    .await
+    .unwrap();
+    assert!(matches!(result.outputs["second"].value, Value::List(_)));
+    let seen = backend.seen.lock().unwrap();
+    assert_eq!(seen.len(), 8);
+    assert_eq!(
+        seen[2..]
+            .iter()
+            .filter(|request| request.backend.as_str() == "judge2")
+            .count(),
+        3
+    );
 }
 
 /// Trace: FR-076-AC-3, FR-076-AC-7, IT-014-SC-08
