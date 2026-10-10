@@ -3,7 +3,10 @@
 //! Bounded recording-to-confidence projection; no model execution (FR-068).
 use crate::CliError;
 use sapho_core::{Answer, ErrorCode, Question, SaphoError};
-use sapho_evidence::{ConfidenceWindow, DriftReport, DriftSelector, compare_confidence_windows};
+use sapho_evidence::{
+    ConfidenceWindow, DriftReport, DriftSelector, compare_confidence_windows,
+    validate_drift_identity,
+};
 use sapho_recording::Recording;
 
 fn mismatch(detail: &'static str) -> CliError {
@@ -18,10 +21,8 @@ pub fn project_recording_confidences(
     selector: &DriftSelector,
     question: &Question,
 ) -> Result<ConfidenceWindow, CliError> {
-    if selector.question_id.trim().is_empty() || name.trim().is_empty() {
-        return Err(mismatch("Missing drift selector or window name"));
-    }
-    selector.binding.validate()?;
+    selector.validate()?;
+    validate_drift_identity(name)?;
     let recording = Recording::from_json(bytes, max_bytes)?;
     let retained_exchanges = u32::try_from(recording.exchanges.len())
         .map_err(|_| mismatch("Recording exchange count exceeds supported range"))?;
@@ -82,6 +83,9 @@ pub fn compare_recordings(
     question: &Question,
     threshold: f64,
 ) -> Result<DriftReport, CliError> {
+    selector.validate()?;
+    validate_drift_identity(reference_name)?;
+    validate_drift_identity(current_name)?;
     let reference = project_recording_confidences(
         reference_bytes,
         max_bytes,

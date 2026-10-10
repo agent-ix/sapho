@@ -135,3 +135,56 @@ fn repeats_count_empty_is_absent_and_invalid_values_refuse() {
         Err(EvidenceError::InvalidDriftInput)
     ));
 }
+
+/// Trace: FR-068-AC-4, IT-011-SC-07
+#[test]
+fn drift_report_identities_have_a_byte_ceiling() {
+    let max = "x".repeat(MAX_DRIFT_IDENTITY_BYTES);
+    assert!(
+        compare_confidence_windows(
+            DriftSelector {
+                binding: sapho_core::BackendId::new(max.clone()).unwrap(),
+                question_id: max.clone(),
+                actual_model: max.clone()
+            },
+            0.8,
+            window(&max, vec![]),
+            window("current", vec![]),
+        )
+        .is_ok()
+    );
+    let over = "x".repeat(MAX_DRIFT_IDENTITY_BYTES + 1);
+    for bad in [
+        DriftSelector {
+            binding: sapho_core::BackendId::new(over.clone()).unwrap(),
+            ..selector()
+        },
+        DriftSelector {
+            question_id: over.clone(),
+            ..selector()
+        },
+        DriftSelector {
+            actual_model: over.clone(),
+            ..selector()
+        },
+    ] {
+        assert!(matches!(
+            compare_confidence_windows(
+                bad,
+                0.8,
+                window("reference", vec![]),
+                window("current", vec![])
+            ),
+            Err(EvidenceError::InvalidDriftInput)
+        ));
+    }
+    assert!(matches!(
+        compare_confidence_windows(
+            selector(),
+            0.8,
+            window(&over, vec![]),
+            window("current", vec![])
+        ),
+        Err(EvidenceError::InvalidDriftInput)
+    ));
+}

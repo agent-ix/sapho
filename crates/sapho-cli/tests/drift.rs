@@ -343,3 +343,68 @@ fn choice_and_score_use_reported_confidence_when_selected_consistently() {
             .unwrap();
     assert_eq!(projected.confidences, vec![0.61]);
 }
+
+/// Trace: FR-068-AC-4, IT-011-SC-07
+#[test]
+fn selector_is_exact_and_oversized_identity_refuses_before_projection() {
+    let question = boolean_question("Is it true?");
+    let actual_model = "https://model.example/opaque-id";
+    let transport_endpoint = "https://transport.example/secret-endpoint";
+    let credential = "credential-sentinel-never-report";
+    let chosen = DriftSelector {
+        actual_model: actual_model.into(),
+        ..selector()
+    };
+    let recording = bytes(vec![exchange(
+        "judge",
+        actual_model,
+        "q",
+        question.clone(),
+        boolean(0.7),
+    )]);
+    let report = compare_recordings(
+        &recording,
+        &recording,
+        1_048_576,
+        "reference",
+        "current",
+        chosen.clone(),
+        &question,
+        0.8,
+    )
+    .unwrap();
+    assert_eq!(report.selector.actual_model, actual_model);
+    let serialized = serde_json::to_string(&report).unwrap();
+    assert!(!serialized.contains(transport_endpoint));
+    assert!(!serialized.contains(credential));
+    let over = "x".repeat(sapho_evidence::MAX_DRIFT_IDENTITY_BYTES + 1);
+    for bad in [
+        DriftSelector {
+            binding: BackendId::new(over.clone()).unwrap(),
+            ..chosen.clone()
+        },
+        DriftSelector {
+            question_id: over.clone(),
+            ..chosen.clone()
+        },
+        DriftSelector {
+            actual_model: over.clone(),
+            ..chosen.clone()
+        },
+    ] {
+        assert!(
+            project_recording_confidences(
+                b"invalid recording",
+                1_048_576,
+                "reference",
+                &bad,
+                &question
+            )
+            .is_err()
+        );
+    }
+    assert!(
+        project_recording_confidences(b"invalid recording", 1_048_576, &over, &chosen, &question)
+            .is_err()
+    );
+}

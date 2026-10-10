@@ -30,7 +30,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub mod drift;
 pub mod slice;
 pub use drift::{
-    ConfidenceWindow, DriftReport, DriftSelector, DriftWindow, compare_confidence_windows,
+    ConfidenceWindow, DriftReport, DriftSelector, DriftWindow, MAX_DRIFT_IDENTITY_BYTES,
+    compare_confidence_windows, validate_drift_identity,
 };
 pub use slice::{
     DeltaValue, MetricDeltas, RiskDeltas, SliceEntry, SliceKey, SliceReport, WindowAssignment,

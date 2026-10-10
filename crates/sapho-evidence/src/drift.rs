@@ -5,6 +5,17 @@ use crate::EvidenceError;
 use sapho_core::BackendId;
 use serde::{Deserialize, Serialize};
 
+/// Maximum UTF-8 byte length of each identity copied into a drift report.
+pub const MAX_DRIFT_IDENTITY_BYTES: usize = 256;
+
+/// Validate a caller or provider identity before it can enter a drift report.
+pub fn validate_drift_identity(value: &str) -> Result<(), EvidenceError> {
+    if value.trim().is_empty() || value.len() > MAX_DRIFT_IDENTITY_BYTES {
+        return Err(EvidenceError::InvalidDriftInput);
+    }
+    Ok(())
+}
+
 /// Nonsecret identity of the selected recorded answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -15,6 +26,14 @@ pub struct DriftSelector {
     pub question_id: String,
     /// Actual reported model identity.
     pub actual_model: String,
+}
+impl DriftSelector {
+    /// Validate exact selector identities within the report byte ceiling.
+    pub fn validate(&self) -> Result<(), EvidenceError> {
+        validate_drift_identity(self.binding.as_str())?;
+        validate_drift_identity(&self.question_id)?;
+        validate_drift_identity(&self.actual_model)
+    }
 }
 /// Bounded host projection of one validated recording set, without labels or raw bodies.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,9 +96,7 @@ pub struct DriftReport {
 }
 
 fn summarize(mut input: ConfidenceWindow, threshold: f64) -> Result<DriftWindow, EvidenceError> {
-    if input.name.trim().is_empty() {
-        return Err(EvidenceError::InvalidDriftInput);
-    }
+    validate_drift_identity(&input.name)?;
     if input
         .confidences
         .iter()
@@ -126,15 +143,8 @@ pub fn compare_confidence_windows(
     reference: ConfidenceWindow,
     current: ConfidenceWindow,
 ) -> Result<DriftReport, EvidenceError> {
-    selector
-        .binding
-        .validate()
-        .map_err(|_| EvidenceError::InvalidDriftInput)?;
-    if selector.question_id.trim().is_empty()
-        || selector.actual_model.trim().is_empty()
-        || reference.name == current.name
-        || !threshold.is_finite()
-        || !(0.0..=1.0).contains(&threshold)
+    selector.validate()?;
+    if reference.name == current.name || !threshold.is_finite() || !(0.0..=1.0).contains(&threshold)
     {
         return Err(EvidenceError::InvalidDriftInput);
     }
