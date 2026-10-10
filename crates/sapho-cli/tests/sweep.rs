@@ -218,14 +218,16 @@ fn generated_candidates_tune_like_handwritten_and_replay_unchanged_requests() {
     let grid = root.path().join("grid.json");
     write(
         &grid,
-        br#"{"axes":[{"id":"cutoff","values":[0.6,0.7,0.8]}]}"#,
+        br#"{"axes":[{"id":"cutoff","values":[0.6,0.7,0.8]},{"id":"weights","values":[[0.25,0.75],[0.5,0.5]]}]}"#,
     );
     let dest = root.path().join("generated");
     let generated = sweep(&base, &grid, &dest, 16).unwrap();
-    assert_eq!(generated.candidates, 3);
+    assert_eq!(generated.candidates, 6);
     let mut generated_paths = Vec::new();
     let mut handwritten_paths = Vec::new();
-    for (index, cutoff) in [0.6, 0.7, 0.8].into_iter().enumerate() {
+    for index in 0..6 {
+        let cutoff = [0.6, 0.7, 0.8][index / 2];
+        let weights = [[0.25, 0.75], [0.5, 0.5]][index % 2];
         generated_paths.push(dest.join(format!("candidate-{index:04}.json")));
         let mut handwritten = graph.clone();
         let node = handwritten
@@ -237,6 +239,23 @@ fn generated_candidates_tune_like_handwritten_and_replay_unchanged_requests() {
             panic!("literal")
         };
         value.value = Value::Probability(Probability::new(cutoff).unwrap());
+        let metadata = handwritten
+            .nodes
+            .iter_mut()
+            .find(|node| node.id.as_str() == "metadata")
+            .unwrap();
+        let Binding::Literal { value, .. } = metadata.inputs.get_mut("weights").unwrap() else {
+            panic!("weights literal")
+        };
+        value.value = Value::List(
+            weights
+                .into_iter()
+                .enumerate()
+                .map(|(item, weight)| {
+                    Datum::new(["contract", "testing"][item], Value::Number(weight)).unwrap()
+                })
+                .collect(),
+        );
         let file = root.path().join(format!("handwritten-{index}.json"));
         write(&file, &serde_json::to_vec(&handwritten).unwrap());
         handwritten_paths.push(file);
@@ -272,8 +291,8 @@ fn generated_candidates_tune_like_handwritten_and_replay_unchanged_requests() {
     };
     let a = tune(&generated_paths);
     let b = tune(&handwritten_paths);
-    assert_eq!(a["ranking"].as_array().unwrap().len(), 3);
-    for index in 0..3 {
+    assert_eq!(a["ranking"].as_array().unwrap().len(), 6);
+    for index in 0..6 {
         assert_eq!(
             a["candidates"][index]["measurement"],
             b["candidates"][index]["measurement"]
@@ -283,6 +302,7 @@ fn generated_candidates_tune_like_handwritten_and_replay_unchanged_requests() {
     }
     let input = repo.join("examples/data/code-review-input.json");
     let mut requests = Vec::new();
+    let mut metadata = Vec::new();
     for candidate in &generated_paths {
         let output = cli(&[
             "replay",
@@ -298,7 +318,9 @@ fn generated_candidates_tune_like_handwritten_and_replay_unchanged_requests() {
             "{}",
             String::from_utf8_lossy(&output.stdout)
         );
-        let trace = json(&output)["trace"]["nodes"]
+        let document = json(&output);
+        metadata.push(document["outputs"]["metadata"].clone());
+        let trace = document["trace"]["nodes"]
             .as_array()
             .unwrap()
             .iter()
@@ -312,6 +334,9 @@ fn generated_candidates_tune_like_handwritten_and_replay_unchanged_requests() {
         requests.push(trace);
     }
     assert!(requests.windows(2).all(|pair| pair[0] == pair[1]));
+    for pair in metadata.chunks_exact(2) {
+        assert_ne!(pair[0], pair[1]);
+    }
 }
 
 struct Constant;
