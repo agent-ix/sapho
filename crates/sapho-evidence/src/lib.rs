@@ -32,6 +32,8 @@ mod calibration;
 mod roster;
 pub use calibration::{FitAttribution, calibration_cases_digest, fit_calibration};
 pub use roster::*;
+mod gate;
+pub use gate::*;
 
 pub mod drift;
 pub mod slice;
@@ -110,6 +112,9 @@ pub enum EvidenceError {
     /// Fitting data, attribution or split is ineligible.
     #[error("Invalid calibration evidence: {0}")]
     InvalidCalibration(String),
+    /// A promotion gate or its bound evidence is malformed or mismatched.
+    #[error("Invalid promotion gate: {0}")]
+    InvalidGate(String),
 }
 /// Explicit development/held-out partition; tuning and exports always select development.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

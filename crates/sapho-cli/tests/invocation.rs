@@ -2353,3 +2353,354 @@ fn real_git_selectors_feed_the_same_typed_graph_boundary() {
     assert_eq!(invalid.status.code(), Some(2));
     assert_eq!(result(&invalid)["error"]["detail"]["kind"], "revision");
 }
+
+/// Trace: FR-069-AC-1, FR-069-AC-2, FR-069-AC-3, FR-069-AC-4, FR-069-AC-6,
+/// FR-071-AC-1, FR-071-AC-2, FR-071-AC-3, FR-071-AC-4,
+/// IT-012-SC-01, IT-012-SC-02, IT-012-SC-03, IT-012-SC-05, IT-012-SC-06
+#[test]
+fn registered_gate_precedes_synthetic_cases_and_reports_three_exit_codes() {
+    use sapho_evidence::{GateBars, PromotionGate, dataset_content_digest};
+    let root = tempfile::tempdir().unwrap();
+    let graph = GraphSpec::parse(
+        "inputs: {p: {kind: probability}}\noutputs: {result: {kind: input, name: p}}",
+    )
+    .unwrap();
+    let graph_path = graph_file(root.path(), "gate-graph.json", &graph);
+    let graph_identity = graph_semantic_identity(&graph).unwrap();
+    let mut data = Dataset {
+        id: SourceId::new("fixture").unwrap(),
+        cases: [("a", true, 0.9), ("b", false, 0.1)]
+            .into_iter()
+            .map(|(id, label, p)| Case {
+                id: ItemId::new(id).unwrap(),
+                split: Split::HeldOut,
+                inputs: Inputs::from([(
+                    "p".into(),
+                    Datum::new("p", Value::Probability(Probability::new(p).unwrap())).unwrap(),
+                )]),
+                labels: BTreeMap::from([("result".into(), label)]),
+                label_provenance: LabelProvenance {
+                    kind: LabelKind::Human,
+                    source: "fixture".into(),
+                    reference: "fixture".into(),
+                },
+            })
+            .collect(),
+    };
+    let data_path = root.path().join("dataset.json");
+    std::fs::write(&data_path, serde_json::to_vec(&data).unwrap()).unwrap();
+    let gate_path = root.path().join("gate.json");
+    let receipt_path = root.path().join("receipt.json");
+    let report_path = root.path().join("report.json");
+    let mut bars = GateBars {
+        minimum_margin: 0.0,
+        maximum_ece: 0.2,
+        minimum_true_recall: 1.0,
+        minimum_false_recall: 1.0,
+        maximum_disagreement: 0.0,
+        minimum_scored_count: 2,
+    };
+    let mut gate = PromotionGate {
+        version: 1,
+        dataset: data.id.clone(),
+        dataset_content_digest: dataset_content_digest(&data, 100).unwrap(),
+        split: Split::HeldOut,
+        graph_semantic_identity: graph_identity.clone(),
+        outputs: BTreeMap::from([("result".into(), bars.clone())]),
+    };
+    std::fs::write(&gate_path, serde_json::to_vec(&gate).unwrap()).unwrap();
+    let registered = cli(
+        &[
+            "gate-register",
+            path(&graph_path),
+            "--dataset",
+            path(&data_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&receipt_path),
+        ],
+        None,
+    );
+    assert_eq!(
+        registered.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&registered.stderr)
+    );
+    assert!(receipt_path.exists());
+    let report = cli(
+        &[
+            "gate-evaluate",
+            path(&graph_path),
+            "--dataset",
+            path(&data_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&receipt_path),
+            "--output",
+            path(&report_path),
+        ],
+        None,
+    );
+    assert_eq!(
+        report.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let report_json = result(&report);
+    assert_eq!(report_json["gate"]["verdict"], "go");
+    assert_eq!(
+        report_json["gate"]["outputs"]["result"]["margin"]["status"],
+        "pass"
+    );
+    assert_eq!(report_json["repetition_source"], "fresh_live_requests");
+    assert_eq!(
+        report_json["gate"]["dataset_content_digest"],
+        gate.dataset_content_digest
+    );
+    assert_eq!(
+        report_json["gate"]["graph_semantic_identity"],
+        graph_identity
+    );
+    let collision = cli(
+        &[
+            "gate-evaluate",
+            path(&graph_path),
+            "--dataset",
+            path(&data_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&receipt_path),
+            "--output",
+            path(&report_path),
+        ],
+        None,
+    );
+    assert_eq!(collision.status.code(), Some(2));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&std::fs::read(&report_path).unwrap()).unwrap(),
+        report_json
+    );
+    bars.minimum_margin = 0.5;
+    gate.outputs.insert("result".into(), bars);
+    std::fs::write(&gate_path, serde_json::to_vec(&gate).unwrap()).unwrap();
+    let edited = cli(
+        &[
+            "gate-evaluate",
+            path(&graph_path),
+            "--dataset",
+            path(&data_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&receipt_path),
+        ],
+        None,
+    );
+    assert_eq!(edited.status.code(), Some(2));
+    let new_receipt = root.path().join("receipt2.json");
+    assert_eq!(
+        cli(
+            &[
+                "gate-register",
+                path(&graph_path),
+                "--dataset",
+                path(&data_path),
+                "--gate",
+                path(&gate_path),
+                "--receipt",
+                path(&new_receipt)
+            ],
+            None
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    let no_go = cli(
+        &[
+            "gate-evaluate",
+            path(&graph_path),
+            "--dataset",
+            path(&data_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&new_receipt),
+        ],
+        None,
+    );
+    assert_eq!(no_go.status.code(), Some(1));
+    assert_eq!(result(&no_go)["gate"]["verdict"], "no_go");
+    data.cases[1].inputs.clear();
+    let incomplete_dataset = root.path().join("partial.json");
+    std::fs::write(&incomplete_dataset, serde_json::to_vec(&data).unwrap()).unwrap();
+    gate.dataset_content_digest = dataset_content_digest(&data, 100).unwrap();
+    std::fs::write(&gate_path, serde_json::to_vec(&gate).unwrap()).unwrap();
+    let partial_receipt = root.path().join("receipt3.json");
+    assert_eq!(
+        cli(
+            &[
+                "gate-register",
+                path(&graph_path),
+                "--dataset",
+                path(&incomplete_dataset),
+                "--gate",
+                path(&gate_path),
+                "--receipt",
+                path(&partial_receipt)
+            ],
+            None
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    let incomplete = cli(
+        &[
+            "gate-evaluate",
+            path(&graph_path),
+            "--dataset",
+            path(&incomplete_dataset),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&partial_receipt),
+        ],
+        None,
+    );
+    assert_eq!(incomplete.status.code(), Some(2));
+    assert_eq!(result(&incomplete)["gate"]["complete"], false);
+}
+
+/// Trace: FR-069-AC-6, FR-070-AC-7, FR-071-AC-3, FR-071-AC-5,
+/// IT-012-SC-05, IT-012-SC-07
+#[test]
+fn gate_refuses_output_subset_and_reused_replay_content() {
+    use sapho_evidence::{GateBars, PromotionGate, dataset_content_digest};
+    let root = tempfile::tempdir().unwrap();
+    let graph = GraphSpec::parse("inputs: {p: {kind: probability}, flag: {kind: boolean}}\noutputs: {result: {kind: input, name: p}, other: {kind: input, name: flag}}").unwrap();
+    let graph_path = graph_file(root.path(), "graph.json", &graph);
+    let data = Dataset {
+        id: SourceId::new("fixture").unwrap(),
+        cases: vec![Case {
+            id: ItemId::new("one").unwrap(),
+            split: Split::HeldOut,
+            inputs: Inputs::from([
+                (
+                    "p".into(),
+                    Datum::new("p", Value::Probability(Probability::new(0.9).unwrap())).unwrap(),
+                ),
+                (
+                    "flag".into(),
+                    Datum::new("flag", Value::Boolean(false)).unwrap(),
+                ),
+            ]),
+            labels: BTreeMap::from([("result".into(), true), ("other".into(), true)]),
+            label_provenance: LabelProvenance {
+                kind: LabelKind::Human,
+                source: "fixture".into(),
+                reference: "fixture".into(),
+            },
+        }],
+    };
+    let dataset_path = root.path().join("data.json");
+    std::fs::write(&dataset_path, serde_json::to_vec(&data).unwrap()).unwrap();
+    let gate_path = root.path().join("gate.json");
+    let receipt_path = root.path().join("receipt.json");
+    let bars = GateBars {
+        minimum_margin: 0.0,
+        maximum_ece: 1.0,
+        minimum_true_recall: 0.1,
+        minimum_false_recall: 0.1,
+        maximum_disagreement: 1.0,
+        minimum_scored_count: 1,
+    };
+    let mut gate = PromotionGate {
+        version: 1,
+        dataset: data.id.clone(),
+        dataset_content_digest: dataset_content_digest(&data, 100).unwrap(),
+        split: Split::HeldOut,
+        graph_semantic_identity: graph_semantic_identity(&graph).unwrap(),
+        outputs: BTreeMap::from([("result".into(), bars.clone())]),
+    };
+    std::fs::write(&gate_path, serde_json::to_vec(&gate).unwrap()).unwrap();
+    let omitted = cli(
+        &[
+            "gate-register",
+            path(&graph_path),
+            "--dataset",
+            path(&dataset_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&receipt_path),
+        ],
+        None,
+    );
+    assert_eq!(omitted.status.code(), Some(2));
+    assert!(!receipt_path.exists());
+    gate.outputs.insert("other".into(), bars);
+    std::fs::write(&gate_path, serde_json::to_vec(&gate).unwrap()).unwrap();
+    assert_eq!(
+        cli(
+            &[
+                "gate-register",
+                path(&graph_path),
+                "--dataset",
+                path(&dataset_path),
+                "--gate",
+                path(&gate_path),
+                "--receipt",
+                path(&receipt_path)
+            ],
+            None
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    let both = cli(
+        &[
+            "gate-evaluate",
+            path(&graph_path),
+            "--dataset",
+            path(&dataset_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&receipt_path),
+        ],
+        None,
+    );
+    assert_eq!(both.status.code(), Some(1));
+    assert!(result(&both)["gate"]["outputs"].get("result").is_some());
+    assert!(result(&both)["gate"]["outputs"].get("other").is_some());
+    let recording = root.path().join("recording.json");
+    std::fs::write(&recording, Recording::default().to_json(1000).unwrap()).unwrap();
+    let repeated = cli(
+        &[
+            "gate-evaluate",
+            path(&graph_path),
+            "--dataset",
+            path(&dataset_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&receipt_path),
+            "--replay",
+            path(&recording),
+            "--repeat-replay",
+            path(&recording),
+            "--repeat-replay",
+            path(&recording),
+        ],
+        None,
+    );
+    assert_eq!(repeated.status.code(), Some(2));
+    assert_eq!(result(&repeated)["error"]["kind"], "evidence");
+}

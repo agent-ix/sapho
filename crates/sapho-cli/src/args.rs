@@ -60,6 +60,10 @@ pub(crate) enum Command {
     Measure(MeasureArgs),
     /// Fit one development-only calibration literal from raw Probability outcomes.
     FitCalibration(FitCalibrationArgs),
+    /// Register a held-out promotion gate before running any case.
+    GateRegister(GateRegisterArgs),
+    /// Evaluate a previously registered held-out gate.
+    GateEvaluate(GateEvaluateArgs),
     /// Measure an attributable per-model roster for one Dataset split.
     Roster(RosterArgs),
     /// Project measured roster entries to an ordinary typed graph literal.
@@ -251,6 +255,38 @@ pub(crate) struct FitCalibrationArgs {
     pub(crate) max_cases: usize,
     #[command(flatten)]
     pub(crate) limits: Limits,
+}
+#[derive(Args)]
+pub(crate) struct GateRegisterArgs {
+    #[command(flatten)]
+    pub(crate) graph: GraphArgs,
+    #[arg(long)]
+    pub(crate) dataset: PathBuf,
+    #[arg(long)]
+    pub(crate) gate: PathBuf,
+    #[arg(long)]
+    pub(crate) receipt: PathBuf,
+    #[arg(long, default_value_t = 1024)]
+    pub(crate) max_cases: usize,
+    #[arg(long, default_value_t = 8 * 1_048_576)]
+    pub(crate) max_artifact_bytes: usize,
+}
+#[derive(Args)]
+pub(crate) struct GateEvaluateArgs {
+    #[command(flatten)]
+    pub(crate) graph: GraphArgs,
+    #[command(flatten)]
+    pub(crate) options: MeasurementOptions,
+    #[arg(long)]
+    pub(crate) gate: PathBuf,
+    #[arg(long)]
+    pub(crate) receipt: PathBuf,
+    /// Two or more fresh additional runs. Replay requires one distinct file per run.
+    #[arg(long, default_value_t = 2)]
+    pub(crate) repetitions: usize,
+    /// Independent exact replay evidence for each additional run.
+    #[arg(long = "repeat-replay")]
+    pub(crate) repeat_replay: Vec<PathBuf>,
 }
 #[derive(Args)]
 pub(crate) struct RosterArgs {
