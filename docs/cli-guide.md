@@ -131,6 +131,23 @@ Replay works with either inferred identity or explicit CLM metadata and never re
 
 CLM calls use a 30-second queue/HTTP/decode deadline, a 1 MiB request ceiling, an 8 MiB response ceiling and four simultaneous requests per adapter. Runtime's separate limits still apply. There are no retries or redirects. Boolean criteria map to `true`/`false`; question and option order are preserved. Reported confidence is retained independently of probability: CLM defines it as top probability minus the mean of the others. Usage retains `input_tokens`, `output_tokens` and optional `billing_units` separately. Raw distributions remain unchanged under strict or approximate-complete policy.
 
+## Bind multiple System One services
+
+Build the existing `clm` feature. A `systemone` binding requires an explicit model and uses the same System One codec and bounded CLM HTTP adapter. Put only model and policy in the bindings file:
+
+```yaml
+fast_a: {provider: systemone, model: model-a, distribution_policy: {kind: strict}}
+fast_b: {provider: systemone, model: model-b, distribution_policy: {kind: strict}}
+```
+
+Put endpoints and optional OS credential key references in a separate JSON host file:
+
+```json
+{"services":{"fast_a":{"base_url":"http://127.0.0.1:8711"},"fast_b":{"base_url":"http://127.0.0.1:8712","credential_key":"fast-b-api-key","limits":{"timeout_ms":30000,"request_bytes":1048576,"response_bytes":8388608,"in_flight":4}}}}
+```
+
+Select that file with `--service-config services.json` on live `run`, `record`, `measure` or `tune`, or set `SAPHO_SERVICE_CONFIG` to its path. The command argument is a path, never an endpoint or secret. Each required `systemone` binding needs an entry. Only required entries resolve their optional key from the OS store under `agent-ix/sapho`; they never inherit CLM or Jev environment keys. Missing `limits` uses 30 seconds, 1 MiB request, 8 MiB response and four in flight. Overrides must be positive and no greater than those defaults. Remote HTTP, URL userinfo, query and fragment are refused; loopback HTTP and remote HTTPS are accepted. Offline validate, inspect, replay and replay-backed measure/tune do not load this file or secrets. Recording retains binding IDs and model responses without endpoint or credential metadata.
+
 ## Bind Ollama explicitly
 
 Use an already running [Ollama](https://ollama.com) server; Sapho never starts a server or pulls a model. The provider needs no credential and reads no secret store.
