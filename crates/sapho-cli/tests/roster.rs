@@ -5,7 +5,7 @@
 use sapho_core::{
     Answer, BackendBinding, BackendId, BackendRegistry, Datum, DistributionPolicy, Inputs, ItemId,
     ModelBackend, ModelIdentity, ModelRequest, ModelResponse, PrimitiveRegistry, Probability,
-    ProviderDescriptor, SourceId, Value,
+    ProviderDescriptor, Question, SourceId, Value,
 };
 use sapho_evidence::{
     Case, CaseOutcome, Dataset, LabelKind, LabelProvenance, Roster, RosterCall, RosterCase,
@@ -56,6 +56,13 @@ nodes:
       questions:
         - id: q
           question: {kind: boolean, instructions: "Does this hold?", yes: Holds, no: Absent}
+        - id: q_choice
+          question:
+            kind: choice
+            instructions: "Which label?"
+            options:
+              - {label: a, description: First}
+              - {label: b, description: Second}
   - id: alpha_ask
     operation: {kind: ask, backend: alpha}
     inputs:
@@ -166,7 +173,7 @@ fn serve(listener: TcpListener, expected: usize) {
             _ => panic!("unexpected model"),
         };
         let probability = if first { 0.8 } else { 0.2 };
-        let body = serde_json::to_vec(&serde_json::json!({"model": actual, "answers": {"q": {"type":"noul", "noul": probability}}, "usage": {"input_tokens": 10, "output_tokens": 2, "billing_units": 1}})).unwrap();
+        let body = serde_json::to_vec(&serde_json::json!({"model": actual, "answers": {"q": {"type":"noul", "noul": probability}, "q_choice": {"type":"choice", "choice":"a", "confidence":0.6, "probabilities":{"a":0.6,"b":0.4}}}, "usage": {"input_tokens": 10, "output_tokens": 2, "billing_units": 1}})).unwrap();
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -557,8 +564,19 @@ impl ModelBackend for CustomBackend {
                 .map(|q| {
                     (
                         q.id.clone(),
-                        Answer::Boolean {
-                            probability: Probability::new(0.75).unwrap(),
+                        match &q.question {
+                            Question::Boolean { .. } => Answer::Boolean {
+                                probability: Probability::new(0.75).unwrap(),
+                            },
+                            Question::Choice { .. } => Answer::Choice {
+                                selected: "a".into(),
+                                confidence: Probability::new(0.6).unwrap(),
+                                probabilities: Some(BTreeMap::from([
+                                    ("a".into(), Probability::new(0.6).unwrap()),
+                                    ("b".into(), Probability::new(0.4).unwrap()),
+                                ])),
+                            },
+                            Question::Score { .. } => unreachable!(),
                         },
                     )
                 })
