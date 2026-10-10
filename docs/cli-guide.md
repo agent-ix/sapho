@@ -131,6 +131,25 @@ Replay works with either inferred identity or explicit CLM metadata and never re
 
 CLM calls use a 30-second queue/HTTP/decode deadline, a 1 MiB request ceiling, an 8 MiB response ceiling and four simultaneous requests per adapter. Runtime's separate limits still apply. There are no retries or redirects. Boolean criteria map to `true`/`false`; question and option order are preserved. Reported confidence is retained independently of probability: CLM defines it as top probability minus the mean of the others. Usage retains `input_tokens`, `output_tokens` and optional `billing_units` separately. Raw distributions remain unchanged under strict or approximate-complete policy.
 
+## Bind Claude explicitly
+
+The optional `claude` provider sends typed Boolean, Choice and Score questions to Anthropic's Messages API. Choose a model documented to support structured outputs; an unsupported model receives one provider 400 and a typed `ServiceValidation` refusal. Sapho does not infer model quality from a returned probability.
+
+```sh
+cargo install --path crates/sapho-cli --locked --features claude
+```
+
+```yaml
+judge:
+  provider: claude
+  model: claude-sonnet-4-6
+  distribution_policy: {kind: strict}
+```
+
+The graph still names only backend `judge`; changing the provider and model in this binding leaves the graph source unchanged. Set `ANTHROPIC_API_KEY` or store the key under scope `agent-ix/sapho`, account `anthropic-api-key`. An embedding host's explicit secret takes precedence over environment, then OS storage. For a multi-workspace or identity-linked key, set `ANTHROPIC_WORKSPACE_ID` in the host environment. The CLI validates it before sending and never reads it for offline commands. Credentials and workspace IDs are refused in graph/binding files and argv, and excluded from recordings and printable errors.
+
+The stock endpoint is fixed to `https://api.anthropic.com/v1/messages`. Calls have a 30-second total deadline, 1 MiB request and 8 MiB response limits, four in-flight slots per adapter, and a 1024-token output ceiling. They do not retry or follow redirects. A successful recording contains the exact core request, reported actual model, typed answer, usage and raw JSON bodies. Replay uses no Claude feature, credential or network. Run `sapho record examples/graphs/multilayer.yaml --input INPUT.json --bindings bindings.yaml --recording saved.json` for an authorized live check, then `sapho replay` with the same graph/input and saved recording. Record the returned model, answer kinds, usage, status and elapsed time separately; synthetic tests do not establish live account access.
+
 ## Bind Ollama explicitly
 
 Use an already running [Ollama](https://ollama.com) server; Sapho never starts a server or pulls a model. The provider needs no credential and reads no secret store.
@@ -172,7 +191,7 @@ Two deadlines apply. `timeout_seconds` bounds each request to the server, and th
 
 Default tests run against a loopback double of the server. A live check against a real server runs only when you ask for it: `SAPHO_LIVE_OLLAMA=MODEL cargo test -p sapho-cli --features ollama live_server_smoke`.
 
-OpenAI Decisions integration awaits its official preview wire contract. The current CLI offers Jev, CLM and Ollama; no substitute API is presented as Decisions.
+OpenAI Decisions remains a separate provider integration. The Claude provider uses only Anthropic Messages; it does not substitute for Decisions.
 
 ## Record and replay
 

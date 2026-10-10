@@ -1,0 +1,25 @@
+[package]
+name = "sapho-claude"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bounded Claude Messages adapter for typed Sapho questions."
+
+[lints]
+workspace = true
+
+[dependencies]
+sapho-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+ix-cli-kit.workspace = true
+
+[dev-dependencies]
+sapho-recording.workspace = true
+tokio = { workspace = true, features = ["test-util", "net", "io-util"] }
