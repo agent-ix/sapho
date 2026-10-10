@@ -310,21 +310,13 @@ pub fn measure(
     outcomes: &BTreeMap<ItemId, CaseOutcome>,
     max_cases: usize,
 ) -> Result<Measurement, EvidenceError> {
-    let mut report = measure_inner(dataset, split, schemas, outcomes, max_cases)?;
+    let mut report = measure_inner(dataset, split, schemas, outcomes, max_cases, None)?;
     let kinds = dataset
         .selected(split)
         .map(|case| case.label_provenance.kind)
         .collect::<BTreeSet<_>>();
     for kind in kinds {
-        let subset = Dataset {
-            id: dataset.id.clone(),
-            cases: dataset
-                .selected(split)
-                .filter(|case| case.label_provenance.kind == kind)
-                .cloned()
-                .collect(),
-        };
-        let view = measure_inner(&subset, split, schemas, outcomes, max_cases)?;
+        let view = measure_inner(dataset, split, schemas, outcomes, max_cases, Some(kind))?;
         for (output, measurement) in view.outputs {
             report
                 .per_kind
@@ -341,6 +333,7 @@ fn measure_inner(
     schemas: &BTreeMap<String, ValueType>,
     outcomes: &BTreeMap<ItemId, CaseOutcome>,
     max_cases: usize,
+    selected_kind: Option<LabelKind>,
 ) -> Result<Measurement, EvidenceError> {
     dataset.validate(max_cases)?;
     for schema in schemas.values() {
@@ -356,7 +349,10 @@ fn measure_inner(
         predictions: Vec::new(),
     };
     let mut squared_errors = BTreeMap::<String, f64>::new();
-    for case in dataset.selected(split) {
+    for case in dataset
+        .selected(split)
+        .filter(|case| selected_kind.is_none_or(|kind| case.label_provenance.kind == kind))
+    {
         report.selected_cases += 1;
         let answering = match outcomes.get(&case.id) {
             Some(CaseOutcome::Completed { models, .. } | CaseOutcome::Failed { models, .. }) => {
@@ -445,7 +441,9 @@ fn measure_inner(
                     }
                 }
             }
-            report.predictions.push(prediction);
+            if selected_kind.is_none() {
+                report.predictions.push(prediction);
+            }
         }
     }
     for (name, counts) in &mut report.outputs {
