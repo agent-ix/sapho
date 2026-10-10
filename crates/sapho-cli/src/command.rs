@@ -374,6 +374,12 @@ struct MeasurementReport {
     measurement: Measurement,
     runs: Documents,
 }
+#[derive(Serialize)]
+struct CalibrationMismatchReport {
+    graph: GraphArtifact,
+    error: SaphoError,
+    runs: Documents,
+}
 fn raw_output_ask_binding(graph: &GraphSpec, output: &str) -> Result<BackendId, CliError> {
     let mut pending = Vec::new();
     let Some(Binding::Node { node, .. }) = graph.outputs.get(output) else {
@@ -653,33 +659,54 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         )?
     };
     let destination = claim(options.output.as_deref())?;
-    let calculated = (|| -> Result<(Measurement, Documents), CliError> {
-        let case_runs = runtime.block_on(run_cases(&runner, &data, selected, &options.limits))?;
-        if selected == Split::Development {
-            check_development_calibration_observations(
-                &data,
-                &graph.definition,
-                &case_runs,
-                options.max_cases,
-            )?;
-        }
-        let (outcomes, runs) = split(case_runs);
-        let measurement = measure(
-            &data,
-            selected,
-            &runner.inspection().signature.outputs,
-            &outcomes,
-            options.max_cases,
-        )?;
-        Ok((measurement, runs))
-    })();
-    let (measurement, runs) = match calculated {
+    let case_runs = match runtime.block_on(run_cases(&runner, &data, selected, &options.limits)) {
         Ok(value) => value,
         Err(error) => {
             if let Some(destination) = destination {
                 destination.discard()?;
             }
             return Err(error);
+        }
+    };
+    if selected == Split::Development {
+        match check_development_calibration_observations(
+            &data,
+            &graph.definition,
+            &case_runs,
+            options.max_cases,
+        ) {
+            Ok(()) => {}
+            Err(CliError::Engine(error)) if error.code == ErrorCode::ModelMismatch => {
+                let (_, runs) = split(case_runs);
+                return respond(
+                    CalibrationMismatchReport { graph, error, runs },
+                    ExitStatus::Refused,
+                    options.limits.max_artifact_bytes,
+                    destination,
+                );
+            }
+            Err(error) => {
+                if let Some(destination) = destination {
+                    destination.discard()?;
+                }
+                return Err(error);
+            }
+        }
+    }
+    let (outcomes, runs) = split(case_runs);
+    let measurement = match measure(
+        &data,
+        selected,
+        &runner.inspection().signature.outputs,
+        &outcomes,
+        options.max_cases,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            if let Some(destination) = destination {
+                destination.discard()?;
+            }
+            return Err(error.into());
         }
     };
     let exit = if measurement.complete() {

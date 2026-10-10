@@ -317,6 +317,23 @@ mod tests {
         let mut duplicate = map.clone();
         duplicate.knots[1].raw = duplicate.knots[0].raw;
         assert!(duplicate.validate().is_err());
+        let mut descending = map.clone();
+        descending.knots.swap(0, 1);
+        assert!(descending.validate().is_err());
+        let mut excessive = map.clone();
+        excessive.case_count = 4097;
+        excessive.knots = (0..4097)
+            .map(|index| CalibrationKnot {
+                raw: Probability::new(index as f64 / 4096.0).unwrap(),
+                calibrated: CalibratedProbability::new(index as f64 / 4096.0).unwrap(),
+            })
+            .collect();
+        assert!(excessive.validate().is_err());
+        let nonfinite =
+            serde_json::to_string(&map)
+                .unwrap()
+                .replacen("\"raw\":0.05", "\"raw\":1e999", 1);
+        assert!(serde_json::from_str::<CalibrationMap>(&nonfinite).is_err());
         let mut wrong = serde_json::to_value(&map).unwrap();
         wrong["endpoint"] = serde_json::json!("https://private.invalid");
         assert!(serde_json::from_value::<CalibrationMap>(wrong).is_err());

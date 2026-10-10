@@ -4,10 +4,10 @@
 use sapho_core::{
     Answer, BackendId, CalibratedProbability, CalibrationMap, Datum, DistributionPolicy, Inputs,
     ItemId, ModelRequest, ModelResponse, NamedQuestion, NodeId, Probability, Question, SourceId,
-    Value,
+    Value, ValueType,
 };
 use sapho_evidence::{Case, Dataset, LabelKind, LabelProvenance, Split};
-use sapho_graph::{Binding, GraphSpec, NodeSpec, Operation};
+use sapho_graph::{Binding, Comparator, GraphBody, GraphSpec, NodeSpec, Operation};
 use sapho_recording::{Exchange, Recording};
 use std::{collections::BTreeMap, path::Path, process::Command};
 fn path(p: &Path) -> &str {
@@ -107,7 +107,7 @@ fn command(args: &[&str]) -> std::process::Output {
 }
 /// Trace: FR-081-AC-4, FR-082-AC-3, FR-083-AC-5,
 /// FR-084-AC-1, FR-084-AC-2, FR-084-AC-3, FR-084-AC-4,
-/// IT-017-SC-01, IT-017-SC-03, IT-017-SC-05, IT-017-SC-06
+/// IT-017-SC-01, IT-017-SC-03, IT-017-SC-05, IT-017-SC-06, IT-017-SC-07, IT-017-SC-08
 #[test]
 fn development_fit_replays_and_writes_identical_exclusive_literals() {
     let root = tempfile::tempdir().unwrap();
@@ -213,6 +213,216 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
     );
     let calibrated_path = root.path().join("calibrated.json");
     std::fs::write(&calibrated_path, serde_json::to_vec(&calibrated).unwrap()).unwrap();
+    let mut guarded = calibrated.clone();
+    let mut unrelated_ask = guarded
+        .nodes
+        .iter()
+        .find(|node| node.id.as_str() == "ask")
+        .unwrap()
+        .clone();
+    unrelated_ask.id = NodeId::new("unrelated_ask").unwrap();
+    unrelated_ask.operation = Operation::Ask {
+        backend: BackendId::new("fast_b").unwrap(),
+    };
+    let mut unrelated_probability = guarded
+        .nodes
+        .iter()
+        .find(|node| node.id.as_str() == "probability")
+        .unwrap()
+        .clone();
+    unrelated_probability.id = NodeId::new("unrelated_probability").unwrap();
+    unrelated_probability.inputs.insert(
+        "answers".into(),
+        Binding::Node {
+            node: unrelated_ask.id.clone(),
+            port: "answers".into(),
+            path: Vec::new(),
+        },
+    );
+    let guard = NodeSpec {
+        id: NodeId::new("unrelated_guard").unwrap(),
+        operation: Operation::Compare {
+            comparator: Comparator::Greater,
+        },
+        inputs: BTreeMap::from([
+            (
+                "a".into(),
+                Binding::Node {
+                    node: unrelated_probability.id.clone(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            ),
+            (
+                "b".into(),
+                Binding::Literal {
+                    value: Datum::new(
+                        "threshold",
+                        Value::Probability(Probability::new(0.5).unwrap()),
+                    )
+                    .unwrap(),
+                    value_type: ValueType::Probability,
+                },
+            ),
+        ]),
+        guard: None,
+    };
+    guarded
+        .nodes
+        .extend([unrelated_ask, unrelated_probability, guard]);
+    guarded
+        .nodes
+        .iter_mut()
+        .find(|node| node.id.as_str() == "calibrate")
+        .unwrap()
+        .guard = Some(Binding::Node {
+        node: NodeId::new("unrelated_guard").unwrap(),
+        port: "result".into(),
+        path: Vec::new(),
+    });
+    guarded.outputs.remove("calibrated_support");
+    let guarded_path = root.path().join("unrelated-guard.json");
+    std::fs::write(&guarded_path, serde_json::to_vec(&guarded).unwrap()).unwrap();
+    let mut guarded_recording = exchanges.clone();
+    let mut unrelated_exchange = guarded_recording.exchanges[0].clone();
+    unrelated_exchange.request.backend = BackendId::new("fast_b").unwrap();
+    unrelated_exchange.response.model = "model-b".into();
+    unrelated_exchange.response.answers.insert(
+        "q".into(),
+        Answer::Boolean {
+            probability: Probability::new(0.95).unwrap(),
+        },
+    );
+    guarded_recording.exchanges.push(unrelated_exchange);
+    let guarded_recording_path = root.path().join("unrelated-guard-recording.json");
+    std::fs::write(
+        &guarded_recording_path,
+        guarded_recording.to_json(8 * 1_048_576).unwrap(),
+    )
+    .unwrap();
+    let guarded_input_path = root.path().join("unrelated-guard-input.json");
+    std::fs::write(&guarded_input_path, b"{\"text\":\"case-text-0\"}").unwrap();
+    let guarded_run = command(&[
+        "replay",
+        path(&guarded_path),
+        "--recording",
+        path(&guarded_recording_path),
+        "--input",
+        path(&guarded_input_path),
+    ]);
+    assert!(
+        guarded_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&guarded_run.stdout)
+    );
+    let guarded_report: serde_json::Value = serde_json::from_slice(&guarded_run.stdout).unwrap();
+    assert_eq!(
+        guarded_report["calibration_identity"][0]["status"],
+        "reported_name_match"
+    );
+    let mut mapped = calibrated.clone();
+    let mut mapped_calibrate = mapped
+        .nodes
+        .iter()
+        .find(|node| node.id.as_str() == "calibrate")
+        .unwrap()
+        .clone();
+    mapped_calibrate.inputs.insert(
+        "value".into(),
+        Binding::Input {
+            name: "raw".into(),
+            path: Vec::new(),
+        },
+    );
+    mapped.nodes.retain(|node| node.id.as_str() != "calibrate");
+    mapped.outputs.remove("calibrated_support");
+    mapped.subgraphs.insert(
+        "each".into(),
+        GraphBody {
+            inputs: BTreeMap::from([
+                ("item".into(), ValueType::Boolean),
+                ("raw".into(), ValueType::Probability),
+            ]),
+            nodes: vec![mapped_calibrate],
+            outputs: BTreeMap::from([(
+                "result".into(),
+                Binding::Node {
+                    node: NodeId::new("calibrate").unwrap(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            )]),
+        },
+    );
+    mapped.nodes.push(NodeSpec {
+        id: NodeId::new("map").unwrap(),
+        operation: Operation::Map {
+            graph: "each".into(),
+        },
+        inputs: BTreeMap::from([
+            (
+                "items".into(),
+                Binding::Literal {
+                    value: Datum::new(
+                        "items",
+                        Value::List(vec![
+                            Datum::new("first", Value::Boolean(true)).unwrap(),
+                            Datum::new("second", Value::Boolean(false)).unwrap(),
+                        ]),
+                    )
+                    .unwrap(),
+                    value_type: ValueType::list(ValueType::Boolean),
+                },
+            ),
+            (
+                "raw".into(),
+                Binding::Node {
+                    node: NodeId::new("probability").unwrap(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            ),
+        ]),
+        guard: None,
+    });
+    mapped.outputs.insert(
+        "mapped".into(),
+        Binding::Node {
+            node: NodeId::new("map").unwrap(),
+            port: "result".into(),
+            path: Vec::new(),
+        },
+    );
+    let mapped_path = root.path().join("mapped-calibration.json");
+    std::fs::write(&mapped_path, serde_json::to_vec(&mapped).unwrap()).unwrap();
+    let mapped_run = command(&[
+        "replay",
+        path(&mapped_path),
+        "--recording",
+        path(&recording),
+        "--input",
+        path(&guarded_input_path),
+    ]);
+    assert!(
+        mapped_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&mapped_run.stdout)
+    );
+    let mapped_report: serde_json::Value = serde_json::from_slice(&mapped_run.stdout).unwrap();
+    assert_eq!(
+        mapped_report["calibration_identity"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(
+        mapped_report["calibration_identity"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["status"] == "reported_name_match")
+    );
     for action in ["validate", "inspect"] {
         let checked = command(&[action, path(&calibrated_path)]);
         assert!(
@@ -373,6 +583,68 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
         changed_recording.to_json(8 * 1_048_576).unwrap(),
     )
     .unwrap();
+    let refit_path = root.path().join("model-b-map.json");
+    let refit = command(&[
+        "fit-calibration",
+        path(&graph),
+        "--dataset",
+        path(&dataset),
+        "--replay",
+        path(&changed_path),
+        "--output-name",
+        "raw_support",
+        "--binding",
+        "fast_a",
+        "--split",
+        "development",
+        "--output",
+        path(&refit_path),
+    ]);
+    assert!(
+        refit.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&refit.stdout),
+        String::from_utf8_lossy(&refit.stderr)
+    );
+    let refitted: Binding = serde_json::from_slice(&std::fs::read(&refit_path).unwrap()).unwrap();
+    let Binding::Literal { value, .. } = refitted else {
+        panic!("refitted literal")
+    };
+    let Value::CalibrationMap(refitted_map) = value.value else {
+        panic!("refitted map")
+    };
+    assert_eq!(refitted_map.fit_actual_model, "model-b");
+    assert_ne!(refitted_map.map_id, map.map_id);
+    let mapped_mismatch = command(&[
+        "replay",
+        path(&mapped_path),
+        "--recording",
+        path(&changed_path),
+        "--input",
+        path(&guarded_input_path),
+    ]);
+    assert!(!mapped_mismatch.status.success());
+    let mapped_failure: serde_json::Value =
+        serde_json::from_slice(&mapped_mismatch.stdout).unwrap();
+    assert_eq!(mapped_failure["error"]["code"], "model_mismatch");
+    assert!(
+        mapped_failure["trace"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |node| node["path"] == serde_json::json!(["root", "map", "first", "calibrate"])
+                    && node["status"] == "failed"
+            )
+    );
+    assert!(
+        mapped_failure["trace"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|node| node["operation"]["kind"] == "ask"
+                && node["model"]["response"]["model"] == "model-b")
+    );
     let mismatch = command(&[
         "measure",
         path(&calibrated_path),
@@ -430,7 +702,25 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
         "development",
     ]);
     assert!(!mismatch.status.success());
-    assert!(String::from_utf8_lossy(&mismatch.stdout).contains("model_mismatch"));
+    let mismatch_report: serde_json::Value = serde_json::from_slice(&mismatch.stdout).unwrap();
+    assert_eq!(mismatch_report["error"]["code"], "model_mismatch");
+    assert!(mismatch_report.get("measurement").is_none());
+    assert!(
+        mismatch_report["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|case| {
+                case["report"]["trace"]["nodes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|node| {
+                        node["operation"]["kind"] == "ask"
+                            && node["model"]["response"]["model"] == "model-a"
+                    })
+            })
+    );
     let held = root.path().join("held.json");
     let run = command(&[
         "fit-calibration",
@@ -468,4 +758,149 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
     ]);
     assert!(!existing.status.success());
     assert_eq!(bytes, std::fs::read(&first).unwrap());
+
+    let development_only = root.path().join("development-only-recording.json");
+    let mut no_held_out = exchanges.clone();
+    no_held_out.exchanges.truncate(20);
+    std::fs::write(
+        &development_only,
+        no_held_out.to_json(8 * 1_048_576).unwrap(),
+    )
+    .unwrap();
+    let no_held_out_map = root.path().join("no-held-out-map.json");
+    let development_fit = command(&[
+        "fit-calibration",
+        path(&graph),
+        "--dataset",
+        path(&dataset),
+        "--replay",
+        path(&development_only),
+        "--output-name",
+        "raw_support",
+        "--binding",
+        "fast_a",
+        "--split",
+        "development",
+        "--output",
+        path(&no_held_out_map),
+    ]);
+    assert!(development_fit.status.success());
+    assert_eq!(bytes, std::fs::read(&no_held_out_map).unwrap());
+
+    let mut answers_graph = GraphSpec::parse(raw_graph()).unwrap();
+    answers_graph.outputs.insert(
+        "answers".into(),
+        Binding::Node {
+            node: NodeId::new("ask").unwrap(),
+            port: "answers".into(),
+            path: Vec::new(),
+        },
+    );
+    let answers_path = root.path().join("answers-output.json");
+    std::fs::write(&answers_path, serde_json::to_vec(&answers_graph).unwrap()).unwrap();
+    let non_probability_output = root.path().join("non-probability-map.json");
+    let non_probability = command(&[
+        "fit-calibration",
+        path(&answers_path),
+        "--dataset",
+        path(&dataset),
+        "--replay",
+        path(&recording),
+        "--output-name",
+        "answers",
+        "--binding",
+        "fast_a",
+        "--split",
+        "development",
+        "--output",
+        path(&non_probability_output),
+    ]);
+    assert!(!non_probability.status.success());
+    assert!(String::from_utf8_lossy(&non_probability.stdout).contains("type_mismatch"));
+    assert!(!non_probability_output.exists());
+
+    let mut no_development = data.clone();
+    for case in &mut no_development.cases {
+        case.split = Split::HeldOut;
+    }
+    let no_development_path = root.path().join("no-development.json");
+    std::fs::write(
+        &no_development_path,
+        serde_json::to_vec(&no_development).unwrap(),
+    )
+    .unwrap();
+    let absent_development_output = root.path().join("no-development-map.json");
+    let absent_development = command(&[
+        "fit-calibration",
+        path(&graph),
+        "--dataset",
+        path(&no_development_path),
+        "--replay",
+        path(&recording),
+        "--output-name",
+        "raw_support",
+        "--binding",
+        "fast_a",
+        "--split",
+        "development",
+        "--output",
+        path(&absent_development_output),
+    ]);
+    assert!(!absent_development.status.success());
+    assert!(
+        String::from_utf8_lossy(&absent_development.stdout).contains("empty_split"),
+        "{}",
+        String::from_utf8_lossy(&absent_development.stdout)
+    );
+    assert!(!absent_development_output.exists());
+
+    let mut failed_recording = exchanges.clone();
+    failed_recording.exchanges.remove(0);
+    let failed_recording_path = root.path().join("failed-fit-recording.json");
+    std::fs::write(
+        &failed_recording_path,
+        failed_recording.to_json(8 * 1_048_576).unwrap(),
+    )
+    .unwrap();
+    let failed_fit_output = root.path().join("failed-fit-map.json");
+    let failed_fit = command(&[
+        "fit-calibration",
+        path(&graph),
+        "--dataset",
+        path(&dataset),
+        "--replay",
+        path(&failed_recording_path),
+        "--output-name",
+        "raw_support",
+        "--binding",
+        "fast_a",
+        "--split",
+        "development",
+        "--output",
+        path(&failed_fit_output),
+    ]);
+    assert!(!failed_fit.status.success());
+    assert!(String::from_utf8_lossy(&failed_fit.stdout).contains("model_mismatch"));
+    assert!(!failed_fit_output.exists());
+
+    let wrong_binding_output = root.path().join("wrong-binding-map.json");
+    let wrong_binding = command(&[
+        "fit-calibration",
+        path(&graph),
+        "--dataset",
+        path(&dataset),
+        "--replay",
+        path(&recording),
+        "--output-name",
+        "raw_support",
+        "--binding",
+        "fast_b",
+        "--split",
+        "development",
+        "--output",
+        path(&wrong_binding_output),
+    ]);
+    assert!(!wrong_binding.status.success());
+    assert!(String::from_utf8_lossy(&wrong_binding.stdout).contains("model_mismatch"));
+    assert!(!wrong_binding_output.exists());
 }
