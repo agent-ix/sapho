@@ -480,6 +480,12 @@ struct MeasurementReport {
     comparison: Option<ShadowComparison>,
     runs: Documents,
 }
+#[derive(Serialize)]
+struct CalibrationMismatchReport {
+    graph: GraphArtifact,
+    error: SaphoError,
+    runs: Documents,
+}
 fn raw_output_ask_binding(graph: &GraphSpec, output: &str) -> Result<BackendId, CliError> {
     let mut pending = Vec::new();
     let Some(Binding::Node { node, .. }) = graph.outputs.get(output) else {
@@ -787,44 +793,7 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         }
     }
     let destination = claim(options.output.as_deref())?;
-    let calculated = (|| -> Result<(Measurement, Option<ShadowComparison>, Documents), CliError> {
-        let case_runs = runtime.block_on(run_cases(
-            &runner, &data, selected, &options.limits, selection,
-        ))?;
-        if selected == Split::Development {
-            check_development_calibration_observations(
-                &data,
-                &graph.definition,
-                &case_runs,
-                options.max_cases,
-            )?;
-        }
-        let (outcomes, shadows, runs) = split(case_runs);
-        let measurement = measure(
-            &data,
-            selected,
-            &runner.inspection().signature.outputs,
-            &outcomes,
-            options.max_cases,
-        )?;
-        let comparison = selection
-            .map(|(shadow, output)| {
-                let request = ShadowComparisonRequest {
-                    output: output.into(),
-                    shadow: shadow.into(),
-                    metric: args.shadow_metric.map(ShadowMetric::from).unwrap_or(ShadowMetric::Agreement),
-                    min_scored: args.shadow_min_scored,
-                    margin: args.shadow_margin,
-                };
-                compare_shadow(
-                    &data, selected, &runner.inspection().signature.outputs,
-                    &outcomes, &shadows, &request, options.max_cases,
-                ).map_err(CliError::from)
-            })
-            .transpose()?;
-        Ok((measurement, comparison, runs))
-    })();
-    let (measurement, comparison, runs) = match calculated {
+    let case_runs = match runtime.block_on(run_cases(&runner, &data, selected, &options.limits, selection)) {
         Ok(value) => value,
         Err(error) => {
             if let Some(destination) = destination {
@@ -833,6 +802,62 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
             return Err(error);
         }
     };
+    if selected == Split::Development {
+        match check_development_calibration_observations(
+            &data,
+            &graph.definition,
+            &case_runs,
+            options.max_cases,
+        ) {
+            Ok(()) => {}
+            Err(CliError::Engine(error)) if error.code == ErrorCode::ModelMismatch => {
+                let (_, _, runs) = split(case_runs);
+                return respond(
+                    CalibrationMismatchReport { graph, error, runs },
+                    ExitStatus::Refused,
+                    options.limits.max_artifact_bytes,
+                    destination,
+                );
+            }
+            Err(error) => {
+                if let Some(destination) = destination {
+                    destination.discard()?;
+                }
+                return Err(error);
+            }
+        }
+    }
+    let (outcomes, shadows, runs) = split(case_runs);
+    let measurement = match measure(
+        &data,
+        selected,
+        &runner.inspection().signature.outputs,
+        &outcomes,
+        options.max_cases,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            if let Some(destination) = destination {
+                destination.discard()?;
+            }
+            return Err(error.into());
+        }
+    };
+    let comparison = selection
+        .map(|(shadow, output)| {
+            let request = ShadowComparisonRequest {
+                output: output.into(),
+                shadow: shadow.into(),
+                metric: args.shadow_metric.map(ShadowMetric::from).unwrap_or(ShadowMetric::Agreement),
+                min_scored: args.shadow_min_scored,
+                margin: args.shadow_margin,
+            };
+            compare_shadow(
+                &data, selected, &runner.inspection().signature.outputs,
+                &outcomes, &shadows, &request, options.max_cases,
+            ).map_err(CliError::from)
+        })
+        .transpose()?;
     let exit = if measurement.complete() {
         ExitStatus::Completed
     } else {

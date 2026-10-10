@@ -344,6 +344,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(original, serde_json::to_vec(&again).unwrap());
+        let compact = serde_json::to_vec(&data).unwrap();
+        let pretty = serde_json::to_vec_pretty(&data).unwrap();
+        let compact_data: Dataset = serde_json::from_slice(&compact).unwrap();
+        let pretty_data: Dataset = serde_json::from_slice(&pretty).unwrap();
+        assert_eq!(
+            calibration_cases_digest(&compact_data, "raw_support", 100).unwrap(),
+            calibration_cases_digest(&pretty_data, "raw_support", 100).unwrap()
+        );
+        let selected_digest = calibration_cases_digest(&data, "raw_support", 100).unwrap();
+        let mut changed_label = data.clone();
+        let selected = changed_label.cases[0]
+            .labels
+            .get_mut("raw_support")
+            .unwrap();
+        *selected = !*selected;
+        assert_ne!(
+            selected_digest,
+            calibration_cases_digest(&changed_label, "raw_support", 100).unwrap()
+        );
+        let mut held_out_only = data.clone();
+        let mut extra = held_out_only.cases[0].clone();
+        extra.id = ItemId::new("held-out-only").unwrap();
+        extra.split = Split::HeldOut;
+        extra.labels.insert("raw_support".into(), false);
+        held_out_only.cases.push(extra);
+        assert_eq!(
+            selected_digest,
+            calibration_cases_digest(&held_out_only, "raw_support", 100).unwrap()
+        );
+        let mut previous = 0.0;
+        for step in 0..=1000 {
+            let fitted = map
+                .apply(Probability::new(step as f64 / 1000.0).unwrap())
+                .unwrap()
+                .get();
+            assert!((0.0..=1.0).contains(&fitted));
+            assert!(fitted >= previous);
+            previous = fitted;
+        }
         assert!(
             fit_calibration(
                 &data,
@@ -420,6 +459,29 @@ mod tests {
         assert!((raw_ece - 0.15).abs() < 1e-9);
         assert!((fitted_brier - 0.16).abs() < 1e-9);
         assert!(fitted_ece.abs() < 1e-9);
+        assert!(raw_ece - fitted_ece >= 0.1);
+        assert_eq!(report.outputs["raw_support"].scored, 20);
+        assert_eq!(report.outputs["calibrated_support"].scored, 20);
+        let scored_ids = |output: &str| {
+            report
+                .predictions
+                .iter()
+                .filter(|prediction| prediction.output == output && prediction.unscored.is_none())
+                .map(|prediction| prediction.case.clone())
+                .collect::<Vec<_>>()
+        };
+        let expected_ids = data
+            .cases
+            .iter()
+            .map(|case| case.id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            scored_ids("raw_support")
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected_ids
+        );
+        assert_eq!(scored_ids("raw_support"), scored_ids("calibrated_support"));
     }
     /// Trace: FR-083-AC-2, FR-083-AC-3, FR-083-AC-6
     #[test]
@@ -510,6 +572,108 @@ mod tests {
                 100
             )
             .is_err()
+        );
+    }
+    /// Trace: FR-083-AC-3, IT-017-SC-03
+    #[test]
+    fn fitter_refuses_class_raw_failure_self_source_and_excess_knots() {
+        let graph = format!("graph-v1:sha256:{}", "a".repeat(64));
+        let refusal = |data: &Dataset,
+                       outcomes: &BTreeMap<ItemId, CaseOutcome>,
+                       attribution: &FitAttribution,
+                       reason: &str,
+                       max_cases: usize| {
+            let error = fit_calibration(
+                data,
+                Split::Development,
+                "raw_support",
+                outcomes,
+                attribution,
+                &graph,
+                max_cases,
+            )
+            .unwrap_err();
+            assert!(format!("{error:?}").contains(reason), "{error:?}");
+        };
+
+        let (mut data, outcomes, attribution) = fixture();
+        for case in &mut data.cases {
+            case.labels.insert("raw_support".into(), true);
+        }
+        refusal(&data, &outcomes, &attribution, "class_count", 100);
+
+        let (data, mut outcomes, attribution) = fixture();
+        for outcome in outcomes.values_mut() {
+            if let CaseOutcome::Completed { outputs, .. } = outcome {
+                outputs.get_mut("raw_support").unwrap().value =
+                    Value::Probability(Probability::new(0.5).unwrap());
+            }
+        }
+        refusal(&data, &outcomes, &attribution, "raw_group_count", 100);
+
+        let (data, mut outcomes, attribution) = fixture();
+        outcomes.insert(
+            data.cases[0].id.clone(),
+            CaseOutcome::Failed {
+                error: sapho_core::SaphoError::new(
+                    sapho_core::ErrorCode::BackendFailed,
+                    "synthetic failure",
+                ),
+                models: Vec::new(),
+            },
+        );
+        refusal(&data, &outcomes, &attribution, "case_failed", 100);
+
+        let (mut data, outcomes, attribution) = fixture();
+        data.cases[0].label_provenance.kind = LabelKind::Model;
+        data.cases[0].label_provenance.source = "model-a".into();
+        refusal(&data, &outcomes, &attribution, "self_source", 100);
+
+        let (template, _, _) = fixture();
+        let mut many = Dataset {
+            id: template.id,
+            cases: Vec::new(),
+        };
+        let mut many_outcomes = BTreeMap::new();
+        let mut many_attribution = BTreeMap::new();
+        for index in 0..4097 {
+            let id = ItemId::new(format!("case-{index:04}")).unwrap();
+            let mut case = template.cases[0].clone();
+            case.id = id.clone();
+            case.labels.insert("raw_support".into(), index % 2 == 0);
+            many.cases.push(case);
+            many_outcomes.insert(
+                id.clone(),
+                CaseOutcome::Completed {
+                    outputs: BTreeMap::from([(
+                        "raw_support".into(),
+                        Datum::new(
+                            format!("raw-{index}"),
+                            Value::Probability(Probability::new(index as f64 / 4096.0).unwrap()),
+                        )
+                        .unwrap(),
+                    )]),
+                    models: vec![ModelIdentity {
+                        name: "model-a".into(),
+                    }],
+                },
+            );
+            many_attribution.insert(
+                id,
+                (
+                    BackendId::new("fast_a").unwrap(),
+                    ModelIdentity {
+                        name: "model-a".into(),
+                    },
+                ),
+            );
+        }
+        refusal(
+            &many,
+            &many_outcomes,
+            &many_attribution,
+            "raw_group_count",
+            5000,
         );
     }
 }
