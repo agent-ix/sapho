@@ -354,6 +354,7 @@ fn profile_value(
             let (agreement, brier) = match &metric.measurement.metrics {
                 crate::Metrics::Boolean { agreement, .. } => (*agreement, None),
                 crate::Metrics::Probability { brier, .. } => (None, *brier),
+                crate::Metrics::CalibratedProbability { brier, .. } => (None, *brier),
                 crate::Metrics::Unsupported { .. } => (None, None),
             };
             for (field, value) in [

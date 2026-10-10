@@ -257,9 +257,10 @@ Your host supplies actual per-case outputs or failures.
 | `Case`, `Dataset`, `Split`, `LabelProvenance`, `LabelKind` | Identified typed inputs, Boolean output labels, label provenance (kind `model`, `agent`, `human` or `deterministic_check`, a nonblank source and reference), development/held-out partition. Dataset `validate(max_cases)` checks all cases; `selected(split)` iterates a partition. |
 | `CaseOutcome` | Completed Inputs or Failed SaphoError, each with the models that answered during the case, keyed by ItemId. |
 | `measure(dataset, split, schemas, outcomes, max_cases)` | Return Measurement with per-output coverage and predictions against supplied labels. |
+| `fit_calibration`, `calibration_cases_digest`, `CalibrationMap` | Fit one development raw Probability output from checked outcomes and pure trace attribution; validate a versioned map and apply its monotone knots. `CalibratedProbability` is distinct from raw Probability. |
 | `Measurement::complete()` | No failed or unscored labels; inspect selected count and denominators as well. `Measurement.self_source` lists cases whose declared model source name equals a response model name; they are scored on no output and counted in no label total. Other names do not prove independent sources. |
 | `OutputMeasurement`, `Prediction`, `UnscoredReason` | Labelled/scored/unscored/failed counts; retained values, provenance, missing/unsupported/type mismatch reasons and errors. |
-| `Metrics`, `Confusion` | Boolean agreement and TP/TN/FP/FN; Probability Brier; Unsupported schemas. No metrics for Degree. |
+| `Metrics`, `Confusion` | Boolean agreement and TP/TN/FP/FN; separate raw and calibrated Probability Brier/ECE; Unsupported schemas. No metrics for Degree. |
 | `Candidate`, `Metric`, `rank` | Rank complete development measurements for one output. Agreement descends, Brier ascends; stable ties. |
 | `RankedCandidate` | Candidate ID, original input index and score; your host retains graph artifacts. |
 | `TrainingRow`, `export_training` | Bounded JSONL development supervision preserving inputs, labels and provenance; excludes held-out cases. |

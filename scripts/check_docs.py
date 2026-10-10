@@ -168,6 +168,12 @@ def recipes():
             invoke(["validate", graph])
             inspection = json.loads(invoke(["inspect", graph]))
             assert set(inspection["signature"]["outputs"]) == set(case["expected"])
+            if case["name"] == "calibration":
+                # Pure Rust hosts can apply the map numerically; the stock CLI
+                # requires a contributing Ask response before certifying its use.
+                refused = json.loads(invoke(["run", graph, "--input", f"examples/reference/{case['input']}"], code=2))
+                assert refused["error"]["code"] == "model_mismatch"
+                continue
             report = json.loads(invoke(["run", graph, "--input", f"examples/reference/{case['input']}"]))
             equal({k: plain(v["value"]) for k, v in report["outputs"].items()}, case["expected"])
     for support, expected_exit in [(0.7, 1), (0.8, 0), (0.9, 0)]:

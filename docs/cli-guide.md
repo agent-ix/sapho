@@ -276,6 +276,16 @@ comparison is marked `not_promotable`; held-out comparison is evaluation
 evidence, not a deployment action. Replay needs explicit binding metadata for
 a challenger with no successful exchange in the recording.
 
+## Fit and apply a calibration map
+
+To fit a monotone probability calibration from at least 20 independently labelled development cases, run the raw Probability graph against an exact recording or explicit live binding:
+
+```sh
+sapho fit-calibration raw.yaml --dataset dataset.json --output-name raw_support --binding fast_a --split development --replay recording.json --output map.json
+```
+
+The new file is a complete typed graph literal. Embed it as the `map` input of a `calibrate` node whose `value` input is a raw Probability. `calibrate.result` is a distinct `calibrated_probability`; use `calibrated_as_probability` explicitly before an ordinary probability comparison. The fitted map contains development case and observation digests, the raw graph semantic identity, contributing binding, reported model name and monotone knots. It contains no case inputs or labels. The stock CLI checks the reported binding and model at each executed calibration node before its dependents run. A matching reported name is labelled `reported_name_match`; current responses provide no weights identity. Development measurement on the same selected case content also checks the fitted observation digest. Held-out measurement can score raw and calibrated outputs side by side without fitting.
+
 ## Measure a model roster
 
 Declare which binding and question family produced each public output in a YAML or JSON mapping:
