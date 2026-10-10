@@ -444,6 +444,39 @@ fn calibrated_ports_require_explicit_conversion_and_valid_map_literal() {
     ));
     implicit.outputs.insert("degree".into(), output("degree"));
     assert_eq!(err(&implicit), ErrorCode::TypeMismatch);
+    let mut inverse = base.clone();
+    let map_binding = inverse.nodes[0].inputs["map"].clone();
+    inverse.nodes.push(node(
+        "inverse",
+        Operation::Calibrate,
+        BTreeMap::from([
+            ("value".into(), output("calibrate")),
+            ("map".into(), map_binding),
+        ]),
+    ));
+    inverse.outputs.insert("inverse".into(), output("inverse"));
+    assert_eq!(err(&inverse), ErrorCode::TypeMismatch);
+    let mut mixed_compare = base.clone();
+    mixed_compare.nodes.push(node(
+        "mixed_compare",
+        Operation::Compare {
+            comparator: Comparator::Greater,
+        },
+        BTreeMap::from([
+            ("a".into(), output("calibrate")),
+            (
+                "b".into(),
+                lit(
+                    Value::Probability(Probability::new(0.5).unwrap()),
+                    ValueType::Probability,
+                ),
+            ),
+        ]),
+    ));
+    mixed_compare
+        .outputs
+        .insert("mixed_compare".into(), output("mixed_compare"));
+    assert_eq!(err(&mixed_compare), ErrorCode::TypeMismatch);
     let mut malformed = base;
     let Binding::Literal { value, .. } = malformed.nodes[0].inputs.get_mut("map").unwrap() else {
         unreachable!()
