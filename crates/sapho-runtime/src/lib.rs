@@ -26,7 +26,12 @@
 //! cancellation. Ready model calls may run concurrently. Evidence order remains
 //! deterministic. No retries, file persistence or input acquisition are implicit.
 mod engine;
+mod observation;
 mod operators;
 mod trace;
 pub use engine::{Engine, RunFailure, RunLimits, RunResult};
+pub use observation::{
+    ModelCallObservation, ObservationClock, ObservationConfig, ObservationMode,
+    SystemObservationClock,
+};
 pub use trace::{ModelEvidence, NodeStatus, NodeTrace, Trace};

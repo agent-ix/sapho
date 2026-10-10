@@ -7,7 +7,9 @@ use sapho_core::{
     SaphoError, Signature, Value, check_ports, decode_plain,
 };
 use sapho_graph::{CompiledGraph, GraphSpec, Operation, compile};
-use sapho_runtime::{Engine, RunLimits, Trace};
+use sapho_runtime::{
+    Engine, ModelCallObservation, ObservationConfig, RunFailure, RunLimits, RunResult, Trace,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -180,7 +182,24 @@ impl Runner {
         limits: RunLimits,
         fail_on: Option<&str>,
     ) -> RunReport {
-        match self.engine.run(inputs, limits).await {
+        Self::report(self.engine.run(inputs, limits).await, fail_on)
+    }
+    /// Execute with validated, opt-in model-call evidence outside the deterministic trace.
+    pub async fn run_observed(
+        &self,
+        inputs: &Inputs,
+        limits: RunLimits,
+        fail_on: Option<&str>,
+        config: &ObservationConfig,
+    ) -> Result<(RunReport, Vec<ModelCallObservation>), CliError> {
+        let (result, calls) = self.engine.run_observed(inputs, limits, config).await?;
+        Ok((Self::report(result, fail_on), calls))
+    }
+    fn report(
+        result: std::result::Result<RunResult, RunFailure>,
+        fail_on: Option<&str>,
+    ) -> RunReport {
+        match result {
             Err(failure) => RunReport {
                 outputs: None,
                 trace: failure.trace,

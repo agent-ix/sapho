@@ -2253,6 +2253,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "serde_stacker",
+ "sha2",
  "tokio",
 ]
 
