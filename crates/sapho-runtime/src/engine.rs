@@ -95,6 +95,7 @@ impl std::error::Error for RunFailure {}
 pub struct Engine {
     graph: Arc<CompiledGraph>,
     backends: BackendRegistry,
+    calibration_identity_check: bool,
 }
 impl Engine {
     /// Bind model implementations, rejecting unknown names before work starts.
@@ -103,7 +104,13 @@ impl Engine {
         Ok(Self {
             graph: Arc::new(graph),
             backends,
+            calibration_identity_check: false,
         })
+    }
+    /// Enforce reported binding/model identity at every executed calibration node.
+    pub fn with_calibration_identity_check(mut self) -> Self {
+        self.calibration_identity_check = true;
+        self
     }
     /// Execute with bounded work; no trace persistence or model retry is implicit.
     pub async fn run(
@@ -455,6 +462,10 @@ impl Engine {
         ins: &Inputs,
         state: &mut RunState,
     ) -> Result<Inputs> {
+        if self.calibration_identity_check && matches!(node.spec().operation, Operation::Calibrate)
+        {
+            check_calibration_identity(path, ins, &state.trace)?;
+        }
         match &node.spec().operation {
             Operation::Record {} => one_output(
                 path,
@@ -560,6 +571,8 @@ impl Engine {
             | Operation::Not
             | Operation::Compare { .. }
             | Operation::Probability { .. }
+            | Operation::Calibrate
+            | Operation::CalibratedAsProbability
             | Operation::Degree
             | Operation::Reduce { .. }
             | Operation::Complement
@@ -764,4 +777,65 @@ fn increment(value: usize, n: usize, max: usize, name: &str) -> Result<usize> {
         SaphoError::new(ErrorCode::LimitExceeded, "Run work ceiling exceeded")
             .with_context("limit", name)
     })
+}
+
+fn check_calibration_identity(path: &[String], ins: &Inputs, trace: &Trace) -> Result<()> {
+    let Value::CalibrationMap(map) = &ins
+        .get("map")
+        .ok_or_else(|| SaphoError::new(ErrorCode::MissingInput, "Calibration map absent"))?
+        .value
+    else {
+        return Err(SaphoError::new(
+            ErrorCode::TypeMismatch,
+            "Calibration map input differs",
+        ));
+    };
+    map.validate()?;
+    let mismatch = || {
+        SaphoError::new(
+            ErrorCode::ModelMismatch,
+            "Calibration source differs from fitted model",
+        )
+        .with_context("map_id", &map.map_id)
+        .with_context("node", path.join("/"))
+        .with_context("expected_binding", map.fit_binding.as_str())
+        .with_context("expected_model", &map.fit_actual_model)
+    };
+    let by_path = trace
+        .nodes
+        .iter()
+        .map(|node| (node.path.clone(), node))
+        .collect::<BTreeMap<_, _>>();
+    let Some(current) = by_path.get(path) else {
+        return Err(mismatch());
+    };
+    let mut pending = current.dependencies.clone();
+    let mut visited = BTreeSet::new();
+    let mut contributing = Vec::new();
+    while let Some(next) = pending.pop() {
+        if !visited.insert(next.clone()) {
+            continue;
+        }
+        let Some(node) = by_path.get(&next) else {
+            return Err(mismatch());
+        };
+        pending.extend(node.dependencies.iter().cloned());
+        if let Operation::Ask { backend } = &node.operation {
+            let response = node
+                .model
+                .as_ref()
+                .and_then(|model| model.response.as_ref());
+            contributing.push((backend, response.map(|response| response.model.as_str())));
+        }
+    }
+    if contributing.len() != 1 {
+        return Err(mismatch().with_context("observed_count", contributing.len().to_string()));
+    }
+    let (binding, model) = contributing[0];
+    if binding != &map.fit_binding || model != Some(map.fit_actual_model.as_str()) {
+        return Err(mismatch()
+            .with_context("observed_binding", binding.as_str())
+            .with_context("observed_model", model.unwrap_or("<absent>")));
+    }
+    Ok(())
 }

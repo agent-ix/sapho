@@ -26,7 +26,9 @@ use sapho_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+mod calibration;
 mod roster;
+pub use calibration::{FitAttribution, calibration_cases_digest, fit_calibration};
 pub use roster::*;
 
 /// Refusals distinguish dataset, coverage and candidate failures at this crate boundary.
@@ -75,6 +77,9 @@ pub enum EvidenceError {
     /// A risk-coverage threshold list is not finite, ordered or within the supported range.
     #[error("Invalid risk-coverage thresholds")]
     InvalidThresholds,
+    /// Fitting data, attribution or split is ineligible.
+    #[error("Invalid calibration evidence: {0}")]
+    InvalidCalibration(String),
 }
 /// Explicit development/held-out partition; tuning and exports always select development.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,6 +273,17 @@ pub enum Metrics {
         /// Inclusive confidence threshold rows; empty with no scored cases.
         risk_coverage: Vec<RiskCoverageRow>,
     },
+    /// Fitted probability metrics, separate from raw probability metrics.
+    CalibratedProbability {
+        /// Brier mean; absent with no scored cases.
+        brier: Option<f64>,
+        /// Shared predicted-label ECE; absent with no scored cases.
+        ece: Option<f64>,
+        /// Shared confidence deciles.
+        calibration: Vec<CalibrationBucket>,
+        /// Shared inclusive confidence threshold rows.
+        risk_coverage: Vec<RiskCoverageRow>,
+    },
     /// A missing or unsupported output cannot be scored as a probability.
     Unsupported {
         /// Declared output schema, when present.
@@ -355,7 +371,14 @@ pub fn measure(
     outcomes: &BTreeMap<ItemId, CaseOutcome>,
     max_cases: usize,
 ) -> Result<Measurement, EvidenceError> {
-    measure_with_thresholds(dataset, split, schemas, outcomes, max_cases, &DEFAULT_THRESHOLDS)
+    measure_with_thresholds(
+        dataset,
+        split,
+        schemas,
+        outcomes,
+        max_cases,
+        &DEFAULT_THRESHOLDS,
+    )
 }
 
 /// Default inclusive confidence thresholds for scored Probability predictions.
@@ -372,17 +395,36 @@ pub fn measure_with_thresholds(
 ) -> Result<Measurement, EvidenceError> {
     if thresholds.is_empty()
         || thresholds.len() > 32
-        || thresholds.iter().any(|t| !t.is_finite() || !(0.5..=1.0).contains(t))
+        || thresholds
+            .iter()
+            .any(|t| !t.is_finite() || !(0.5..=1.0).contains(t))
         || thresholds.windows(2).any(|pair| pair[0] >= pair[1])
     {
         return Err(EvidenceError::InvalidThresholds);
     }
-    let mut report = measure_inner(dataset, split, schemas, outcomes, max_cases, None, thresholds)?;
-    let kinds = dataset.selected(split).map(|case| case.label_provenance.kind).collect::<BTreeSet<_>>();
+    let mut report = measure_inner(
+        dataset, split, schemas, outcomes, max_cases, None, thresholds,
+    )?;
+    let kinds = dataset
+        .selected(split)
+        .map(|case| case.label_provenance.kind)
+        .collect::<BTreeSet<_>>();
     for kind in kinds {
-        let view = measure_inner(dataset, split, schemas, outcomes, max_cases, Some(kind), thresholds)?;
+        let view = measure_inner(
+            dataset,
+            split,
+            schemas,
+            outcomes,
+            max_cases,
+            Some(kind),
+            thresholds,
+        )?;
         for (output, measurement) in view.outputs {
-            report.per_kind.entry(output).or_default().insert(kind, measurement);
+            report
+                .per_kind
+                .entry(output)
+                .or_default()
+                .insert(kind, measurement);
         }
     }
     Ok(report)
@@ -411,7 +453,10 @@ fn measure_inner(
     };
     let mut squared_errors = BTreeMap::<String, f64>::new();
     let mut observations = BTreeMap::<String, Vec<(f64, bool)>>::new();
-    for case in dataset.selected(split).filter(|case| selected_kind.is_none_or(|kind| case.label_provenance.kind == kind)) {
+    for case in dataset
+        .selected(split)
+        .filter(|case| selected_kind.is_none_or(|kind| case.label_provenance.kind == kind))
+    {
         report.selected_cases += 1;
         let answering = match outcomes.get(&case.id) {
             Some(CaseOutcome::Completed { models, .. } | CaseOutcome::Failed { models, .. }) => {
@@ -439,6 +484,12 @@ fn measure_inner(
                             agreement: None,
                         },
                         Some(ValueType::Probability) => Metrics::Probability {
+                            brier: None,
+                            ece: None,
+                            calibration: empty_buckets(),
+                            risk_coverage: Vec::new(),
+                        },
+                        Some(ValueType::CalibratedProbability) => Metrics::CalibratedProbability {
                             brier: None,
                             ece: None,
                             calibration: empty_buckets(),
@@ -495,11 +546,29 @@ fn measure_inner(
                                     .or_default()
                                     .push((p.max(1.0 - p), (p >= 0.5) == *label));
                             }
+                            (
+                                Metrics::CalibratedProbability { .. },
+                                Value::CalibratedProbability(value),
+                            ) => {
+                                counts.scored += 1;
+                                let p = value.get();
+                                let delta = p - if *label { 1.0 } else { 0.0 };
+                                *squared_errors.entry(name.clone()).or_default() += delta * delta;
+                                observations
+                                    .entry(name.clone())
+                                    .or_default()
+                                    .push((p.max(1.0 - p), (p >= 0.5) == *label));
+                            }
                             (Metrics::Unsupported { .. }, _) => {
                                 counts.unscored += 1;
                                 prediction.unscored = Some(UnscoredReason::UnsupportedType);
                             }
-                            (Metrics::Boolean { .. } | Metrics::Probability { .. }, _) => {
+                            (
+                                Metrics::Boolean { .. }
+                                | Metrics::Probability { .. }
+                                | Metrics::CalibratedProbability { .. },
+                                _,
+                            ) => {
                                 counts.unscored += 1;
                                 prediction.unscored = Some(UnscoredReason::TypeMismatch);
                             }
@@ -530,6 +599,12 @@ fn measure_inner(
                 )
             }
             Metrics::Probability {
+                brier,
+                ece,
+                calibration,
+                risk_coverage,
+            }
+            | Metrics::CalibratedProbability {
                 brier,
                 ece,
                 calibration,
@@ -677,6 +752,7 @@ pub fn rank(
         let score = match (&o.metrics, metric) {
             (Metrics::Boolean { agreement, .. }, Metric::Agreement) => *agreement,
             (Metrics::Probability { brier, .. }, Metric::Brier) => *brier,
+            (Metrics::CalibratedProbability { brier, .. }, Metric::Brier) => *brier,
             _ => None,
         };
         if let Some(score) = score.filter(|v| v.is_finite()) {

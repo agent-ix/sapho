@@ -241,12 +241,10 @@ fn roster_partitions_actual_models_and_projects_only_measured_fields() {
     assert_eq!(b_metric.case_ids, vec![data.cases[1].id.clone()]);
     assert_eq!(a_metric.measurement.scored, 1);
     assert_eq!(b_metric.measurement.scored, 1);
-    assert_eq!(
+    assert!(matches!(
         a_metric.measurement.metrics,
-        Metrics::Probability {
-            brier: Some(0.03999999999999998)
-        }
-    );
+        Metrics::Probability { brier: Some(value), .. } if (value - 0.04).abs() < 1e-12
+    ));
     assert_eq!(a_metric.ece, None);
     assert_eq!(a_metric.ece_absent_reason.as_deref(), Some("not_computed"));
     assert_eq!(

@@ -167,6 +167,12 @@ fn convert(
         ValueType::Probability => {
             Value::Probability(Probability::new(json.as_f64().ok_or_else(mismatch)?)?)
         }
+        ValueType::CalibratedProbability => Value::CalibratedProbability(
+            crate::CalibratedProbability::new(json.as_f64().ok_or_else(mismatch)?)?,
+        ),
+        ValueType::CalibrationMap => {
+            return Err(mismatch());
+        }
         ValueType::Degree => Value::Degree(Degree::new(json.as_f64().ok_or_else(mismatch)?)?),
         ValueType::Optional { inner } => {
             if json.is_null() {

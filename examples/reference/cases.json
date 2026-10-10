@@ -164,5 +164,13 @@
         "model": "tutorial-1"
       }
     }
+  },
+  {
+    "name": "calibration",
+    "input": "calibration-input.json",
+    "expected": {
+      "fitted": 0.5,
+      "converted": 0.5
+    }
   }
 ]

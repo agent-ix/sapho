@@ -51,6 +51,10 @@ fn semantic_identity_normalizes_representation_and_keeps_ordered_nodes() {
     );
     let mut numeric = graph(vec![], lit(Value::Number(1.0), ValueType::Number));
     let baseline = graph_semantic_identity(&numeric).unwrap();
+    assert_eq!(
+        baseline,
+        "graph-v1:sha256:ab43fcf6e41e198d75b2a5ae6c70348415a4b773855d65f092b6cb65d9a59ac4"
+    );
     let json = serde_json::to_string(&numeric).unwrap();
     let exponent =
         GraphSpec::parse_with_format(&json.replace("1.0", "1e0"), GraphFormat::Json).unwrap();
@@ -398,4 +402,55 @@ fn even_unused_subgraphs_are_validated_for_recursion() {
     let mut spec = graph(vec![], lit(Value::Boolean(true), ValueType::Boolean));
     spec.subgraphs.insert("recursive".into(), body);
     assert_eq!(err(&spec), ErrorCode::Cycle);
+}
+
+/// Trace: FR-081-AC-2, FR-082-AC-2, FR-082-AC-4, IT-017-SC-04
+#[test]
+fn calibrated_ports_require_explicit_conversion_and_valid_map_literal() {
+    let base =
+        GraphSpec::parse(include_str!("../../../examples/reference/calibration.yaml")).unwrap();
+    let compiled = compile(&base, &PrimitiveRegistry::default()).unwrap();
+    assert_eq!(
+        compiled.signature().outputs["fitted"],
+        ValueType::CalibratedProbability
+    );
+    assert_eq!(
+        compiled.signature().outputs["converted"],
+        ValueType::Probability
+    );
+    let mut wrong_map = base.clone();
+    wrong_map.nodes[0].inputs.insert(
+        "map".into(),
+        lit(
+            Value::Probability(Probability::new(0.5).unwrap()),
+            ValueType::Probability,
+        ),
+    );
+    assert_eq!(err(&wrong_map), ErrorCode::TypeMismatch);
+    let mut implicit = base.clone();
+    implicit.nodes[1].inputs.insert(
+        "value".into(),
+        lit(
+            Value::Probability(Probability::new(0.5).unwrap()),
+            ValueType::Probability,
+        ),
+    );
+    assert_eq!(err(&implicit), ErrorCode::TypeMismatch);
+    let mut implicit = base.clone();
+    implicit.nodes.push(node(
+        "degree",
+        Operation::Degree,
+        BTreeMap::from([("value".into(), output("calibrate"))]),
+    ));
+    implicit.outputs.insert("degree".into(), output("degree"));
+    assert_eq!(err(&implicit), ErrorCode::TypeMismatch);
+    let mut malformed = base;
+    let Binding::Literal { value, .. } = malformed.nodes[0].inputs.get_mut("map").unwrap() else {
+        unreachable!()
+    };
+    let Value::CalibrationMap(map) = &mut value.value else {
+        unreachable!()
+    };
+    map.map_id = "calibration-v1:sha256:deadbeef".into();
+    assert_eq!(err(&malformed), ErrorCode::InvalidValue);
 }

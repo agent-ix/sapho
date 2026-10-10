@@ -435,6 +435,17 @@ impl Compiler<'_> {
                 }
                 (one("value", t), one("result", ValueType::Degree))
             }
+            Operation::Calibrate => (
+                BTreeMap::from([
+                    ("value".into(), ValueType::Probability),
+                    ("map".into(), ValueType::CalibrationMap),
+                ]),
+                one("result", ValueType::CalibratedProbability),
+            ),
+            Operation::CalibratedAsProbability => (
+                one("value", ValueType::CalibratedProbability),
+                one("result", ValueType::Probability),
+            ),
             Operation::Reduce { reducer, .. } => {
                 let mut i = one("values", ValueType::list(ValueType::Degree));
                 if *reducer == Reducer::WeightedMean {

@@ -35,7 +35,7 @@ generated rustdoc, and each leaf crate has a compiled crate-level usage example.
 | Extractor, ExtractRequest/Response/Error, `extract`, ScriptedExtractor, `TooLarge`; `sapho-ollama` OllamaBackend, OllamaEmbedder, Server, Limits | [Adapters](api-reference.md#model-adapters) | core `extract` and `sapho-ollama` loopback tests; [live check](../crates/sapho-ollama/examples/live_smoke.rs) run on demand |
 | System One codec, Boolean/choice/score conversion, source-free state | [Codec](api-reference.md#model-adapters) | systemone doctest; adapter tests |
 | CLI host Runner/Inspection/RunReport/ExitStatus, format/I/O/artifacts, bindings and credential resolution | [Embedding](api-reference.md#cli-embedding-apis) | CLI host doctest; process recipes; host credential tests |
-| Commands `validate`, `inspect`, `run`, `record`, `replay`, `measure`, `tune`, `export-training`, `select`; selectors `files`, `git`, `json` | [CLI reference](cli-reference.md) | [recipes](examples.md); every command exercised by check_docs.py; `sapho COMMAND --help` |
+| Commands `validate`, `inspect`, `run`, `record`, `replay`, `measure`, `fit-calibration`, `tune`, `export-training`, `select`; selectors `files`, `git`, `json` | [CLI reference](cli-reference.md) | [recipes](examples.md); calibration CLI fixture; `sapho COMMAND --help` |
 | All CLI options/defaults, plain/typed input, limits, artifacts and exits | [CLI reference](cli-reference.md) | CLI recipe checks; `sapho COMMAND --help` |
 | Plugin create/tune/record workflows | [Plugin usage](../README.md#use-the-skills-in-claude-code) | [create skill](../plugins/sapho/skills/create/SKILL.md), [tune skill](../plugins/sapho/skills/tune/SKILL.md), [record skill](../plugins/sapho/skills/record/SKILL.md); underlying CLI recipes |
 

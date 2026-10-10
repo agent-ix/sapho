@@ -131,6 +131,10 @@ pub enum Operation {
         /// Non-empty distinct outcome labels.
         labels: Vec<String>,
     },
+    /// Apply a typed calibration map to a raw model probability.
+    Calibrate,
+    /// Explicitly convert a fitted quantity to an ordinary Probability port.
+    CalibratedAsProbability,
     /// Explicit unit-range conversion into a heuristic degree.
     Degree,
     /// Combine an identified degree collection.

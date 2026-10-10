@@ -5,6 +5,7 @@ use crate::{Binding, GraphBody, GraphSpec};
 use sapho_core::{ErrorCode, Result, SaphoError};
 use serde_json::{Number, Value};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
 /// Hash a typed graph with ordered sequences and canonical named maps/numbers.
 pub fn graph_semantic_identity(spec: &GraphSpec) -> Result<String> {
@@ -51,8 +52,12 @@ fn normalize(value: &mut Value) -> Result<()> {
             }
         }
         Value::Object(fields) => {
-            for item in fields.values_mut() {
-                normalize(item)?;
+            let sorted = std::mem::take(fields)
+                .into_iter()
+                .collect::<BTreeMap<_, _>>();
+            for (key, mut item) in sorted {
+                normalize(&mut item)?;
+                fields.insert(key, item);
             }
         }
         Value::Number(number) => {

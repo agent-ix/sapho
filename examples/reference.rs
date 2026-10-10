@@ -76,6 +76,7 @@ fn operation_case(operation: &Operation) -> &'static str {
             | Comparator::GreaterEqual => "facts",
         },
         Operation::Degree | Operation::Complement => "strengths",
+        Operation::Calibrate | Operation::CalibratedAsProbability => "calibration",
         Operation::Reduce { reducer, .. } => match reducer {
             Reducer::Min | Reducer::Max | Reducer::WeightedMean => "strengths",
         },

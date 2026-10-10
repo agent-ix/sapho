@@ -353,7 +353,8 @@ fn profile_value(
             metric_types.insert("scored".into(), ValueType::Number);
             let (agreement, brier) = match &metric.measurement.metrics {
                 crate::Metrics::Boolean { agreement, .. } => (*agreement, None),
-                crate::Metrics::Probability { brier } => (None, *brier),
+                crate::Metrics::Probability { brier, .. } => (None, *brier),
+                crate::Metrics::CalibratedProbability { brier, .. } => (None, *brier),
                 crate::Metrics::Unsupported { .. } => (None, None),
             };
             for (field, value) in [
