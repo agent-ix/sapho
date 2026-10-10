@@ -22,6 +22,8 @@ pub enum Provider {
     Systemone,
     /// OpenAI Decisions public beta, using the fixed official endpoint.
     Decisions,
+    /// Hosted Claude Messages API, with host-only bearer and workspace headers.
+    Claude,
     /// A running Ollama server; the URL comes from `OLLAMA_BASE_URL`, never from a document.
     Ollama,
 }
@@ -276,6 +278,7 @@ pub fn live_bindings_with_services<B: CredentialBackend>(
             Provider::Clm => prepare_clm()?,
             Provider::Systemone => prepare_systemone(id, services, store)?,
             Provider::Decisions => prepare_decisions(binding)?,
+            Provider::Claude => prepare_claude()?,
             Provider::Ollama => prepare_ollama(binding)?,
         };
         registry.register(id.clone(), binding.attach(backend))?;
@@ -347,6 +350,7 @@ fn prepare_ollama(_: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBackend>
     Err(CliError::Feature(Provider::Ollama))
 }
 #[cfg(any(feature = "jev", feature = "clm", feature = "decisions"))]
+#[cfg(any(feature = "jev", feature = "clm", feature = "claude"))]
 fn credential(provider: Provider) -> Result<Option<ix_cli_kit::secrets::SecretValue>, CliError> {
     crate::resolve_credential(
         provider,
@@ -371,6 +375,28 @@ fn prepare_decisions(
 #[cfg(not(feature = "decisions"))]
 fn prepare_decisions(_: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
     Err(CliError::Feature(Provider::Decisions))
+}
+#[cfg(feature = "claude")]
+fn prepare_claude() -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    let secret =
+        credential(Provider::Claude)?.ok_or(CliError::CredentialMissing(Provider::Claude))?;
+    let workspace_id = std::env::var("ANTHROPIC_WORKSPACE_ID")
+        .map(Some)
+        .or_else(|error| match error {
+            std::env::VarError::NotPresent => Ok(None),
+            std::env::VarError::NotUnicode(_) => Err(CliError::ProviderConfiguration),
+        })?;
+    sapho_claude::ClaudeBackend::new(
+        &secret,
+        workspace_id.as_deref(),
+        sapho_claude::Limits::default(),
+    )
+    .map(|backend| Arc::new(backend) as Arc<dyn sapho_core::ModelBackend>)
+    .map_err(|_| CliError::ProviderConfiguration)
+}
+#[cfg(not(feature = "claude"))]
+fn prepare_claude() -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    Err(CliError::Feature(Provider::Claude))
 }
 #[cfg(feature = "clm")]
 fn prepare_clm() -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {

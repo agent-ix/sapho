@@ -147,6 +147,24 @@ Put endpoints and optional OS credential key references in a separate JSON host 
 ```
 
 Select that file with `--service-config services.json` on live `run`, `record`, `measure` or `tune`, or set `SAPHO_SERVICE_CONFIG` to its path. The command argument is a path, never an endpoint or secret. Each required `systemone` binding needs an entry. Only required entries resolve their optional key from the OS store under `agent-ix/sapho`; they never inherit CLM or Jev environment keys. Missing `limits` uses 30 seconds, 1 MiB request, 8 MiB response and four in flight. Overrides must be positive and no greater than those defaults. Remote HTTP, URL userinfo, query and fragment are refused; loopback HTTP and remote HTTPS are accepted. Offline validate, inspect, replay and replay-backed measure/tune do not load this file or secrets. Recording retains binding IDs and model responses without endpoint or credential metadata.
+## Bind Claude explicitly
+
+The optional `claude` provider sends typed Boolean, Choice and Score questions to Anthropic's Messages API. Choose a model documented to support structured outputs; an unsupported model receives one provider 400 and a typed `ServiceValidation` refusal. Sapho does not infer model quality from a returned probability.
+
+```sh
+cargo install --path crates/sapho-cli --locked --features claude
+```
+
+```yaml
+judge:
+  provider: claude
+  model: claude-sonnet-4-6
+  distribution_policy: {kind: strict}
+```
+
+The graph still names only backend `judge`; changing the provider and model in this binding leaves the graph source unchanged. Set `ANTHROPIC_API_KEY` or store the key under scope `agent-ix/sapho`, account `anthropic-api-key`. An embedding host's explicit secret takes precedence over environment, then OS storage. For a multi-workspace or identity-linked key, set `ANTHROPIC_WORKSPACE_ID` in the host environment. The CLI validates it before sending and never reads it for offline commands. Credentials and workspace IDs are refused in graph/binding files and argv, and excluded from recordings and printable errors.
+
+The stock endpoint is fixed to `https://api.anthropic.com/v1/messages`. Calls have a 30-second total deadline, 1 MiB request and 8 MiB response limits, four in-flight slots per adapter, and a 1024-token output ceiling. They do not retry or follow redirects. A successful recording contains the exact core request, reported actual model, typed answer, usage and raw JSON bodies. Replay uses no Claude feature, credential or network. Run `sapho record examples/graphs/multilayer.yaml --input INPUT.json --bindings bindings.yaml --recording saved.json` for an authorized live check, then `sapho replay` with the same graph/input and saved recording. Record the returned model, answer kinds, usage, status and elapsed time separately; synthetic tests do not establish live account access.
 
 ## Bind Ollama explicitly
 
@@ -190,6 +208,7 @@ Two deadlines apply. `timeout_seconds` bounds each request to the server, and th
 Default tests run against a loopback double of the server. A live check against a real server runs only when you ask for it: `SAPHO_LIVE_OLLAMA=MODEL cargo test -p sapho-cli --features ollama live_server_smoke`.
 
 OpenAI Decisions uses the separate `decisions` build feature and the fixed `https://api.openai.com/v1/decisions` endpoint. A required live binding specifies `provider: decisions`, `model: gpt-6-luna`, and an explicit `distribution_policy`. The key comes from `OPENAI_API_KEY` or the OS secret store under scope `agent-ix/sapho`, account `openai-api-key`; custom embedding hosts can supply an explicit secret first. No endpoint or key belongs in graph, binding, recording or command arguments. `validate`, `inspect`, `replay` and replay-backed `measure`/`tune` remain offline and need neither the feature nor a credential. Decisions calls have a 30-second total deadline, 1 MiB request and 8 MiB response ceilings and up to four simultaneous requests per adapter. The current public beta supports `gpt-6-luna`; live acceptance depends on account quota/access.
+OpenAI Decisions remains a separate provider integration. The Claude provider uses only Anthropic Messages; it does not substitute for Decisions.
 
 ## Record and replay
 

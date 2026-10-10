@@ -8,7 +8,7 @@ use sapho_select::{Patterns, SelectionLimits};
 use std::{path::PathBuf, time::Duration};
 /// Provider help shown by `--help`; the guide carries the same facts at length.
 const BINDINGS_HELP: &str = "\
-Bindings (--bindings FILE): one entry per graph backend, with provider jev, clm, systemone, decisions or ollama.
+Bindings (--bindings FILE): one entry per graph backend, with provider jev, clm, systemone, decisions, claude or ollama.
 Each entry takes model, expected_model and distribution_policy.
 systemone requires an explicit model and a separate JSON host file selected with
 --service-config FILE or SAPHO_SERVICE_CONFIG (file path only). Each required binding

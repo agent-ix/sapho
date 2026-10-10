@@ -59,3 +59,6 @@ pub use sapho_clm as clm;
 #[cfg(feature = "decisions")]
 /// Official OpenAI Decisions backend.
 pub use sapho_decisions as decisions;
+#[cfg(feature = "claude")]
+/// Host-configured Claude Messages backend.
+pub use sapho_claude as claude;
