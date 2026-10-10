@@ -522,3 +522,186 @@ fn manually_constructed_service_limits_cannot_bypass_host_maxima() {
     );
     assert!(store.calls.lock().unwrap().is_empty());
 }
+
+#[cfg(feature = "clm")]
+fn held_service(
+    model: &'static str,
+) -> (
+    String,
+    std::sync::mpsc::Receiver<usize>,
+    std::sync::mpsc::Sender<()>,
+    Arc<std::sync::atomic::AtomicUsize>,
+    std::thread::JoinHandle<usize>,
+) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+    let active_for_assertion = Arc::clone(&active);
+    let server = std::thread::spawn(move || {
+        let mut handlers = Vec::new();
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let release_rx = Arc::clone(&release_rx);
+            let started_tx = started_tx.clone();
+            let active = Arc::clone(&active);
+            let max_active = Arc::clone(&max_active);
+            handlers.push(std::thread::spawn(move || {
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+                let mut bytes = Vec::new();
+                loop {
+                    let mut buffer = [0u8; 1024];
+                    let n = stream.read(&mut buffer).unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&buffer[..n]);
+                    if let Some(index) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&bytes[..index]);
+                        let length: usize = headers.lines().find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap())).unwrap();
+                        if bytes.len() >= index + 4 + length { break }
+                    }
+                }
+                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                max_active.fetch_max(now, Ordering::SeqCst);
+                started_tx.send(now).unwrap();
+                release_rx.lock().unwrap().recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+                let body = serde_json::to_vec(&serde_json::json!({"model":model,"answers":{"q":{"type":"noul","noul":0.7}},"usage":{"input_tokens":1,"output_tokens":0,"billing_units":1}})).unwrap();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+                stream.write_all(&body).unwrap();
+                active.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+        for handler in handlers {
+            handler.join().unwrap();
+        }
+        max_active.load(Ordering::SeqCst)
+    });
+    (
+        endpoint,
+        started_rx,
+        release_tx,
+        active_for_assertion,
+        server,
+    )
+}
+
+/// Trace: FR-072-AC-5, IT-013-SC-05
+#[cfg(feature = "clm")]
+#[test]
+fn two_configured_services_enforce_independent_concurrency_ceilings() {
+    use sapho_core::{DistributionPolicy, ModelRequest, NamedQuestion, Question, Value};
+    use std::{collections::BTreeMap, sync::atomic::Ordering};
+    let (url_a, started_a, release_a, active_a, server_a) = held_service("model-a");
+    let (url_b, started_b, release_b, active_b, server_b) = held_service("model-b");
+    let config = ServiceConfig::from_json(&serde_json::to_vec(&serde_json::json!({"services":{
+        "fast_a":{"base_url":url_a,"limits":{"timeout_ms":30000,"request_bytes":1048576,"response_bytes":8388608,"in_flight":1}},
+        "fast_b":{"base_url":url_b,"limits":{"timeout_ms":30000,"request_bytes":1048576,"response_bytes":8388608,"in_flight":2}}
+    }})).unwrap()).unwrap();
+    let bindings = sapho_graph::parse_config::<sapho_cli::Bindings>("fast_a: {provider: systemone, model: model-a, distribution_policy: {kind: strict}}\nfast_b: {provider: systemone, model: model-b, distribution_policy: {kind: strict}}", sapho_graph::GraphFormat::Yaml).unwrap();
+    let store = Store {
+        calls: Mutex::new(Vec::new()),
+    };
+    let registry = live_bindings_with_services(
+        &[
+            BackendId::new("fast_a").unwrap(),
+            BackendId::new("fast_b").unwrap(),
+        ],
+        &bindings,
+        &config,
+        &SecretStore::new(&store),
+    )
+    .unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut calls = Vec::new();
+    runtime.block_on(async {
+        for name in ["fast_a", "fast_a", "fast_b", "fast_b"] {
+            let backend_id = BackendId::new(name).unwrap();
+            let binding = registry.get(&backend_id).unwrap();
+            let request = ModelRequest {
+                backend: backend_id,
+                model: binding.model,
+                expected_model: None,
+                distribution_policy: DistributionPolicy::Strict {},
+                state: Value::Record(BTreeMap::new()),
+                questions: vec![NamedQuestion {
+                    id: "q".into(),
+                    question: Question::Boolean {
+                        instructions: "Is it true?".into(),
+                        yes: "Yes".into(),
+                        no: "No".into(),
+                    },
+                }],
+            };
+            calls.push(tokio::spawn(async move {
+                binding.backend.infer(&request).await
+            }));
+        }
+    });
+    let timeout = std::time::Duration::from_secs(10);
+    assert_eq!(started_a.recv_timeout(timeout).unwrap(), 1);
+    let mut peer_starts = [
+        started_b.recv_timeout(timeout).unwrap(),
+        started_b.recv_timeout(timeout).unwrap(),
+    ];
+    peer_starts.sort_unstable();
+    assert_eq!(peer_starts, [1, 2]);
+    assert_eq!(active_a.load(Ordering::SeqCst), 1);
+    assert_eq!(active_b.load(Ordering::SeqCst), 2);
+    release_b.send(()).unwrap();
+    release_b.send(()).unwrap();
+    release_a.send(()).unwrap();
+    assert_eq!(started_a.recv_timeout(timeout).unwrap(), 1);
+    release_a.send(()).unwrap();
+    runtime.block_on(async {
+        for call in calls {
+            assert!(call.await.unwrap().is_ok());
+        }
+    });
+    assert_eq!(server_a.join().unwrap(), 1);
+    assert_eq!(server_b.join().unwrap(), 2);
+    assert!(store.calls.lock().unwrap().is_empty());
+}
+
+struct UnavailableStore;
+impl CredentialBackend for &UnavailableStore {
+    fn get(&self, _: &AppScope, _: &SecretKey) -> Result<Option<SecretValue>, SecretError> {
+        Err(SecretError::Unavailable)
+    }
+    fn set(&self, _: &AppScope, _: &SecretKey, _: &SecretValue) -> Result<(), SecretError> {
+        panic!("no write")
+    }
+    fn delete(&self, _: &AppScope, _: &SecretKey) -> Result<DeleteStatus, SecretError> {
+        panic!("no delete")
+    }
+    fn status(&self, _: &AppScope, _: &SecretKey) -> Result<Presence, SecretError> {
+        panic!("no status")
+    }
+}
+/// Trace: FR-072-AC-4, IT-013-SC-04
+#[cfg(feature = "clm")]
+#[test]
+fn unavailable_named_store_key_refuses_before_transport() {
+    let config = ServiceConfig::from_json(br#"{"services":{"fast_a":{"base_url":"http://127.0.0.1:1","credential_key":"fast-a-key"}}}"#).unwrap();
+    let bindings = sapho_graph::parse_config::<sapho_cli::Bindings>(
+        "fast_a: {provider: systemone, model: m, distribution_policy: {kind: strict}}",
+        sapho_graph::GraphFormat::Yaml,
+    )
+    .unwrap();
+    let result = live_bindings_with_services(
+        &[BackendId::new("fast_a").unwrap()],
+        &bindings,
+        &config,
+        &SecretStore::new(&UnavailableStore),
+    );
+    assert!(matches!(
+        result,
+        Err(sapho_cli::CliError::Credential(SecretError::Unavailable))
+    ));
+}
