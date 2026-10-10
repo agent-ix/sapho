@@ -2162,6 +2162,7 @@ dependencies = [
  "async-trait",
  "sapho-clm",
  "sapho-core",
+ "sapho-decisions",
  "sapho-graph",
  "sapho-jev",
  "sapho-ollama",
@@ -2184,6 +2185,7 @@ dependencies = [
  "rustix",
  "sapho-clm",
  "sapho-core",
+ "sapho-decisions",
  "sapho-evidence",
  "sapho-graph",
  "sapho-jev",
@@ -2227,6 +2229,22 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "jsonschema",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "sapho-decisions"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "ix-cli-kit",
+ "reqwest",
+ "sapho-core",
+ "sapho-recording",
  "serde",
  "serde_json",
  "thiserror",

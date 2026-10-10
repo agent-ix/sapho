@@ -81,6 +81,10 @@ name = "sapho-clm"
 allow = ["AGPL-3.0-or-later"]
 
 [[licenses.exceptions]]
+name = "sapho-decisions"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
 name = "ix-cli-kit"
 allow = ["AGPL-3.0-or-later"]
 

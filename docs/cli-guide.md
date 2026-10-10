@@ -172,7 +172,7 @@ Two deadlines apply. `timeout_seconds` bounds each request to the server, and th
 
 Default tests run against a loopback double of the server. A live check against a real server runs only when you ask for it: `SAPHO_LIVE_OLLAMA=MODEL cargo test -p sapho-cli --features ollama live_server_smoke`.
 
-OpenAI Decisions integration awaits its official preview wire contract. The current CLI offers Jev, CLM and Ollama; no substitute API is presented as Decisions.
+OpenAI Decisions uses the separate `decisions` build feature and the fixed `https://api.openai.com/v1/decisions` endpoint. A required live binding specifies `provider: decisions`, `model: gpt-6-luna`, and an explicit `distribution_policy`. The key comes from `OPENAI_API_KEY` or the OS secret store under scope `agent-ix/sapho`, account `openai-api-key`; custom embedding hosts can supply an explicit secret first. No endpoint or key belongs in graph, binding, recording or command arguments. `validate`, `inspect`, `replay` and replay-backed `measure`/`tune` remain offline and need neither the feature nor a credential. Decisions calls have a 30-second total deadline, 1 MiB request and 8 MiB response ceilings and up to four simultaneous requests per adapter. The current public beta supports `gpt-6-luna`; live acceptance depends on account quota/access.
 
 ## Record and replay
 

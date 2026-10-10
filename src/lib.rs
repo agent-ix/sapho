@@ -40,7 +40,7 @@
 //! Start with [`graph::GraphSpec`], [`graph::compile`] and [`runtime::Engine`].
 //! [`core`] owns values, host primitives and model backend registration;
 //! [`recording`] wraps any backend for capture and exact offline replay.
-//! Enable `jev` or `clm` for the included adapters. Input gathering and dataset
+//! Enable `jev`, `clm` or `decisions` for the included adapters. Input gathering and dataset
 //! scoring are available as separate `sapho-select` and `sapho-evidence` crates.
 //!
 //! Run `cargo run --example reference` for complete offline examples of every
@@ -55,3 +55,7 @@ pub use sapho_runtime as runtime;
 #[cfg(feature = "clm")]
 /// Host-configured CLM System One backend.
 pub use sapho_clm as clm;
+
+#[cfg(feature = "decisions")]
+/// Official OpenAI Decisions backend.
+pub use sapho_decisions as decisions;

@@ -19,6 +19,7 @@ doc = false
 [features]
 default = []
 clm = ["dep:sapho-clm"]
+decisions = ["dep:sapho-decisions"]
 ollama = ["dep:sapho-ollama"]
 jev = ["dep:sapho-jev", "dep:typesafe-sdk-client", "dep:typesafe-sdk-config", "dep:typesafe-sdk-env", "dep:typesafe-sdk-http", "dep:typesafe-sdk-log"]
 
@@ -26,6 +27,7 @@ jev = ["dep:sapho-jev", "dep:typesafe-sdk-client", "dep:typesafe-sdk-config", "d
 ix-cli-kit.workspace = true
 sapho-systemone.workspace = true
 sapho-clm = { workspace = true, optional = true }
+sapho-decisions = { workspace = true, optional = true }
 sapho-core.workspace = true
 sapho-ollama = { workspace = true, optional = true }
 sapho-graph.workspace = true
@@ -53,3 +55,4 @@ rustix = { version = "1", features = ["event", "fs"] }
 [dev-dependencies]
 tempfile = "3"
 async-trait.workspace = true
+sapho-decisions.workspace = true
