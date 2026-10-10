@@ -29,6 +29,7 @@ Owning component: `sapho-cli`. See the [workspace boundaries](../../spec.md).
 - [FR-046](functional/FR-046.md): shared CLI foundations
 - [FR-055](functional/FR-055.md): the `ollama` provider for local models
 - [FR-056](functional/FR-056.md): explicit ceilings for Datasets of about fifteen thousand cases
+- [FR-090](functional/FR-090.md): required-only Claude binding and offline replay
 
 ## References
 
