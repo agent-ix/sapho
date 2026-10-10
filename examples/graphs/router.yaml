@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+# Three exclusive routes from an explicit risk feature and threshold profile.
+# Configure tier_a, tier_b and tier_c in the host; this graph contains no endpoints.
+inputs:
+  risk: {kind: probability}
+  low: {kind: probability}
+  high: {kind: probability}
+nodes:
+  - id: state
+    operation: {kind: record}
+    inputs: {risk: {kind: input, name: risk}}
+  - id: questions
+    operation:
+      kind: questions
+      questions:
+        - id: accepted
+          question: {kind: boolean, instructions: Is this item accepted?, yes: Accepted, no: Rejected}
+  - id: below_low
+    operation: {kind: compare, comparator: less}
+    inputs:
+      a: {kind: input, name: risk}
+      b: {kind: input, name: low}
+  - id: below_high
+    operation: {kind: compare, comparator: less}
+    inputs:
+      a: {kind: input, name: risk}
+      b: {kind: input, name: high}
+  - id: above_high
+    operation: {kind: not}
+    inputs: {value: {kind: node, node: below_high, port: result}}
+  - id: above_low
+    operation: {kind: not}
+    inputs: {value: {kind: node, node: below_low, port: result}}
+  - id: middle
+    operation: {kind: and}
+    inputs:
+      a: {kind: node, node: above_low, port: result}
+      b: {kind: node, node: below_high, port: result}
+  - id: low_ask
+    guard: {kind: node, node: below_low, port: result}
+    operation: {kind: ask, backend: tier_a}
+    inputs:
+      state: {kind: node, node: state, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: middle_ask
+    guard: {kind: node, node: middle, port: result}
+    operation: {kind: ask, backend: tier_b}
+    inputs:
+      state: {kind: node, node: state, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: high_ask
+    guard: {kind: node, node: above_high, port: result}
+    operation: {kind: ask, backend: tier_c}
+    inputs:
+      state: {kind: node, node: state, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: chosen_answers
+    operation: {kind: merge_present}
+    inputs:
+      low: {kind: node, node: low_ask, port: answers}
+      middle: {kind: node, node: middle_ask, port: answers}
+      high: {kind: node, node: high_ask, port: answers}
+  - id: chosen_model
+    operation: {kind: merge_present}
+    inputs:
+      low: {kind: node, node: low_ask, port: model}
+      middle: {kind: node, node: middle_ask, port: model}
+      high: {kind: node, node: high_ask, port: model}
+  - id: confidence
+    operation: {kind: probability, question: accepted, labels: ["true"]}
+    inputs: {answers: {kind: node, node: chosen_answers, port: result}}
+outputs:
+  answers: {kind: node, node: chosen_answers, port: result}
+  model: {kind: node, node: chosen_model, port: result}
+  confidence: {kind: node, node: confidence, port: result}

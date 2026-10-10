@@ -27,6 +27,8 @@ docs:
 	RUSTDOCFLAGS="-D warnings" $(CARGO) doc --workspace --no-deps --all-features
 docs-examples:
 	$(CARGO) check --locked --workspace --examples --all-features
+	$(CARGO) run --locked -p sapho-cli -- validate examples/graphs/router.yaml
+	$(CARGO) run --locked -p sapho-cli -- validate examples/graphs/escalation.yaml
 	$(CARGO) run --locked --example reference
 	$(CARGO) run --locked -p sapho-select --example acquisition
 	$(CARGO) run --locked -p sapho-evidence --example measurement
