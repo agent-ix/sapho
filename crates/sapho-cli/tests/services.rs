@@ -7,7 +7,7 @@ use sapho_cli::CliError;
 use sapho_cli::{ServiceConfig, live_bindings_with_services};
 use sapho_core::BackendId;
 #[cfg(feature = "clm")]
-use sapho_recording::Recording;
+use sapho_recording::{Recording, RecordingBackend};
 use std::sync::Mutex;
 #[cfg(feature = "clm")]
 use std::{
@@ -221,6 +221,21 @@ fn two_named_ports_record_and_replay_offline_and_third_name_needs_only_files() {
         let original: serde_json::Value = serde_json::from_slice(&recorded.stdout).unwrap();
         let replay: serde_json::Value = serde_json::from_slice(&replayed.stdout).unwrap();
         assert_eq!(original["outputs"], replay["outputs"]);
+        let changed_input = root.path().join("changed-input.json");
+        std::fs::write(&changed_input, br#"{"text":"different request"}"#).unwrap();
+        let changed_request = invoke(&[
+            "replay",
+            path(&graph_path),
+            "--input",
+            path(&changed_input),
+            "--bindings",
+            path(&bindings),
+            "--recording",
+            path(&recording),
+        ]);
+        assert_eq!(changed_request.status.code(), Some(2));
+        let changed: serde_json::Value = serde_json::from_slice(&changed_request.stdout).unwrap();
+        assert_eq!(changed["error"]["code"], "replay_miss");
         let changed_graph = root.path().join("changed.yaml");
         std::fs::write(&changed_graph, graph(&["different"])).unwrap();
         let changed_bindings = root.path().join("changed-bindings.yaml");
@@ -291,6 +306,72 @@ fn only_required_named_service_resolves_its_own_store_key() {
     assert_eq!(*calls, ["key-a"]);
     #[cfg(not(feature = "clm"))]
     assert!(calls.is_empty());
+}
+
+/// Trace: FR-072-AC-3, FR-073-AC-3, IT-013-SC-02, IT-013-SC-03
+#[cfg(feature = "clm")]
+#[tokio::test]
+async fn credentialed_named_service_records_without_persisting_key_or_secret() {
+    use sapho_core::{BackendRegistry, Datum, Inputs, PrimitiveRegistry, Value};
+    use sapho_graph::GraphSpec;
+    use sapho_runtime::RunLimits;
+    use std::sync::Arc;
+
+    let (endpoint, captured, server) = fake("model-a", 0.8, 0);
+    let config = ServiceConfig::from_json(
+        &serde_json::to_vec(&serde_json::json!({"services": {
+            "fast_a": {"base_url": endpoint, "credential_key": "key-a"}
+        }}))
+        .unwrap(),
+    )
+    .unwrap();
+    let bindings = sapho_graph::parse_config::<sapho_cli::Bindings>(
+        "fast_a: {provider: systemone, model: model-a, distribution_policy: {kind: strict}}",
+        sapho_graph::GraphFormat::Yaml,
+    )
+    .unwrap();
+    let store = Store {
+        calls: Mutex::new(Vec::new()),
+    };
+    let id = BackendId::new("fast_a").unwrap();
+    let live = live_bindings_with_services(
+        std::slice::from_ref(&id),
+        &bindings,
+        &config,
+        &SecretStore::new(&store),
+    )
+    .unwrap();
+    assert_eq!(*store.calls.lock().unwrap(), ["key-a"]);
+    let binding = live.get(&id).unwrap();
+    let recorder = Arc::new(RecordingBackend::new(binding.backend, 1_048_576).unwrap());
+    let mut recorded = BackendRegistry::default();
+    recorded
+        .register(
+            id,
+            sapho_core::BackendBinding {
+                backend: recorder.clone(),
+                ..binding
+            },
+        )
+        .unwrap();
+    let graph = GraphSpec::parse(&graph(&["fast_a"])).unwrap();
+    let runner = sapho_cli::Runner::new(&graph, &PrimitiveRegistry::default(), recorded).unwrap();
+    let inputs = Inputs::from([(
+        "text".into(),
+        Datum::new("input", Value::Text("synthetic".into())).unwrap(),
+    )]);
+    let report = runner.run(&inputs, RunLimits::default(), None).await;
+    assert_eq!(report.exit, sapho_cli::ExitStatus::Completed);
+    server.join().unwrap();
+    assert!(captured.lock().unwrap()[0].contains("credential-sentinel"));
+    let recording = recorder.snapshot().unwrap().to_json(1_048_576).unwrap();
+    let report = serde_json::to_vec(&report).unwrap();
+    for bytes in [&recording[..], &report[..]] {
+        let text = String::from_utf8_lossy(bytes);
+        assert!(!text.contains("key-a"));
+        assert!(!text.contains("credential-sentinel"));
+        assert!(!text.contains(&endpoint));
+    }
 }
 
 /// Trace: FR-072-AC-3, FR-072-AC-4, FR-072-AC-7, IT-013-SC-04
