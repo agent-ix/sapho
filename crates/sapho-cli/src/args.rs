@@ -177,6 +177,37 @@ pub(crate) struct MeasureArgs {
     pub(crate) options: MeasurementOptions,
     #[arg(long, value_enum)]
     pub(crate) split: Partition,
+    /// Shadow ask ID for side-by-side comparison.
+    #[arg(long)]
+    pub(crate) shadow: Option<String>,
+    /// Public decision output mapped by the selected shadow observation.
+    #[arg(long, requires = "shadow")]
+    pub(crate) shadow_output: Option<String>,
+    /// Comparison metric; ECE is unavailable until SAPHO-21 lands.
+    #[arg(long, value_enum, requires = "shadow")]
+    pub(crate) shadow_metric: Option<ShadowMetricArg>,
+    /// Required positive scored cases in each role.
+    #[arg(long, requires = "shadow", default_value_t = 1)]
+    pub(crate) shadow_min_scored: u32,
+    /// Required nonnegative improvement.
+    #[arg(long, requires = "shadow", default_value_t = 0.0)]
+    pub(crate) shadow_margin: f64,
+}
+#[derive(Clone, Copy, ValueEnum)]
+#[value(rename_all = "snake_case")]
+pub(crate) enum ShadowMetricArg {
+    Agreement,
+    Brier,
+    Ece,
+}
+impl From<ShadowMetricArg> for sapho_evidence::ShadowMetric {
+    fn from(value: ShadowMetricArg) -> Self {
+        match value {
+            ShadowMetricArg::Agreement => Self::Agreement,
+            ShadowMetricArg::Brier => Self::Brier,
+            ShadowMetricArg::Ece => Self::Ece,
+        }
+    }
 }
 #[derive(Clone, Copy, ValueEnum)]
 pub(crate) enum Metric {
