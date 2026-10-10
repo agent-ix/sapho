@@ -410,7 +410,6 @@ fn contributing_responses(
                 pending.push(vec!["root".into(), node.to_string()]);
             }
             let mut visited = std::collections::BTreeSet::new();
-            let mut contributors = Vec::new();
             while let Some(path) = pending.pop() {
                 if !visited.insert(path.clone()) {
                     continue;
@@ -427,31 +426,48 @@ fn contributing_responses(
                                 .cloned(),
                         );
                     }
-                    if node.status == NodeStatus::Completed
-                        && let Operation::Ask { backend } = &node.operation
-                        && let Some(response) = node
-                            .model
-                            .as_ref()
-                            .and_then(|model| model.response.as_ref())
-                    {
-                        contributors.push(RosterContributor {
-                            binding: backend.clone(),
-                            actual_model: Some(response.model.clone()),
-                            question_kind: node.model.as_ref().and_then(|model| {
-                                let mut kinds = model.request.questions.iter().map(|named| {
-                                    match named.question {
-                                        Question::Boolean { .. } => RosterQuestionKind::Boolean,
-                                        Question::Choice { .. } => RosterQuestionKind::Choice,
-                                        Question::Score { .. } => RosterQuestionKind::Score,
-                                    }
-                                });
-                                let first = kinds.next()?;
-                                kinds.all(|kind| kind == first).then_some(first)
-                            }),
-                        });
-                    }
                 }
             }
+            let questions = visited
+                .iter()
+                .filter_map(|path| match &by_path.get(path)?.operation {
+                    Operation::Probability { question, .. } => Some(question.as_str()),
+                    _ => None,
+                })
+                .collect::<std::collections::BTreeSet<_>>();
+            let contributors = visited
+                .iter()
+                .filter_map(|path| {
+                    let node = by_path.get(path)?;
+                    let Operation::Ask { backend } = &node.operation else {
+                        return None;
+                    };
+                    if node.status != NodeStatus::Completed {
+                        return None;
+                    }
+                    let model = node.model.as_ref()?;
+                    let response = model.response.as_ref()?;
+                    let mut kinds = model
+                        .request
+                        .questions
+                        .iter()
+                        .filter(|named| {
+                            questions.is_empty() || questions.contains(named.id.as_str())
+                        })
+                        .map(|named| match named.question {
+                            Question::Boolean { .. } => RosterQuestionKind::Boolean,
+                            Question::Choice { .. } => RosterQuestionKind::Choice,
+                            Question::Score { .. } => RosterQuestionKind::Score,
+                        });
+                    let first = kinds.next();
+                    let question_kind = first.filter(|first| kinds.all(|kind| kind == *first));
+                    Some(RosterContributor {
+                        binding: backend.clone(),
+                        actual_model: Some(response.model.clone()),
+                        question_kind,
+                    })
+                })
+                .collect();
             (output.clone(), contributors)
         })
         .collect()
