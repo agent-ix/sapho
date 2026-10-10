@@ -13,3 +13,5 @@ mod runtime;
 
 #[path = "scenarios/assembly.rs"]
 mod assembly;
+#[path = "scenarios/sampling.rs"]
+mod sampling;

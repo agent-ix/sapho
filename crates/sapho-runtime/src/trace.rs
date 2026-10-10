@@ -41,6 +41,19 @@ impl PartialEq for ModelEvidence {
         self.request == other.request && bare(&self.response) == bare(&other.response)
     }
 }
+/// Terminal evidence for one dispatched repeated-Ask sample.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SampleEvidence {
+    /// Zero-based exact request identity.
+    pub index: u32,
+    /// Completed or failed inference call.
+    pub status: NodeStatus,
+    /// Request and optional response or raw failure exchange.
+    pub model: ModelEvidence,
+    /// Structured failure for this sample, when any.
+    pub error: Option<SaphoError>,
+}
 /// Evidence for one concrete node, including map item scope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -63,6 +76,9 @@ pub struct NodeTrace {
     pub error: Option<SaphoError>,
     /// Request and raw response for an ask node.
     pub model: Option<ModelEvidence>,
+    /// Ordered repeated samples; absent for one-call legacy Ask nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub samples: Option<Vec<SampleEvidence>>,
 }
 /// Ordered deterministic content of a run, including a partial failed run.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
