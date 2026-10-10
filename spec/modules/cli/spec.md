@@ -24,6 +24,8 @@ Owning component: `sapho-cli`. See the [workspace boundaries](../../spec.md).
 - [FR-033: Inspect a graph without executing it](functional/FR-033.md)
 - [FR-034: Invoke bounded graphs from data](functional/FR-034.md)
 - [FR-035: Record and replay CLI evaluations](functional/FR-035.md)
+- [FR-079: Expand a declared literal grid into validated candidate graphs](functional/FR-079.md)
+- [FR-080: Publish sweep candidates without overwriting artifacts](functional/FR-080.md)
 
 - [FR-045](functional/FR-045.md): host provider credentials
 - [FR-046](functional/FR-046.md): shared CLI foundations
