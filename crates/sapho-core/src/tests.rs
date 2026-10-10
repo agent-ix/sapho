@@ -31,6 +31,7 @@ fn choice() -> NamedQuestion {
 }
 fn request(q: Vec<NamedQuestion>) -> ModelRequest {
     ModelRequest {
+        sample_index: None,
         distribution_policy: DistributionPolicy::Strict {},
         backend: BackendId::new("judge").unwrap(),
         model: "model-1".into(),

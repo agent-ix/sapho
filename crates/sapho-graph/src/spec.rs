@@ -8,6 +8,13 @@ use sapho_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+const fn one_sample() -> u64 {
+    1
+}
+fn is_one_sample(samples: &u64) -> bool {
+    *samples == 1
+}
+
 /// A typed connection with an optional record-field projection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -94,6 +101,9 @@ pub enum Operation {
     Ask {
         /// Host-configured model binding.
         backend: BackendId,
+        /// Number of identical-content calls; one retains legacy ports and JSON.
+        #[serde(default = "one_sample", skip_serializing_if = "is_one_sample")]
+        samples: u64,
     },
     /// Map a reusable subgraph over identified items.
     Map {

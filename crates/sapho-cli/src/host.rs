@@ -70,7 +70,7 @@ fn describe(graph: &CompiledGraph, spec: &GraphSpec) -> Inspection {
                 .collect(),
         });
         for node in graph.stages().iter().flatten() {
-            if let Operation::Ask { backend } = &node.spec().operation {
+            if let Operation::Ask { backend, .. } = &node.spec().operation {
                 backends.insert(backend.clone());
             }
             if let Some(child) = node.mapped_graph() {

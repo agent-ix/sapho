@@ -18,6 +18,7 @@ use tokio::{
 };
 fn request() -> ModelRequest {
     ModelRequest {
+        sample_index: None,
         backend: BackendId::new("decision").unwrap(),
         model: DEFAULT_MODEL.into(),
         expected_model: Some(DEFAULT_MODEL.into()),
