@@ -249,7 +249,8 @@ impl ModelBackend for ClaudeBackend {
         let deadline = tokio::time::Instant::now()
             .checked_add(self.limits.timeout)
             .ok_or_else(|| failure(ErrorCode::DeadlineExceeded))?;
-        let body = wire::encode(request, self.limits.max_tokens, self.limits.request_bytes)?;
+        let body = wire::encode(request, self.limits.max_tokens, self.limits.request_bytes)
+            .map_err(|error| SaphoError::new(error.code, "Claude request refused"))?;
         tokio::time::timeout_at(deadline, async {
             let _permit = self
                 .capacity

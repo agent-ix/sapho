@@ -700,6 +700,41 @@ async fn declared_response_length_over_ceiling_refuses_before_collection() {
     server.join().unwrap();
 }
 
+/// Trace: FR-089-AC-2
+#[tokio::test(flavor = "multi_thread")]
+async fn underreported_content_length_cannot_yield_a_valid_answer() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/v1/messages", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = [0u8; 8192];
+        let _ = stream.read(&mut bytes).unwrap();
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n")
+            .unwrap();
+        stream.write_all(&message(answers())).unwrap();
+    });
+    let backend =
+        ClaudeBackend::at_endpoint(&url, &SecretValue::new("private"), None, Limits::default())
+            .unwrap();
+    let error = backend
+        .infer(&request())
+        .await
+        .expect_err("truncated message");
+    assert!(matches!(
+        error.code,
+        ErrorCode::InvalidAnswer | ErrorCode::BackendFailed
+    ));
+    server.join().unwrap();
+}
+
 /// Trace: FR-088-AC-3, FR-089-AC-3
 #[tokio::test]
 async fn actual_model_mismatch_keeps_provider_text_only_in_private_raw_evidence() {
@@ -729,4 +764,112 @@ async fn actual_model_mismatch_keeps_provider_text_only_in_private_raw_evidence(
             .unwrap()
             .contains("sentinel-private-provider-body")
     );
+}
+
+/// Trace: FR-089-AC-3
+#[tokio::test]
+async fn invalid_request_state_does_not_enter_printable_error() {
+    let fake = Fake::new(200, message(answers()));
+    let backend = ClaudeBackend::with_transport(fake.clone(), Limits::default()).unwrap();
+    let mut request = request();
+    request.state = Value::Record(BTreeMap::from([(
+        "sentinel-private/name".into(),
+        Value::Text("sentinel-private-value".into()),
+    )]));
+    let error = backend.infer(&request).await.expect_err("invalid state");
+    assert_eq!(error.code, ErrorCode::InvalidValue);
+    assert!(fake.calls().is_empty());
+    for printable in [
+        format!("{error:?}"),
+        format!("{error}"),
+        serde_json::to_string(&error).unwrap(),
+    ] {
+        assert!(!printable.contains("sentinel-private/name"));
+        assert!(!printable.contains("sentinel-private-value"));
+    }
+}
+
+/// Trace: FR-089-AC-2
+#[tokio::test]
+async fn exact_serialized_byte_boundaries_and_queued_deadline() {
+    let input = request();
+    let request_len = super::wire::encode(&input, 1024, 1_048_576).unwrap().len();
+    let response = message(answers());
+    let fake = Fake::new(200, response.clone());
+    let exact = ClaudeBackend::with_transport(
+        fake.clone(),
+        Limits {
+            request_bytes: request_len,
+            response_bytes: response.len(),
+            ..Limits::default()
+        },
+    )
+    .unwrap();
+    exact.infer(&input).await.unwrap();
+    let request_short = ClaudeBackend::with_transport(
+        fake.clone(),
+        Limits {
+            request_bytes: request_len - 1,
+            ..Limits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        request_short.infer(&input).await.unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+    let response_short = ClaudeBackend::with_transport(
+        fake.clone(),
+        Limits {
+            response_bytes: response.len() - 1,
+            ..Limits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        response_short.infer(&input).await.unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+    assert_eq!(fake.calls().len(), 2);
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Held(AtomicUsize);
+    #[async_trait]
+    impl Transport for Held {
+        async fn post(&self, _: &[u8], _: usize) -> Result<HttpResponse> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::future::pending::<()>().await;
+            unreachable!()
+        }
+    }
+    let held = Arc::new(Held(AtomicUsize::new(0)));
+    let backend = Arc::new(
+        ClaudeBackend::with_transport(
+            held.clone(),
+            Limits {
+                timeout: Duration::from_millis(100),
+                in_flight: 1,
+                ..Limits::default()
+            },
+        )
+        .unwrap(),
+    );
+    let first = tokio::spawn({
+        let backend = backend.clone();
+        async move { backend.infer(&request()).await }
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while held.0.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let second = backend.infer(&input).await.unwrap_err();
+    assert_eq!(second.code, ErrorCode::DeadlineExceeded);
+    assert_eq!(
+        first.await.unwrap().unwrap_err().code,
+        ErrorCode::DeadlineExceeded
+    );
+    assert_eq!(held.0.load(Ordering::SeqCst), 1);
 }
