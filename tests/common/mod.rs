@@ -129,6 +129,7 @@ pub fn ask_graph(guard: Option<bool>) -> GraphSpec {
     let mut ask = node(
         "ask",
         Operation::Ask {
+            samples: 1,
             backend: BackendId::new("judge").unwrap(),
         },
         [

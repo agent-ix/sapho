@@ -334,6 +334,7 @@ async fn streamed_loading_gives_the_replay_of_typed_loading_and_refuses_the_same
 #[tokio::test]
 async fn exact_matching_includes_option_order_model_state_and_backend() {
     let request = ModelRequest {
+        sample_index: None,
         distribution_policy: sapho::core::DistributionPolicy::Strict {},
         backend: BackendId::new("judge").unwrap(),
         model: "model-1".into(),
