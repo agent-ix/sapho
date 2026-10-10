@@ -76,6 +76,7 @@ Each binding names a graph input, a node port, or a typed literal and may select
 | code | Declared by registered Primitive | Declared by Primitive | Primitive name and typed params |
 | questions | None | result: Questions | Ordered definitions |
 | ask | state: Record; questions: Questions | answers: Answers; model: Text | Backend name |
+| shadow_ask | state: Record; questions: Questions | observation only; no graph output port | Backend name and mappings to decision outputs |
 | map | items: List(T); captures matching subgraph inputs | result: List(U) | Subgraph with item input and result output |
 | filter | items: List(T); mask: List(Boolean) | result: List(T) | None |
 | pairs | left: List(L); right: List(R) | result: List(Record(left,right)) | None |
@@ -93,7 +94,7 @@ Each binding names a graph input, a node port, or a typed literal and may select
 
 ## Execution and Failure Model
 
-Compiled graphs are immutable. Node statuses are completed, skipped or failed. Guard false produces Optional absence without work; failures abort the run and retain the partial trace. Model calls may execute concurrently within a ready stage, but output and trace order remain deterministic. Maps reuse this executor and its global counters. A run has no implicit retry or repair loop. Native code is cooperative and cannot be forcibly preempted after it starts.
+Compiled graphs are immutable. Node statuses are completed, skipped or failed. Guard false produces Optional absence without work; decision-node failures abort the run and retain the partial trace. Shadow asks run as isolated observation work after a successful decision; their failures are traced without changing decision outputs or exit status. They share RunLimits and consume remaining model-call credits; exhausted capacity skips shadow work. Model calls may execute concurrently within a ready stage, but output and trace order remain deterministic. Maps reuse this executor and its global counters. A run has no implicit retry or repair loop. Native code is cooperative and cannot be forcibly preempted after it starts.
 
 Errors use a typed ErrorCode plus contextual fields, not message parsing: Config, DuplicateId, UnknownPrimitive, UnknownBackend, UnknownReference, Cycle, TypeMismatch, MissingInput, InvalidValue, InvalidAnswer, MissingAnswer, UnsupportedDistribution, LimitExceeded, DeadlineExceeded, TooLarge, CodeFailed, BackendFailed, Unauthorized, RateLimited, ServiceValidation, ModelMismatch, ReplayMiss, RecordingIo and RecordingMismatch.
 
@@ -111,7 +112,7 @@ First-release requirements are specified and reviewed before code. Requirement I
 
 ## CLI and Evidence Contracts
 
-The initial command set is validate, inspect, run, record, replay, select (files/git/json), measure, tune and export-training. Commands consume explicitly selected graph/input/binding/dataset paths. Machine output is typed JSON. Existing application-owned Rust registries remain the extension boundary; the stock executable never loads arbitrary code. Dataset curation requires Boolean labels whose provenance declares their kind (model, agent, human or deterministic_check) and source, explicit development/held_out splits and stable case identities. A model answer is a valid label when its kind and source are declared, and measure never scores a model against labels it made itself. Reports separate scored coverage from errors/unscored outputs. Only Probability is measured by Brier score; Degree remains a heuristic. Tuning ranks complete development candidates only; training export excludes held-out cases. Exact replay and raw evidence policy remain unchanged.
+The initial command set is validate, inspect, run, record, replay, select (files/git/json), measure, tune and export-training. Commands consume explicitly selected graph/input/binding/dataset paths. Machine output is typed JSON. Existing application-owned Rust registries remain the extension boundary; the stock executable never loads arbitrary code. Dataset curation requires Boolean labels whose provenance declares their kind (model, agent, human or deterministic_check) and source, explicit development/held_out splits and stable case identities. A model answer is a valid label when its kind and source are declared, and measure never scores a model against labels it made itself. Reports separate scored coverage from errors/unscored outputs. Only Probability is measured by Brier score; Degree remains a heuristic. Shadow observations compare against the same curated labels as their mapped decision outputs and do not enter decision dataflow. Tuning ranks complete development candidates only; training export excludes held-out cases. Exact replay and raw evidence policy remain unchanged.
 
 All approved acquisition and graph-skill behavior is specified before implementation. Generic selectors live outside the runtime and retain full selected bytes/context with source references. EARS owns its separate consumer migration, coordinated through SAPHO-4; no EARS data or extractor source is copied here. The skills create/tune/record operate through the same CLI and guide.
 
