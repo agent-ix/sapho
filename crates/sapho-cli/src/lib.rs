@@ -38,3 +38,5 @@ pub use io::{
 
 mod credentials;
 pub use credentials::{resolve_credential, resolve_endpoint};
+mod drift;
+pub use drift::{compare_recordings, project_recording_confidences};

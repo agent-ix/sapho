@@ -140,7 +140,10 @@ fn probability_scores_and_missing_degree_failures_remain_separate() {
         100,
     )
     .unwrap();
-    let Metrics::Probability { brier: Some(score) } = report.outputs["result"].metrics else {
+    let Metrics::Probability {
+        brier: Some(score), ..
+    } = report.outputs["result"].metrics
+    else {
         panic!("Brier expected")
     };
     assert!((score - 0.1).abs() < 1e-12);
@@ -184,6 +187,287 @@ fn probability_scores_and_missing_degree_failures_remain_separate() {
         missing.predictions[0].unscored,
         Some(UnscoredReason::MissingOutput)
     );
+}
+
+/// Trace: FR-065-AC-1, FR-065-AC-2, FR-066-AC-1, IT-010-SC-01, IT-010-SC-02
+#[test]
+fn sapho_21_ten_case_ece_parity() {
+    let rows = [
+        (0.05, false),
+        (0.15, false),
+        (0.25, true),
+        (0.35, false),
+        (0.45, true),
+        (0.55, true),
+        (0.65, true),
+        (0.75, false),
+        (0.9, true),
+        (1.0, false),
+    ];
+    let data = dataset(&rows.map(|(_, label)| label));
+    let values = rows.map(|(p, _)| Value::Probability(Probability::new(p).unwrap()));
+    let report = measure(
+        &data,
+        Split::Development,
+        &BTreeMap::from([("result".into(), ValueType::Probability)]),
+        &outcomes(&values),
+        100,
+    )
+    .unwrap();
+    let Metrics::Probability {
+        ece,
+        calibration,
+        risk_coverage,
+        ..
+    } = &report.outputs["result"].metrics
+    else {
+        panic!("Probability metrics expected");
+    };
+    assert!((ece.unwrap() - 0.33).abs() < 1e-9);
+    assert_eq!(calibration.len(), 10);
+    assert_eq!((calibration[9].count, calibration[9].correct), (3, 2));
+    assert!((calibration[9].mean_confidence.unwrap() - 0.95).abs() < 1e-9);
+    assert!((calibration[9].accuracy.unwrap() - 2.0 / 3.0).abs() < 1e-9);
+    assert_eq!((calibration[8].count, calibration[8].correct), (1, 1));
+    assert!((calibration[8].mean_confidence.unwrap() - 0.85).abs() < 1e-9);
+    assert_eq!(
+        risk_coverage
+            .iter()
+            .map(|row| (row.answered, row.correct, row.total))
+            .collect::<Vec<_>>(),
+        [
+            (10, 6, 10),
+            (8, 5, 10),
+            (6, 3, 10),
+            (4, 3, 10),
+            (3, 2, 10),
+            (2, 1, 10)
+        ]
+    );
+    for row in risk_coverage {
+        assert!((row.coverage - f64::from(row.answered) / 10.0).abs() < 1e-12);
+        assert!(
+            (row.accuracy.unwrap() - f64::from(row.correct) / f64::from(row.answered)).abs()
+                < 1e-12
+        );
+        assert!((row.risk.unwrap() - (1.0 - row.accuracy.unwrap())).abs() < 1e-12);
+    }
+}
+
+/// Trace: FR-065-AC-2, FR-066-AC-2, FR-066-AC-3, IT-010-SC-03
+#[test]
+fn calibration_boundaries_and_threshold_overrides_are_checked() {
+    let data = dataset(&[true, true, true]);
+    let values = [0.899, 0.9, 1.0].map(|p| Value::Probability(Probability::new(p).unwrap()));
+    let schema = BTreeMap::from([("result".into(), ValueType::Probability)]);
+    let cases = outcomes(&values);
+    let default = measure(&data, Split::Development, &schema, &cases, 10).unwrap();
+    let Metrics::Probability {
+        calibration,
+        brier,
+        ece,
+        ..
+    } = &default.outputs["result"].metrics
+    else {
+        panic!("Probability metrics expected");
+    };
+    assert_eq!(calibration[8].count, 1);
+    assert_eq!(calibration[9].count, 2);
+    assert!((calibration[9].mean_confidence.unwrap() - 0.95).abs() < 1e-12);
+    assert_eq!(calibration[9].accuracy, Some(1.0));
+    let selected = measure_with_thresholds(
+        &data,
+        Split::Development,
+        &schema,
+        &cases,
+        10,
+        &[0.899, 0.9, 1.0],
+    )
+    .unwrap();
+    let Metrics::Probability {
+        risk_coverage,
+        brier: selected_brier,
+        ece: selected_ece,
+        ..
+    } = &selected.outputs["result"].metrics
+    else {
+        panic!("Probability metrics expected");
+    };
+    assert_eq!((selected_brier, selected_ece), (brier, ece));
+    assert_eq!(
+        risk_coverage
+            .iter()
+            .map(|row| row.answered)
+            .collect::<Vec<_>>(),
+        [3, 2, 1]
+    );
+    let never = measure_with_thresholds(
+        &data,
+        Split::Development,
+        &schema,
+        &outcomes(&[Value::Probability(Probability::new(0.5).unwrap())]),
+        10,
+        &[0.9],
+    )
+    .unwrap();
+    let Metrics::Probability { risk_coverage, .. } = &never.outputs["result"].metrics else {
+        panic!("Probability metrics expected");
+    };
+    assert_eq!(risk_coverage[0].answered, 0);
+    assert_eq!(risk_coverage[0].coverage, 0.0);
+    assert_eq!(
+        (risk_coverage[0].accuracy, risk_coverage[0].risk),
+        (None, None)
+    );
+    for invalid in [
+        vec![],
+        vec![0.9, 0.9],
+        vec![0.9, 0.8],
+        vec![f64::NAN],
+        vec![f64::INFINITY],
+        vec![0.49],
+        vec![1.01],
+        (0..33).map(|i| 0.5 + f64::from(i) / 100.0).collect(),
+    ] {
+        assert!(matches!(
+            measure_with_thresholds(&data, Split::Development, &schema, &cases, 10, &invalid),
+            Err(EvidenceError::InvalidThresholds)
+        ));
+    }
+}
+
+/// Trace: FR-065-AC-3, FR-065-AC-4, FR-065-AC-5, FR-066-AC-4, FR-066-AC-5, IT-010-SC-04, IT-010-SC-05
+#[test]
+fn empty_probability_and_exclusions_preserve_measurement_contract() {
+    let mut data = dataset(&[true, false, true, false]);
+    data.cases[0].label_provenance = provenance(LabelKind::Model, "answering-model");
+    data.cases[3].split = Split::HeldOut;
+    let encoded = serde_json::to_vec(&data).unwrap();
+    let decoded: Dataset = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded, data);
+    decoded.validate(10).unwrap();
+    let cases = BTreeMap::from([
+        (
+            data.cases[0].id.clone(),
+            CaseOutcome::Completed {
+                outputs: Inputs::from([(
+                    "result".into(),
+                    Datum::new("p", Value::Probability(Probability::new(1.0).unwrap())).unwrap(),
+                )]),
+                models: vec![ModelIdentity {
+                    name: "answering-model".into(),
+                }],
+            },
+        ),
+        (
+            data.cases[1].id.clone(),
+            CaseOutcome::Completed {
+                outputs: Inputs::from([(
+                    "result".into(),
+                    Datum::new("n", Value::Number(0.8)).unwrap(),
+                )]),
+                models: Vec::new(),
+            },
+        ),
+        (
+            data.cases[2].id.clone(),
+            CaseOutcome::Failed {
+                error: SaphoError::new(ErrorCode::ReplayMiss, "fixture"),
+                models: Vec::new(),
+            },
+        ),
+        (
+            data.cases[3].id.clone(),
+            CaseOutcome::Completed {
+                outputs: Inputs::from([(
+                    "result".into(),
+                    Datum::new("p", Value::Probability(Probability::new(0.9).unwrap())).unwrap(),
+                )]),
+                models: Vec::new(),
+            },
+        ),
+    ]);
+    let report = measure(
+        &data,
+        Split::Development,
+        &BTreeMap::from([("result".into(), ValueType::Probability)]),
+        &cases,
+        10,
+    )
+    .unwrap();
+    assert_eq!(report.self_source, vec![data.cases[0].id.clone()]);
+    assert_eq!(
+        (
+            report.selected_cases,
+            report.outputs["result"].labelled,
+            report.outputs["result"].scored,
+            report.outputs["result"].unscored,
+            report.outputs["result"].failed
+        ),
+        (3, 2, 0, 1, 1)
+    );
+    let Metrics::Probability {
+        brier,
+        ece,
+        calibration,
+        risk_coverage,
+    } = &report.outputs["result"].metrics
+    else {
+        panic!("Probability metrics expected");
+    };
+    assert_eq!((*brier, *ece), (None, None));
+    assert!(calibration.iter().all(|bucket| bucket.count == 0
+        && bucket.mean_confidence.is_none()
+        && bucket.accuracy.is_none()));
+    assert!(risk_coverage.is_empty());
+    let mut one_scored = cases.clone();
+    one_scored.insert(
+        data.cases[1].id.clone(),
+        CaseOutcome::Completed {
+            outputs: Inputs::from([(
+                "result".into(),
+                Datum::new("p", Value::Probability(Probability::new(0.2).unwrap())).unwrap(),
+            )]),
+            models: Vec::new(),
+        },
+    );
+    let isolated = measure(
+        &data,
+        Split::Development,
+        &BTreeMap::from([("result".into(), ValueType::Probability)]),
+        &one_scored,
+        10,
+    )
+    .unwrap();
+    let Metrics::Probability {
+        calibration,
+        risk_coverage,
+        ..
+    } = &isolated.outputs["result"].metrics
+    else {
+        panic!("Probability metrics expected");
+    };
+    assert_eq!(isolated.outputs["result"].scored, 1);
+    assert_eq!(
+        calibration.iter().map(|bucket| bucket.count).sum::<u32>(),
+        1
+    );
+    assert!(risk_coverage.iter().all(|row| row.total == 1));
+    for value_type in [ValueType::Degree, ValueType::Number] {
+        let unsupported = measure(
+            &data,
+            Split::Development,
+            &BTreeMap::from([("result".into(), value_type.clone())]),
+            &cases,
+            10,
+        )
+        .unwrap();
+        assert!(matches!(
+            unsupported.outputs["result"].metrics,
+            Metrics::Unsupported { .. }
+        ));
+        assert_eq!(unsupported.outputs["result"].scored, 0);
+    }
 }
 /// Trace: FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, TC-037
 #[test]
