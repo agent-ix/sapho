@@ -23,6 +23,7 @@ mod bindings;
 mod error;
 mod host;
 mod io;
+mod sweep;
 #[cfg(feature = "ollama")]
 pub use bindings::ollama_base_url;
 pub use bindings::{
@@ -35,6 +36,7 @@ pub use io::{
     ArtifactWriter, GraphArtifact, load_graph, read_bytes, read_bytes_with_timeout, select_format,
     write_new,
 };
+pub use sweep::{SweepReport, sweep};
 
 mod credentials;
 pub use credentials::{resolve_credential, resolve_endpoint};

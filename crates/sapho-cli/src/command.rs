@@ -5,7 +5,7 @@ use crate::args::*;
 use sapho_cli::{
     ArtifactWriter, Bindings, CliError, ExitStatus, GraphArtifact, RunReport, Runner, inspect,
     live_bindings, load_graph, plain_inputs, read_bytes, read_bytes_with_timeout,
-    recording_bindings, replay_bindings_json, select_format,
+    recording_bindings, replay_bindings_json, select_format, sweep,
 };
 use sapho_core::{
     BackendRegistry, ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry, SaphoError,
@@ -650,6 +650,15 @@ pub(crate) fn execute(cli: Cli) -> Result<Response, CliError> {
         Command::Replay { run, recording } => invoke(run, Invocation::Replay(recording)),
         Command::Measure(args) => measurement(args),
         Command::Tune(args) => tuning(args),
+        Command::Sweep(args) => {
+            let report = sweep(
+                &args.graph,
+                &args.grid,
+                &args.output_dir,
+                args.max_candidates,
+            )?;
+            respond(report, ExitStatus::Completed, 8 * 1_048_576, None)
+        }
         Command::ExportTraining {
             dataset: path,
             output,

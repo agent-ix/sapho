@@ -54,6 +54,8 @@ pub(crate) enum Command {
     Measure(MeasureArgs),
     /// Compare explicit candidates using development labels only.
     Tune(TuneArgs),
+    /// Generate a bounded full grid of literal-only graph candidates.
+    Sweep(SweepArgs),
     /// Export curated development supervision; performs no inference or training.
     ExportTraining {
         #[arg(long)]
@@ -205,6 +207,20 @@ pub(crate) struct TuneArgs {
     pub(crate) max_candidates: usize,
     #[command(flatten)]
     pub(crate) options: MeasurementOptions,
+}
+#[derive(Args)]
+pub(crate) struct SweepArgs {
+    /// Base YAML or JSON graph.
+    pub(crate) graph: PathBuf,
+    /// Strict JSON axes over named literal Datum IDs.
+    #[arg(long)]
+    pub(crate) grid: PathBuf,
+    /// New directory for candidates and manifest.
+    #[arg(long)]
+    pub(crate) output_dir: PathBuf,
+    /// Full-grid ceiling, independent of tune's own ceiling.
+    #[arg(long, default_value_t = 16)]
+    pub(crate) max_candidates: usize,
 }
 #[derive(Args)]
 pub(crate) struct Acquisition {
