@@ -283,8 +283,9 @@ impl ModelBackend for ClaudeBackend {
             };
             let decoded = wire::decode(request, &response.body, self.limits.response_bytes)
                 .map_err(|error| error.with_raw(raw.clone()))?;
-            sapho_core::validate_response(request, &decoded)
-                .map_err(|error| error.with_raw(raw.clone()))?;
+            sapho_core::validate_response(request, &decoded).map_err(|error| {
+                SaphoError::new(error.code, "Claude answer refused").with_raw(raw.clone())
+            })?;
             if tokio::time::Instant::now() >= deadline {
                 return Err(failure(ErrorCode::DeadlineExceeded).with_raw(raw));
             }
