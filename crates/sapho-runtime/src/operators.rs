@@ -65,6 +65,21 @@ pub(crate) fn logic(op: &Operation, input: &Inputs) -> Result<Value> {
             };
             Value::Probability(a.probability(question, labels)?)
         }
+        Operation::Calibrate => {
+            let Value::Probability(raw) = operand(input, "value")? else {
+                return Err(mismatch("Calibrate needs raw Probability"));
+            };
+            let Value::CalibrationMap(map) = operand(input, "map")? else {
+                return Err(mismatch("Calibrate needs CalibrationMap"));
+            };
+            Value::CalibratedProbability(map.apply(*raw)?)
+        }
+        Operation::CalibratedAsProbability => {
+            let Value::CalibratedProbability(value) = operand(input, "value")? else {
+                return Err(mismatch("Conversion needs CalibratedProbability"));
+            };
+            Value::Probability(sapho_core::Probability::new(value.get())?)
+        }
         Operation::Degree => Value::Degree(Degree::new(number(operand(input, "value")?)?)?),
         Operation::Complement => {
             Value::Degree(Degree::new(1.0 - degree(operand(input, "value")?)?)?)

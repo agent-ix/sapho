@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Cooperative bounded orchestration, including dependent map subgraphs.
+use crate::observation::{self, ModelCallObservation, ObservationClock, ObservationConfig};
 use crate::{ModelEvidence, NodeStatus, NodeTrace, Trace, operators};
 use futures::{
     future::BoxFuture,
@@ -12,9 +13,9 @@ use sapho_core::{
 };
 use sapho_graph::{Binding, CompiledGraph, CompiledNode, Operation};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -94,6 +95,7 @@ impl std::error::Error for RunFailure {}
 pub struct Engine {
     graph: Arc<CompiledGraph>,
     backends: BackendRegistry,
+    calibration_identity_check: bool,
 }
 impl Engine {
     /// Bind model implementations, rejecting unknown names before work starts.
@@ -102,7 +104,13 @@ impl Engine {
         Ok(Self {
             graph: Arc::new(graph),
             backends,
+            calibration_identity_check: false,
         })
+    }
+    /// Enforce reported binding/model identity at every executed calibration node.
+    pub fn with_calibration_identity_check(mut self) -> Self {
+        self.calibration_identity_check = true;
+        self
     }
     /// Execute with bounded work; no trace persistence or model retry is implicit.
     pub async fn run(
@@ -110,18 +118,49 @@ impl Engine {
         inputs: &Inputs,
         limits: RunLimits,
     ) -> std::result::Result<RunResult, RunFailure> {
+        self.run_internal(inputs, limits, None).await.0
+    }
+    /// Execute with a separate model-call observation sidecar.
+    pub async fn run_observed(
+        &self,
+        inputs: &Inputs,
+        limits: RunLimits,
+        config: &ObservationConfig,
+    ) -> Result<(
+        std::result::Result<RunResult, RunFailure>,
+        Vec<ModelCallObservation>,
+    )> {
+        config.validate()?;
+        Ok(self.run_internal(inputs, limits, Some(config)).await)
+    }
+    async fn run_internal(
+        &self,
+        inputs: &Inputs,
+        limits: RunLimits,
+        config: Option<&ObservationConfig>,
+    ) -> (
+        std::result::Result<RunResult, RunFailure>,
+        Vec<ModelCallObservation>,
+    ) {
         let fail = |error| RunFailure {
             error,
             trace: Trace::default(),
         };
-        limits.validate().map_err(fail)?;
-        check_ports(&self.graph.signature().inputs, inputs).map_err(fail)?;
-        let deadline = Instant::now().checked_add(limits.duration).ok_or_else(|| {
-            fail(SaphoError::new(
-                ErrorCode::InvalidValue,
-                "Duration exceeds monotonic clock range",
-            ))
-        })?;
+        if let Err(error) = limits
+            .validate()
+            .and_then(|()| check_ports(&self.graph.signature().inputs, inputs))
+        {
+            return (Err(fail(error)), Vec::new());
+        }
+        let Some(deadline) = Instant::now().checked_add(limits.duration) else {
+            return (
+                Err(fail(SaphoError::new(
+                    ErrorCode::InvalidValue,
+                    "Duration exceeds monotonic clock range",
+                ))),
+                Vec::new(),
+            );
+        };
         let mut state = RunState {
             limits,
             deadline,
@@ -131,12 +170,20 @@ impl Engine {
             bytes: 0,
             trace: Trace::default(),
             cancelled: Arc::new(AtomicBool::new(false)),
+            clock: config.map(|c| c.clock.clone()),
+            durations: BTreeMap::new(),
+            started: Arc::new(Mutex::new(BTreeMap::new())),
         };
-        state.data(inputs).map_err(|error| RunFailure {
-            error,
-            trace: state.trace.clone(),
-        })?;
-        match self
+        if let Err(error) = state.data(inputs) {
+            return (
+                Err(RunFailure {
+                    error,
+                    trace: state.trace.clone(),
+                }),
+                Vec::new(),
+            );
+        }
+        let result = match self
             .graph_run(&self.graph, inputs.clone(), vec!["root".into()], &mut state)
             .await
         {
@@ -158,7 +205,24 @@ impl Engine {
                     trace: state.trace.clone(),
                 })
             }
-        }
+        };
+        let observations = config.map_or_else(Vec::new, |c| {
+            let started = state
+                .started
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let attempted = started.keys().copied().collect::<BTreeSet<_>>();
+            if c.mode == observation::ObservationMode::Live {
+                for (index, at) in started.iter() {
+                    state.durations.entry(*index).or_insert_with(|| {
+                        u64::try_from(c.clock.now().saturating_duration_since(*at).as_micros())
+                            .unwrap_or(u64::MAX)
+                    });
+                }
+            }
+            observation::collect(&state.trace, &state.durations, &attempted, c)
+        });
+        (result, observations)
     }
     fn graph_run<'a>(
         &'a self,
@@ -308,8 +372,20 @@ impl Engine {
                 for chunk in asks.chunks(state.limits.concurrency) {
                     let mut futures = FuturesUnordered::new();
                     let deadline = tokio::time::Instant::from_std(state.deadline);
-                    for (order, (_, _, _, _, backend, request)) in chunk.iter().enumerate() {
+                    let clock = state.clock.clone();
+                    let started_calls = state.started.clone();
+                    for (order, (_, index, _, _, backend, request)) in chunk.iter().enumerate() {
+                        let clock = clock.clone();
+                        let started_calls = started_calls.clone();
+                        let index = *index;
                         futures.push(async move {
+                            let started = clock.as_ref().map(|clock| clock.now());
+                            if let Some(at) = started {
+                                started_calls
+                                    .lock()
+                                    .unwrap_or_else(|poison| poison.into_inner())
+                                    .insert(index, at);
+                            }
                             let response =
                                 tokio::time::timeout_at(deadline, backend.infer(request))
                                     .await
@@ -320,14 +396,25 @@ impl Engine {
                                         )
                                     })
                                     .and_then(|r| r);
-                            (order, response)
+                            let elapsed = started.and_then(|start| {
+                                clock
+                                    .as_ref()
+                                    .map(|clock| clock.now().saturating_duration_since(start))
+                            });
+                            (order, response, elapsed)
                         });
                     }
-                    while let Some((order, result)) = futures.next().await {
+                    while let Some((order, result, elapsed)) = futures.next().await {
                         let (node, index, np, ins, _, request) =
                             chunk.get(order).ok_or_else(|| {
                                 SaphoError::new(ErrorCode::BackendFailed, "Model task order absent")
                             })?;
+                        if let Some(elapsed) = elapsed {
+                            state.durations.insert(
+                                *index,
+                                u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+                            );
+                        }
                         let processed = (|| {
                             let response = result?;
                             if let Some(evidence) = &mut state.trace_entry(*index)?.model {
@@ -375,6 +462,10 @@ impl Engine {
         ins: &Inputs,
         state: &mut RunState,
     ) -> Result<Inputs> {
+        if self.calibration_identity_check && matches!(node.spec().operation, Operation::Calibrate)
+        {
+            check_calibration_identity(path, node, ins, &self.graph, &state.trace)?;
+        }
         match &node.spec().operation {
             Operation::Record {} => one_output(
                 path,
@@ -480,6 +571,8 @@ impl Engine {
             | Operation::Not
             | Operation::Compare { .. }
             | Operation::Probability { .. }
+            | Operation::Calibrate
+            | Operation::CalibratedAsProbability
             | Operation::Degree
             | Operation::Reduce { .. }
             | Operation::Complement
@@ -613,6 +706,9 @@ struct RunState {
     bytes: usize,
     trace: Trace,
     cancelled: Arc<AtomicBool>,
+    clock: Option<Arc<dyn ObservationClock>>,
+    durations: BTreeMap<usize, u64>,
+    started: Arc<Mutex<BTreeMap<usize, Instant>>>,
 }
 impl Drop for RunState {
     fn drop(&mut self) {
@@ -681,4 +777,245 @@ fn increment(value: usize, n: usize, max: usize, name: &str) -> Result<usize> {
         SaphoError::new(ErrorCode::LimitExceeded, "Run work ceiling exceeded")
             .with_context("limit", name)
     })
+}
+
+fn compiled_at_path(graph: &Arc<CompiledGraph>, path: &[String]) -> Option<CompiledNode> {
+    if path.first().is_none_or(|part| part != "root") || path.len() < 2 {
+        return None;
+    }
+    let mut scope = graph.clone();
+    let mut index = 1;
+    while index + 2 < path.len() {
+        let map = scope
+            .stages()
+            .iter()
+            .flatten()
+            .find(|node| node.spec().id.as_str() == path[index])?;
+        scope = map.mapped_graph()?;
+        index += 2;
+    }
+    scope
+        .stages()
+        .iter()
+        .flatten()
+        .find(|node| node.spec().id.as_str() == path[index])
+        .cloned()
+}
+fn contains_item(value: &Value, item_id: &str) -> bool {
+    matches!(value, Value::List(items) if items.iter().any(|item| item.id.as_str() == item_id || contains_item(&item.value, item_id)))
+}
+fn calibration_item_sources(
+    graph: &Arc<CompiledGraph>,
+    trace: &BTreeMap<Vec<String>, &NodeTrace>,
+    owner: &[String],
+    binding: &Binding,
+    item_id: &str,
+    visited: &mut BTreeSet<Vec<String>>,
+    contributing: &mut Vec<(sapho_core::BackendId, Option<String>)>,
+) {
+    let Binding::Node {
+        node,
+        port,
+        path: projection,
+    } = binding
+    else {
+        return;
+    };
+    if port != "result" || !projection.is_empty() {
+        return;
+    }
+    let mut source_path = owner[..owner.len() - 1].to_vec();
+    source_path.push(node.to_string());
+    let (Some(source), Some(evidence)) = (
+        compiled_at_path(graph, &source_path),
+        trace.get(&source_path),
+    ) else {
+        return;
+    };
+    if evidence.status != NodeStatus::Completed {
+        return;
+    }
+    match &source.spec().operation {
+        Operation::List { order, .. } => {
+            let Some(Value::List(items)) = evidence.outputs.get("result").map(|d| &d.value) else {
+                return;
+            };
+            let matches = items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| {
+                    item.id.as_str() == item_id || contains_item(&item.value, item_id)
+                })
+                .collect::<Vec<_>>();
+            let [(position, item)] = matches.as_slice() else {
+                return;
+            };
+            let Some(selected) = order
+                .get(*position)
+                .and_then(|name| source.spec().inputs.get(name))
+            else {
+                return;
+            };
+            if item.id.as_str() == item_id {
+                calibration_sources(graph, trace, &source_path, selected, visited, contributing);
+            } else {
+                calibration_item_sources(
+                    graph,
+                    trace,
+                    &source_path,
+                    selected,
+                    item_id,
+                    visited,
+                    contributing,
+                );
+            }
+        }
+        Operation::Filter | Operation::Collect => {
+            if let Some(items) = source.spec().inputs.get("items") {
+                calibration_item_sources(
+                    graph,
+                    trace,
+                    &source_path,
+                    items,
+                    item_id,
+                    visited,
+                    contributing,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+fn calibration_sources(
+    graph: &Arc<CompiledGraph>,
+    trace: &BTreeMap<Vec<String>, &NodeTrace>,
+    owner: &[String],
+    binding: &Binding,
+    visited: &mut BTreeSet<Vec<String>>,
+    contributing: &mut Vec<(sapho_core::BackendId, Option<String>)>,
+) {
+    match binding {
+        Binding::Literal { .. } => {}
+        Binding::Input { name, .. } => {
+            let scope = &owner[..owner.len() - 1];
+            if scope.len() < 3 {
+                return;
+            }
+            let map_path = &scope[..scope.len() - 1];
+            let Some(map) = compiled_at_path(graph, map_path) else {
+                return;
+            };
+            if name == "item" {
+                let Some(item_id) = scope.last() else {
+                    return;
+                };
+                if let Some(items) = map.spec().inputs.get("items") {
+                    calibration_item_sources(
+                        graph,
+                        trace,
+                        map_path,
+                        items,
+                        item_id,
+                        visited,
+                        contributing,
+                    );
+                }
+                return;
+            }
+            if let Some(parent_binding) = map.spec().inputs.get(name) {
+                calibration_sources(
+                    graph,
+                    trace,
+                    map_path,
+                    parent_binding,
+                    visited,
+                    contributing,
+                );
+            }
+        }
+        Binding::Node { node, .. } => {
+            let mut source = owner[..owner.len() - 1].to_vec();
+            source.push(node.to_string());
+            if !visited.insert(source.clone()) {
+                return;
+            }
+            let (Some(compiled), Some(evidence)) =
+                (compiled_at_path(graph, &source), trace.get(&source))
+            else {
+                return;
+            };
+            if evidence.status != NodeStatus::Completed {
+                return;
+            }
+            if let Operation::Ask { backend } = &compiled.spec().operation {
+                contributing.push((
+                    backend.clone(),
+                    evidence
+                        .model
+                        .as_ref()
+                        .and_then(|model| model.response.as_ref())
+                        .map(|response| response.model.clone()),
+                ));
+            } else {
+                for input in compiled.spec().inputs.values() {
+                    calibration_sources(graph, trace, &source, input, visited, contributing);
+                }
+            }
+        }
+    }
+}
+fn check_calibration_identity(
+    path: &[String],
+    node: &CompiledNode,
+    ins: &Inputs,
+    graph: &Arc<CompiledGraph>,
+    trace: &Trace,
+) -> Result<()> {
+    let Value::CalibrationMap(map) = &ins
+        .get("map")
+        .ok_or_else(|| SaphoError::new(ErrorCode::MissingInput, "Calibration map absent"))?
+        .value
+    else {
+        return Err(SaphoError::new(
+            ErrorCode::TypeMismatch,
+            "Calibration map input differs",
+        ));
+    };
+    map.validate()?;
+    let mismatch = || {
+        SaphoError::new(
+            ErrorCode::ModelMismatch,
+            "Calibration source differs from fitted model",
+        )
+        .with_context("map_id", &map.map_id)
+        .with_context("node", path.join("/"))
+        .with_context("expected_binding", map.fit_binding.as_str())
+        .with_context("expected_model", &map.fit_actual_model)
+    };
+    let by_path = trace
+        .nodes
+        .iter()
+        .map(|node| (node.path.clone(), node))
+        .collect::<BTreeMap<_, _>>();
+    let mut visited = BTreeSet::new();
+    let mut contributing = Vec::new();
+    let value_binding = node.spec().inputs.get("value").ok_or_else(mismatch)?;
+    calibration_sources(
+        graph,
+        &by_path,
+        path,
+        value_binding,
+        &mut visited,
+        &mut contributing,
+    );
+    if contributing.len() != 1 {
+        return Err(mismatch().with_context("observed_count", contributing.len().to_string()));
+    }
+    let (binding, model) = &contributing[0];
+    if binding != &map.fit_binding || model.as_deref() != Some(map.fit_actual_model.as_str()) {
+        return Err(mismatch()
+            .with_context("observed_binding", binding.as_str())
+            .with_context("observed_model", model.as_deref().unwrap_or("<absent>")));
+    }
+    Ok(())
 }

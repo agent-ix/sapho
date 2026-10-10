@@ -1,0 +1,60 @@
+inputs:
+  raw:
+    kind: probability
+nodes:
+- id: calibrate
+  operation:
+    kind: calibrate
+  inputs:
+    value:
+      kind: input
+      name: raw
+      path: []
+    map:
+      kind: literal
+      value:
+        id: reference-map
+        value:
+          kind: calibration_map
+          value:
+            format: sapho-calibration-v1
+            dataset_id: reference
+            fit_cases_digest: dataset-development-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            fit_observation_digest: calibration-observations-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            split: development
+            fit_graph_semantic_identity: graph-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            raw_output: raw
+            fit_binding: reference_backend
+            fit_actual_model: reference-model
+            method: isotonic-pava-linear-v1
+            case_count: 20
+            knots:
+            - raw: 0.05
+              calibrated: 0.2
+            - raw: 0.95
+              calibrated: 0.8
+            map_id: calibration-v1:sha256:f82cf806a57a647c67e80094953057203774702a794aa51a7a137c54043f45f1
+        sources: []
+      value_type:
+        kind: calibration_map
+- id: convert
+  operation:
+    kind: calibrated_as_probability
+  inputs:
+    value:
+      kind: node
+      node: calibrate
+      port: result
+      path: []
+outputs:
+  fitted:
+    kind: node
+    node: calibrate
+    port: result
+    path: []
+  converted:
+    kind: node
+    node: convert
+    port: result
+    path: []
+subgraphs: {}

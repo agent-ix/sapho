@@ -92,6 +92,10 @@ unit_scalar!(
     "A model outcome probability; never an aggregate heuristic score."
 );
 unit_scalar!(
+    CalibratedProbability,
+    "A fitted probability, distinct from a raw model probability."
+);
+unit_scalar!(
     Degree,
     "A degree used by an explicitly configured heuristic operator."
 );
@@ -134,6 +138,10 @@ pub enum ValueType {
     Text,
     /// Model outcome probability.
     Probability,
+    /// Explicitly fitted probability.
+    CalibratedProbability,
+    /// Versioned fitted calibration map.
+    CalibrationMap,
     /// Heuristic degree.
     Degree,
     /// Explicit absence or a value of a declared type.
@@ -193,6 +201,8 @@ impl ValueType {
             | Self::Number
             | Self::Text
             | Self::Probability
+            | Self::CalibratedProbability
+            | Self::CalibrationMap
             | Self::Degree
             | Self::Questions
             | Self::Answers => Ok(()),
@@ -210,6 +220,8 @@ impl ValueType {
             | (Self::Number, Value::Number(_))
             | (Self::Text, Value::Text(_))
             | (Self::Probability, Value::Probability(_))
+            | (Self::CalibratedProbability, Value::CalibratedProbability(_))
+            | (Self::CalibrationMap, Value::CalibrationMap(_))
             | (Self::Degree, Value::Degree(_))
             | (Self::Questions, Value::Questions(_))
             | (Self::Answers, Value::Answers(_)) => Ok(()),
@@ -270,6 +282,10 @@ pub enum Value {
     Text(String),
     /// Model outcome probability.
     Probability(Probability),
+    /// Explicitly fitted probability.
+    CalibratedProbability(CalibratedProbability),
+    /// Versioned fitted map.
+    CalibrationMap(Box<crate::CalibrationMap>),
     /// Heuristic degree.
     Degree(Degree),
     /// Explicit absence or present value.
@@ -327,10 +343,12 @@ impl Value {
             }
             Self::Questions(q) => validate_questions(q),
             Self::Answers(a) => a.validate(),
+            Self::CalibrationMap(map) => map.validate(),
             Self::Boolean(_)
             | Self::Number(_)
             | Self::Text(_)
             | Self::Probability(_)
+            | Self::CalibratedProbability(_)
             | Self::Degree(_)
             | Self::Optional(None) => Ok(()),
         }
@@ -343,6 +361,11 @@ impl Value {
             Self::Number(v) => Ok(serde_json::json!(v)),
             Self::Text(v) => Ok(v.clone().into()),
             Self::Probability(v) => Ok(serde_json::json!(v.get())),
+            Self::CalibratedProbability(v) => Ok(serde_json::json!(v.get())),
+            Self::CalibrationMap(_) => Err(SaphoError::new(
+                ErrorCode::TypeMismatch,
+                "Calibration map is not model state",
+            )),
             Self::Degree(v) => Ok(serde_json::json!(v.get())),
             Self::Optional(None) => Ok(serde_json::Value::Null),
             Self::Optional(Some(v)) => v.to_plain_json(),

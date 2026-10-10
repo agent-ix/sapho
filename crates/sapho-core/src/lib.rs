@@ -22,6 +22,7 @@
 //! Register host code through [`PrimitiveRegistry`] and inference through
 //! [`BackendRegistry`]. [`validate_response`] returns [`Answers`] suitable for
 //! probability projection; reported confidence and heuristic degrees are separate.
+mod calibration;
 mod data;
 mod distribution;
 mod error;
@@ -30,6 +31,7 @@ mod model;
 mod ports;
 pub mod reason;
 mod value;
+pub use calibration::{CalibrationKnot, CalibrationMap, canonical_sha256};
 pub use data::{decode_json, decode_plain};
 pub use distribution::{DistributionAdjustment, DistributionPolicy};
 pub use error::{ErrorCode, Result, SaphoError};

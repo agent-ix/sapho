@@ -7,7 +7,9 @@ use sapho_core::{
     SaphoError, Signature, Value, check_ports, decode_plain,
 };
 use sapho_graph::{CompiledGraph, GraphSpec, Operation, compile};
-use sapho_runtime::{Engine, RunLimits, Trace};
+use sapho_runtime::{
+    Engine, ModelCallObservation, ObservationConfig, RunFailure, RunLimits, RunResult, Trace,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -149,11 +151,56 @@ pub struct RunReport {
     pub error: Option<SaphoError>,
     /// Explicit process outcome.
     pub exit: ExitStatus,
+    /// Successful checked calibration uses in this run; a name match is not weights identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calibration_identity: Vec<CalibrationIdentity>,
+}
+/// Reported-name match at one executed calibration node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CalibrationIdentity {
+    /// Versioned map identity.
+    pub map_id: String,
+    /// Node path, including Map item identity when present.
+    pub node: Vec<String>,
+    /// Contributing backend binding.
+    pub binding: BackendId,
+    /// Provider-reported actual model name.
+    pub actual_model: String,
+    /// Exact scope of the check; current responses provide no weights digest.
+    pub status: String,
+    /// Explicit absence of weights identity.
+    pub weights_identity: Option<String>,
+}
+fn calibration_identities(trace: &Trace) -> Vec<CalibrationIdentity> {
+    trace
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            if !matches!(node.operation, Operation::Calibrate)
+                || node.status != sapho_runtime::NodeStatus::Completed
+            {
+                return None;
+            }
+            let sapho_core::Value::CalibrationMap(map) = &node.inputs.get("map")?.value else {
+                return None;
+            };
+            Some(CalibrationIdentity {
+                map_id: map.map_id.clone(),
+                node: node.path.clone(),
+                binding: map.fit_binding.clone(),
+                actual_model: map.fit_actual_model.clone(),
+                status: "reported_name_match".into(),
+                weights_identity: None,
+            })
+        })
+        .collect()
 }
 /// Prepared executor for data-only or custom-host graphs; evaluation performs no file I/O.
 pub struct Runner {
     engine: Engine,
     inspection: Inspection,
+    calibration_checked: bool,
 }
 impl Runner {
     /// Compile and bind host implementations before evaluation.
@@ -167,7 +214,19 @@ impl Runner {
         Ok(Self {
             engine: Engine::new(graph, backends)?,
             inspection,
+            calibration_checked: false,
         })
+    }
+    /// Prepare the stock CLI boundary with calibration identity enforcement.
+    pub fn new_stock(
+        spec: &GraphSpec,
+        primitives: &PrimitiveRegistry,
+        backends: BackendRegistry,
+    ) -> Result<Self, CliError> {
+        let mut runner = Self::new(spec, primitives, backends)?;
+        runner.engine = runner.engine.with_calibration_identity_check();
+        runner.calibration_checked = true;
+        Ok(runner)
     }
     /// Borrow the prepared invocation contract without performing work.
     pub fn inspection(&self) -> &Inspection {
@@ -180,9 +239,39 @@ impl Runner {
         limits: RunLimits,
         fail_on: Option<&str>,
     ) -> RunReport {
-        match self.engine.run(inputs, limits).await {
+        Self::report(
+            self.engine.run(inputs, limits).await,
+            fail_on,
+            self.calibration_checked,
+        )
+    }
+    /// Execute with validated, opt-in model-call evidence outside the deterministic trace.
+    pub async fn run_observed(
+        &self,
+        inputs: &Inputs,
+        limits: RunLimits,
+        fail_on: Option<&str>,
+        config: &ObservationConfig,
+    ) -> Result<(RunReport, Vec<ModelCallObservation>), CliError> {
+        let (result, calls) = self.engine.run_observed(inputs, limits, config).await?;
+        Ok((
+            Self::report(result, fail_on, self.calibration_checked),
+            calls,
+        ))
+    }
+    fn report(
+        result: std::result::Result<RunResult, RunFailure>,
+        fail_on: Option<&str>,
+        calibration_checked: bool,
+    ) -> RunReport {
+        match result {
             Err(failure) => RunReport {
                 outputs: None,
+                calibration_identity: if calibration_checked {
+                    calibration_identities(&failure.trace)
+                } else {
+                    Vec::new()
+                },
                 trace: failure.trace,
                 error: Some(failure.error),
                 exit: ExitStatus::Refused,
@@ -207,6 +296,11 @@ impl Runner {
                 };
                 RunReport {
                     outputs: Some(result.outputs),
+                    calibration_identity: if calibration_checked {
+                        calibration_identities(&result.trace)
+                    } else {
+                        Vec::new()
+                    },
                     trace: result.trace,
                     error,
                     exit,

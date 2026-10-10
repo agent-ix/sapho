@@ -178,6 +178,13 @@ impl ArtifactWriter {
             path: path.into(),
         })
     }
+    /// Remove an exclusively claimed destination when evaluation refuses before persistence.
+    pub fn discard(self) -> Result<(), CliError> {
+        std::fs::remove_file(&self.path).map_err(|source| CliError::Io {
+            path: self.path.clone(),
+            source,
+        })
+    }
     /// Persist complete bounded bytes synchronously after evaluation.
     pub fn finish(mut self, bytes: &[u8], max_bytes: usize) -> Result<(), CliError> {
         if bytes.len() > max_bytes {

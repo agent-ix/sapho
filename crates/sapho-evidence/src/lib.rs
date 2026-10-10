@@ -17,7 +17,7 @@
 //! ```
 //!
 //! Supply actual per-case [`CaseOutcome`] values to [`measure`]. Boolean outputs
-//! use agreement; Probability outputs use Brier. Missing, unsupported and failed
+//! use agreement; Probability outputs use Brier, ECE and risk-coverage. Missing, unsupported and failed
 //! predictions retain explicit coverage. [`rank`] compares complete development
 //! candidates for one output; held-out evaluation remains a separate request.
 use sapho_core::{
@@ -26,6 +26,10 @@ use sapho_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+mod calibration;
+mod roster;
+pub use calibration::{FitAttribution, calibration_cases_digest, fit_calibration};
+pub use roster::*;
 
 /// Refusals distinguish dataset, coverage and candidate failures at this crate boundary.
 #[derive(Debug, thiserror::Error, Serialize)]
@@ -67,6 +71,15 @@ pub enum EvidenceError {
         /// Selected output.
         output: String,
     },
+    /// Roster mapping, attribution or observation mode is inconsistent.
+    #[error("Invalid roster evidence: {0}")]
+    InvalidRoster(String),
+    /// A risk-coverage threshold list is not finite, ordered or within the supported range.
+    #[error("Invalid risk-coverage thresholds")]
+    InvalidThresholds,
+    /// Fitting data, attribution or split is ineligible.
+    #[error("Invalid calibration evidence: {0}")]
+    InvalidCalibration(String),
 }
 /// Explicit development/held-out partition; tuning and exports always select development.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +91,7 @@ pub enum Split {
     HeldOut,
 }
 /// Who made a label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LabelKind {
     /// A model's answer.
@@ -202,6 +215,42 @@ pub struct Confusion {
     /// Predicted false, label true.
     pub false_negative: u32,
 }
+/// One count-weighted confidence decile of scored Probability predictions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CalibrationBucket {
+    /// Inclusive lower confidence bound.
+    pub lower: f64,
+    /// Upper confidence bound; inclusive only for the last bucket.
+    pub upper: f64,
+    /// Number of scored observations in this bucket.
+    pub count: u32,
+    /// Correct predicted labels in this bucket.
+    pub correct: u32,
+    /// Mean of actual confidence values, absent for an empty bucket.
+    pub mean_confidence: Option<f64>,
+    /// Correct fraction, absent for an empty bucket.
+    pub accuracy: Option<f64>,
+}
+/// Coverage and risk at one inclusive confidence threshold.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RiskCoverageRow {
+    /// Minimum accepted predicted-label confidence.
+    pub threshold: f64,
+    /// Scored predictions at or above the threshold.
+    pub answered: u32,
+    /// Correct predictions among answered predictions.
+    pub correct: u32,
+    /// All scored Probability predictions for this output.
+    pub total: u32,
+    /// Answered fraction of total.
+    pub coverage: f64,
+    /// Correct fraction of answered predictions, absent when none are answered.
+    pub accuracy: Option<f64>,
+    /// One minus accuracy, absent when none are answered.
+    pub risk: Option<f64>,
+}
 /// A metric has its own semantic type and explicit scored denominator.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -217,6 +266,23 @@ pub enum Metrics {
     Probability {
         /// Brier mean; absent with no scored cases.
         brier: Option<f64>,
+        /// Count-weighted predicted-label confidence decile error; absent with no scored cases.
+        ece: Option<f64>,
+        /// Ten confidence deciles, including empty ones.
+        calibration: Vec<CalibrationBucket>,
+        /// Inclusive confidence threshold rows; empty with no scored cases.
+        risk_coverage: Vec<RiskCoverageRow>,
+    },
+    /// Fitted probability metrics, separate from raw probability metrics.
+    CalibratedProbability {
+        /// Brier mean; absent with no scored cases.
+        brier: Option<f64>,
+        /// Shared predicted-label ECE; absent with no scored cases.
+        ece: Option<f64>,
+        /// Shared confidence deciles.
+        calibration: Vec<CalibrationBucket>,
+        /// Shared inclusive confidence threshold rows.
+        risk_coverage: Vec<RiskCoverageRow>,
     },
     /// A missing or unsupported output cannot be scored as a probability.
     Unsupported {
@@ -283,6 +349,9 @@ pub struct Measurement {
     pub self_source: Vec<ItemId>,
     /// Separate coverage and metrics for each output.
     pub outputs: BTreeMap<String, OutputMeasurement>,
+    /// The same score and coverage formulas on each declared label kind's cases.
+    #[serde(default)]
+    pub per_kind: BTreeMap<String, BTreeMap<LabelKind, OutputMeasurement>>,
     /// Observed values, labels and failures.
     pub predictions: Vec<Prediction>,
 }
@@ -302,6 +371,73 @@ pub fn measure(
     outcomes: &BTreeMap<ItemId, CaseOutcome>,
     max_cases: usize,
 ) -> Result<Measurement, EvidenceError> {
+    measure_with_thresholds(
+        dataset,
+        split,
+        schemas,
+        outcomes,
+        max_cases,
+        &DEFAULT_THRESHOLDS,
+    )
+}
+
+/// Default inclusive confidence thresholds for scored Probability predictions.
+pub const DEFAULT_THRESHOLDS: [f64; 6] = [0.5, 0.6, 0.7, 0.8, 0.9, 0.95];
+
+/// Score a selected split with a caller-chosen risk-coverage threshold list.
+pub fn measure_with_thresholds(
+    dataset: &Dataset,
+    split: Split,
+    schemas: &BTreeMap<String, ValueType>,
+    outcomes: &BTreeMap<ItemId, CaseOutcome>,
+    max_cases: usize,
+    thresholds: &[f64],
+) -> Result<Measurement, EvidenceError> {
+    if thresholds.is_empty()
+        || thresholds.len() > 32
+        || thresholds
+            .iter()
+            .any(|t| !t.is_finite() || !(0.5..=1.0).contains(t))
+        || thresholds.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(EvidenceError::InvalidThresholds);
+    }
+    let mut report = measure_inner(
+        dataset, split, schemas, outcomes, max_cases, None, thresholds,
+    )?;
+    let kinds = dataset
+        .selected(split)
+        .map(|case| case.label_provenance.kind)
+        .collect::<BTreeSet<_>>();
+    for kind in kinds {
+        let view = measure_inner(
+            dataset,
+            split,
+            schemas,
+            outcomes,
+            max_cases,
+            Some(kind),
+            thresholds,
+        )?;
+        for (output, measurement) in view.outputs {
+            report
+                .per_kind
+                .entry(output)
+                .or_default()
+                .insert(kind, measurement);
+        }
+    }
+    Ok(report)
+}
+fn measure_inner(
+    dataset: &Dataset,
+    split: Split,
+    schemas: &BTreeMap<String, ValueType>,
+    outcomes: &BTreeMap<ItemId, CaseOutcome>,
+    max_cases: usize,
+    selected_kind: Option<LabelKind>,
+    thresholds: &[f64],
+) -> Result<Measurement, EvidenceError> {
     dataset.validate(max_cases)?;
     for schema in schemas.values() {
         schema.validate()?;
@@ -312,10 +448,15 @@ pub fn measure(
         selected_cases: 0,
         self_source: Vec::new(),
         outputs: BTreeMap::new(),
+        per_kind: BTreeMap::new(),
         predictions: Vec::new(),
     };
     let mut squared_errors = BTreeMap::<String, f64>::new();
-    for case in dataset.selected(split) {
+    let mut observations = BTreeMap::<String, Vec<(f64, bool)>>::new();
+    for case in dataset
+        .selected(split)
+        .filter(|case| selected_kind.is_none_or(|kind| case.label_provenance.kind == kind))
+    {
         report.selected_cases += 1;
         let answering = match outcomes.get(&case.id) {
             Some(CaseOutcome::Completed { models, .. } | CaseOutcome::Failed { models, .. }) => {
@@ -342,7 +483,18 @@ pub fn measure(
                             confusion: Confusion::default(),
                             agreement: None,
                         },
-                        Some(ValueType::Probability) => Metrics::Probability { brier: None },
+                        Some(ValueType::Probability) => Metrics::Probability {
+                            brier: None,
+                            ece: None,
+                            calibration: empty_buckets(),
+                            risk_coverage: Vec::new(),
+                        },
+                        Some(ValueType::CalibratedProbability) => Metrics::CalibratedProbability {
+                            brier: None,
+                            ece: None,
+                            calibration: empty_buckets(),
+                            risk_coverage: Vec::new(),
+                        },
                         other => Metrics::Unsupported {
                             value_type: other.cloned(),
                         },
@@ -386,14 +538,37 @@ pub fn measure(
                             }
                             (Metrics::Probability { .. }, Value::Probability(value)) => {
                                 counts.scored += 1;
-                                let delta = value.get() - if *label { 1.0 } else { 0.0 };
+                                let p = value.get();
+                                let delta = p - if *label { 1.0 } else { 0.0 };
                                 *squared_errors.entry(name.clone()).or_default() += delta * delta;
+                                observations
+                                    .entry(name.clone())
+                                    .or_default()
+                                    .push((p.max(1.0 - p), (p >= 0.5) == *label));
+                            }
+                            (
+                                Metrics::CalibratedProbability { .. },
+                                Value::CalibratedProbability(value),
+                            ) => {
+                                counts.scored += 1;
+                                let p = value.get();
+                                let delta = p - if *label { 1.0 } else { 0.0 };
+                                *squared_errors.entry(name.clone()).or_default() += delta * delta;
+                                observations
+                                    .entry(name.clone())
+                                    .or_default()
+                                    .push((p.max(1.0 - p), (p >= 0.5) == *label));
                             }
                             (Metrics::Unsupported { .. }, _) => {
                                 counts.unscored += 1;
                                 prediction.unscored = Some(UnscoredReason::UnsupportedType);
                             }
-                            (Metrics::Boolean { .. } | Metrics::Probability { .. }, _) => {
+                            (
+                                Metrics::Boolean { .. }
+                                | Metrics::Probability { .. }
+                                | Metrics::CalibratedProbability { .. },
+                                _,
+                            ) => {
                                 counts.unscored += 1;
                                 prediction.unscored = Some(UnscoredReason::TypeMismatch);
                             }
@@ -404,7 +579,9 @@ pub fn measure(
                     }
                 }
             }
-            report.predictions.push(prediction);
+            if selected_kind.is_none() {
+                report.predictions.push(prediction);
+            }
         }
     }
     for (name, counts) in &mut report.outputs {
@@ -421,15 +598,94 @@ pub fn measure(
                         / f64::from(counts.scored),
                 )
             }
-            Metrics::Probability { brier } => {
+            Metrics::Probability {
+                brier,
+                ece,
+                calibration,
+                risk_coverage,
+            }
+            | Metrics::CalibratedProbability {
+                brier,
+                ece,
+                calibration,
+                risk_coverage,
+            } => {
                 *brier = squared_errors
                     .get(name)
-                    .map(|sum| sum / f64::from(counts.scored))
+                    .map(|sum| sum / f64::from(counts.scored));
+                if let Some(rows) = observations.get(name) {
+                    let (error, buckets) = calibration_summary(rows);
+                    *ece = Some(error);
+                    *calibration = buckets;
+                    *risk_coverage = coverage_rows(rows, thresholds);
+                }
             }
             Metrics::Unsupported { .. } => {}
         }
     }
     Ok(report)
+}
+
+fn empty_buckets() -> Vec<CalibrationBucket> {
+    (0..10)
+        .map(|index| CalibrationBucket {
+            lower: f64::from(index) / 10.0,
+            upper: f64::from(index + 1) / 10.0,
+            count: 0,
+            correct: 0,
+            mean_confidence: None,
+            accuracy: None,
+        })
+        .collect()
+}
+
+fn calibration_summary(rows: &[(f64, bool)]) -> (f64, Vec<CalibrationBucket>) {
+    let mut buckets = empty_buckets();
+    let mut confidence_sums = [0.0; 10];
+    for &(confidence, correct) in rows {
+        let index = ((confidence * 10.0).floor() as usize).min(9);
+        let bucket = &mut buckets[index];
+        bucket.count += 1;
+        bucket.correct += u32::from(correct);
+        confidence_sums[index] += confidence;
+    }
+    let mut ece = 0.0;
+    let total = u32::try_from(rows.len()).unwrap_or(u32::MAX);
+    for (bucket, sum) in buckets.iter_mut().zip(confidence_sums) {
+        if bucket.count > 0 {
+            let mean = sum / f64::from(bucket.count);
+            let accuracy = f64::from(bucket.correct) / f64::from(bucket.count);
+            bucket.mean_confidence = Some(mean);
+            bucket.accuracy = Some(accuracy);
+            ece += f64::from(bucket.count) / f64::from(total) * (mean - accuracy).abs();
+        }
+    }
+    (ece, buckets)
+}
+
+fn coverage_rows(rows: &[(f64, bool)], thresholds: &[f64]) -> Vec<RiskCoverageRow> {
+    let total = u32::try_from(rows.len()).unwrap_or(u32::MAX);
+    thresholds
+        .iter()
+        .map(|&threshold| {
+            let (answered, correct) = rows.iter().filter(|(c, _)| *c >= threshold).fold(
+                (0u32, 0u32),
+                |(answered, correct), (_, is_correct)| {
+                    (answered + 1, correct + u32::from(*is_correct))
+                },
+            );
+            let accuracy = (answered > 0).then(|| f64::from(correct) / f64::from(answered));
+            RiskCoverageRow {
+                threshold,
+                answered,
+                correct,
+                total,
+                coverage: f64::from(answered) / f64::from(total),
+                accuracy,
+                risk: accuracy.map(|value| 1.0 - value),
+            }
+        })
+        .collect()
 }
 /// Metric selected explicitly for candidate comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -495,7 +751,8 @@ pub fn rank(
         }
         let score = match (&o.metrics, metric) {
             (Metrics::Boolean { agreement, .. }, Metric::Agreement) => *agreement,
-            (Metrics::Probability { brier }, Metric::Brier) => *brier,
+            (Metrics::Probability { brier, .. }, Metric::Brier) => *brier,
+            (Metrics::CalibratedProbability { brier, .. }, Metric::Brier) => *brier,
             _ => None,
         };
         if let Some(score) = score.filter(|v| v.is_finite()) {

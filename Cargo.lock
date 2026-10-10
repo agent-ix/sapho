@@ -2229,6 +2229,7 @@ dependencies = [
  "jsonschema",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tokio",
 ]
@@ -2253,6 +2254,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "serde_stacker",
+ "sha2",
  "tokio",
 ]
 

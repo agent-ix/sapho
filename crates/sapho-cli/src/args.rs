@@ -52,6 +52,12 @@ pub(crate) enum Command {
     },
     /// Measure agreement against supplied labelled cases on an explicit split.
     Measure(MeasureArgs),
+    /// Fit one development-only calibration literal from raw Probability outcomes.
+    FitCalibration(FitCalibrationArgs),
+    /// Measure an attributable per-model roster for one Dataset split.
+    Roster(RosterArgs),
+    /// Project measured roster entries to an ordinary typed graph literal.
+    RosterLiteral(RosterLiteralArgs),
     /// Compare explicit candidates using development labels only.
     Tune(TuneArgs),
     /// Export curated development supervision; performs no inference or training.
@@ -177,6 +183,55 @@ pub(crate) struct MeasureArgs {
     pub(crate) options: MeasurementOptions,
     #[arg(long, value_enum)]
     pub(crate) split: Partition,
+}
+#[derive(Args)]
+pub(crate) struct FitCalibrationArgs {
+    #[command(flatten)]
+    pub(crate) graph: GraphArgs,
+    #[arg(long)]
+    pub(crate) dataset: PathBuf,
+    #[arg(long)]
+    pub(crate) bindings: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) replay: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) output_name: String,
+    #[arg(long)]
+    pub(crate) binding: String,
+    #[arg(long, value_enum)]
+    pub(crate) split: Partition,
+    #[arg(long)]
+    pub(crate) output: PathBuf,
+    #[arg(long, default_value_t = 1024)]
+    pub(crate) max_cases: usize,
+    #[command(flatten)]
+    pub(crate) limits: Limits,
+}
+#[derive(Args)]
+pub(crate) struct RosterArgs {
+    #[command(flatten)]
+    pub(crate) graph: GraphArgs,
+    #[command(flatten)]
+    pub(crate) options: MeasurementOptions,
+    #[arg(long, value_enum)]
+    pub(crate) split: Partition,
+    /// JSON or YAML map of output names to binding and question kind.
+    #[arg(long)]
+    pub(crate) mapping: PathBuf,
+}
+#[derive(Args)]
+pub(crate) struct RosterLiteralArgs {
+    /// Existing versioned roster JSON.
+    #[arg(long)]
+    pub(crate) roster: PathBuf,
+    /// JSON array of field, binding and actual-model selections.
+    #[arg(long)]
+    pub(crate) selection: PathBuf,
+    /// New exclusive graph literal JSON destination.
+    #[arg(long)]
+    pub(crate) output: PathBuf,
+    #[arg(long, default_value_t = 8 * 1_048_576)]
+    pub(crate) max_artifact_bytes: usize,
 }
 #[derive(Clone, Copy, ValueEnum)]
 pub(crate) enum Metric {
