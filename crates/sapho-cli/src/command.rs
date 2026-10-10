@@ -551,35 +551,46 @@ fn roster_command(args: RosterArgs) -> Result<Response, CliError> {
     };
     config.validate()?;
     let destination = claim(Some(output_path))?;
-    let mut cases = BTreeMap::new();
-    for case in data.selected(selected) {
-        let (report, calls) = runtime.block_on(runner.run_observed(
-            &case.inputs,
-            options.limits.run(),
-            None,
-            &config,
-        ))?;
-        let lineage = contributing_responses(&graph.definition, &report.trace);
-        cases.insert(
-            case.id.clone(),
-            RosterCase {
-                outcome: outcome(&report),
-                calls: calls.into_iter().map(roster_call).collect(),
-                lineage,
-            },
-        );
-    }
-    let identity = graph_semantic_identity(&graph.definition)?;
-    let report = roster(
-        &data,
-        selected,
-        &identity,
-        env!("CARGO_PKG_VERSION"),
-        &runner.inspection().signature.outputs,
-        &mappings,
-        &cases,
-        options.max_cases,
-    )?;
+    let report = (|| -> Result<Roster, CliError> {
+        let mut cases = BTreeMap::new();
+        for case in data.selected(selected) {
+            let (report, calls) = runtime.block_on(runner.run_observed(
+                &case.inputs,
+                options.limits.run(),
+                None,
+                &config,
+            ))?;
+            let lineage = contributing_responses(&graph.definition, &report.trace);
+            cases.insert(
+                case.id.clone(),
+                RosterCase {
+                    outcome: outcome(&report),
+                    calls: calls.into_iter().map(roster_call).collect(),
+                    lineage,
+                },
+            );
+        }
+        let identity = graph_semantic_identity(&graph.definition)?;
+        Ok(roster(
+            &data,
+            selected,
+            &identity,
+            env!("CARGO_PKG_VERSION"),
+            &runner.inspection().signature.outputs,
+            &mappings,
+            &cases,
+            options.max_cases,
+        )?)
+    })();
+    let report = match report {
+        Ok(report) => report,
+        Err(error) => {
+            if let Some(destination) = destination {
+                destination.discard()?;
+            }
+            return Err(error);
+        }
+    };
     respond(
         report,
         ExitStatus::Completed,
