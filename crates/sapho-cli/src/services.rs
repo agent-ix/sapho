@@ -102,7 +102,12 @@ impl ServiceConfig {
     /// Parse and validate a bounded JSON host file without constructing transports.
     pub fn from_json(bytes: &[u8]) -> Result<Self, CliError> {
         let config: Self = decode_json(bytes, MAX_SERVICE_CONFIG_BYTES)?;
-        for (id, entry) in &config.services {
+        config.validate()?;
+        Ok(config)
+    }
+    /// Validate constructed or deserialized entries before live preparation.
+    pub fn validate(&self) -> Result<(), CliError> {
+        for (id, entry) in &self.services {
             id.validate()
                 .map_err(|_| config_error(id, "Invalid service binding ID"))?;
             if entry.base_url.trim().is_empty() {
@@ -116,7 +121,7 @@ impl ServiceConfig {
                 return Err(config_error(id, "Invalid service limits"));
             }
         }
-        Ok(config)
+        Ok(())
     }
     /// Select exactly one entry for a required named binding.
     pub fn required(&self, id: &BackendId) -> Result<&ServiceEntry, CliError> {

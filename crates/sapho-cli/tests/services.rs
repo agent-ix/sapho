@@ -36,6 +36,7 @@ fn graph(backends: &[&str]) -> String {
 fn fake(
     model: &'static str,
     value: f64,
+    delay_ms: u64,
 ) -> (String, Arc<Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
@@ -80,7 +81,10 @@ fn fake(
             body.len()
         )
         .unwrap();
-        stream.write_all(&body).unwrap();
+        if delay_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+        let _ = stream.write_all(&body);
     });
     (endpoint, captures, task)
 }
@@ -109,7 +113,7 @@ fn two_named_ports_record_and_replay_offline_and_third_name_needs_only_files() {
         let mut captures = Vec::new();
         let mut tasks = Vec::new();
         for (index, model) in models.iter().take(count).enumerate() {
-            let (endpoint, capture, task) = fake(model, 0.6 + index as f64 * 0.1);
+            let (endpoint, capture, task) = fake(model, 0.6 + index as f64 * 0.1, 0);
             endpoints.push(endpoint);
             captures.push(capture);
             tasks.push(task);
@@ -134,18 +138,36 @@ fn two_named_ports_record_and_replay_offline_and_third_name_needs_only_files() {
         )
         .unwrap();
         let recording = root.path().join("recording.json");
-        let recorded = invoke(&[
-            "record",
-            path(&graph_path),
-            "--input",
-            path(&input),
-            "--bindings",
-            path(&bindings),
-            "--service-config",
-            path(&services),
-            "--recording",
-            path(&recording),
-        ]);
+        let recorded = if count == 3 {
+            Command::new(env!("CARGO_BIN_EXE_sapho"))
+                .env_clear()
+                .env("SAPHO_SERVICE_CONFIG", &services)
+                .args([
+                    "record",
+                    path(&graph_path),
+                    "--input",
+                    path(&input),
+                    "--bindings",
+                    path(&bindings),
+                    "--recording",
+                    path(&recording),
+                ])
+                .output()
+                .unwrap()
+        } else {
+            invoke(&[
+                "record",
+                path(&graph_path),
+                "--input",
+                path(&input),
+                "--bindings",
+                path(&bindings),
+                "--service-config",
+                path(&services),
+                "--recording",
+                path(&recording),
+            ])
+        };
         assert!(
             recorded.status.success(),
             "{}",
@@ -201,19 +223,23 @@ fn two_named_ports_record_and_replay_offline_and_third_name_needs_only_files() {
         assert_eq!(original["outputs"], replay["outputs"]);
         let changed_graph = root.path().join("changed.yaml");
         std::fs::write(&changed_graph, graph(&["different"])).unwrap();
+        let changed_bindings = root.path().join("changed-bindings.yaml");
+        std::fs::write(&changed_bindings, format!("{}different: {{provider: systemone, model: model-a, distribution_policy: {{kind: strict}}}}\n", std::fs::read_to_string(&bindings).unwrap())).unwrap();
         let miss = invoke(&[
             "replay",
             path(&changed_graph),
             "--input",
             path(&input),
             "--bindings",
-            path(&bindings),
+            path(&changed_bindings),
             "--service-config",
             path(&services),
             "--recording",
             path(&recording),
         ]);
-        assert!(!miss.status.success());
+        assert_eq!(miss.status.code(), Some(2));
+        let missed: serde_json::Value = serde_json::from_slice(&miss.stdout).unwrap();
+        assert_eq!(missed["error"]["code"], "replay_miss");
     }
 }
 
@@ -376,4 +402,123 @@ fn generic_bindings_require_model_and_reject_provider_fields() {
             "{field}"
         );
     }
+}
+
+/// Trace: FR-072-AC-5, IT-013-SC-05
+#[cfg(feature = "clm")]
+#[test]
+fn service_overrides_bound_response_and_deadline_without_changing_peer() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("input.json");
+    std::fs::write(&input, br#"{"text":"synthetic"}"#).unwrap();
+    let bindings = root.path().join("bindings.yaml");
+    std::fs::write(&bindings, "fast_a: {provider: systemone, model: model-a, distribution_policy: {kind: strict}}\nfast_b: {provider: systemone, model: model-b, distribution_policy: {kind: strict}}\n").unwrap();
+    let services = root.path().join("services.json");
+    let graph_a = root.path().join("a.yaml");
+    let graph_b = root.path().join("b.yaml");
+    std::fs::write(&graph_a, graph(&["fast_a"])).unwrap();
+    std::fs::write(&graph_b, graph(&["fast_b"])).unwrap();
+    let (endpoint_a, _, task_a) = fake("model-a", 0.6, 0);
+    let (endpoint_b, _, task_b) = fake("model-b", 0.7, 0);
+    std::fs::write(&services, serde_json::to_vec(&serde_json::json!({"services":{
+        "fast_a":{"base_url":endpoint_a,"limits":{"timeout_ms":30000,"request_bytes":1048576,"response_bytes":1,"in_flight":1}},
+        "fast_b":{"base_url":endpoint_b}
+    }})).unwrap()).unwrap();
+    let run = |graph_path: &Path| {
+        invoke(&[
+            "run",
+            path(graph_path),
+            "--input",
+            path(&input),
+            "--bindings",
+            path(&bindings),
+            "--service-config",
+            path(&services),
+        ])
+    };
+    let request_limited = root.path().join("request-limited.json");
+    std::fs::write(&request_limited, serde_json::to_vec(&serde_json::json!({"services":{
+        "fast_a":{"base_url":"http://127.0.0.1:1","limits":{"timeout_ms":30000,"request_bytes":1,"response_bytes":8388608,"in_flight":1}}
+    }})).unwrap()).unwrap();
+    let no_send = invoke(&[
+        "run",
+        path(&graph_a),
+        "--input",
+        path(&input),
+        "--bindings",
+        path(&bindings),
+        "--service-config",
+        path(&request_limited),
+    ]);
+    assert_eq!(no_send.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&no_send.stdout).unwrap();
+    assert_eq!(report["error"]["code"], "limit_exceeded");
+    let refused = run(&graph_a);
+    task_a.join().unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&refused.stdout).unwrap();
+    assert_eq!(report["error"]["code"], "limit_exceeded");
+    let completed = run(&graph_b);
+    task_b.join().unwrap();
+    assert!(
+        completed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&completed.stdout)
+    );
+    let (endpoint_a, _, task_a) = fake("model-a", 0.6, 80);
+    let (endpoint_b, _, task_b) = fake("model-b", 0.7, 0);
+    std::fs::write(&services, serde_json::to_vec(&serde_json::json!({"services":{
+        "fast_a":{"base_url":endpoint_a,"limits":{"timeout_ms":1,"request_bytes":1048576,"response_bytes":8388608,"in_flight":1}},
+        "fast_b":{"base_url":endpoint_b}
+    }})).unwrap()).unwrap();
+    let refused = run(&graph_a);
+    task_a.join().unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&refused.stdout).unwrap();
+    assert_eq!(report["error"]["code"], "deadline_exceeded");
+    let completed = run(&graph_b);
+    task_b.join().unwrap();
+    assert!(
+        completed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&completed.stdout)
+    );
+}
+
+/// Trace: FR-072-AC-7, IT-013-SC-04
+#[test]
+fn manually_constructed_service_limits_cannot_bypass_host_maxima() {
+    let bindings = sapho_graph::parse_config::<sapho_cli::Bindings>(
+        "fast_a: {provider: systemone, model: m, distribution_policy: {kind: strict}}",
+        sapho_graph::GraphFormat::Yaml,
+    )
+    .unwrap();
+    let store = Store {
+        calls: Mutex::new(Vec::new()),
+    };
+    let config = ServiceConfig {
+        services: std::collections::BTreeMap::from([(
+            BackendId::new("fast_a").unwrap(),
+            sapho_cli::ServiceEntry {
+                base_url: "http://127.0.0.1:1".into(),
+                credential_key: None,
+                limits: Some(sapho_cli::ServiceLimits {
+                    timeout_ms: 30_001,
+                    request_bytes: 1,
+                    response_bytes: 1,
+                    in_flight: 1,
+                }),
+            },
+        )]),
+    };
+    assert!(
+        live_bindings_with_services(
+            &[BackendId::new("fast_a").unwrap()],
+            &bindings,
+            &config,
+            &SecretStore::new(&store)
+        )
+        .is_err()
+    );
+    assert!(store.calls.lock().unwrap().is_empty());
 }

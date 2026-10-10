@@ -10,6 +10,9 @@ use std::{path::PathBuf, time::Duration};
 const BINDINGS_HELP: &str = "\
 Bindings (--bindings FILE): one entry per graph backend, with provider jev, clm, systemone or ollama.
 Each entry takes model, expected_model and distribution_policy.
+systemone requires an explicit model and a separate JSON host file selected with
+--service-config FILE or SAPHO_SERVICE_CONFIG (file path only). Each required binding
+has its own base_url, optional OS-store credential_key and bounded limits.
 The ollama provider (a build with the ollama feature) also takes think (default false),
 num_ctx (default 32768), num_predict (default 512) and timeout_seconds (default 600).
 It needs no credential. The server URL is read from OLLAMA_BASE_URL only (default
