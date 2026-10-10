@@ -32,6 +32,7 @@ Owning crate: `sapho-runtime`. Internal prerequisites: core, graph. See the [wor
 
 - [FR-030: Assemble records from graph values](functional/FR-030.md)
 - [FR-031: Assemble ordered identified lists](functional/FR-031.md)
+- [FR-076: Execute and score repeated ask samples](functional/FR-076.md)
 
 ## References
 
