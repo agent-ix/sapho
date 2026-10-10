@@ -820,12 +820,50 @@ fn calibration_sources(
             let Some(map) = compiled_at_path(graph, map_path) else {
                 return;
             };
-            let parent_port = if name == "item" {
-                "items"
-            } else {
-                name.as_str()
-            };
-            if let Some(parent_binding) = map.spec().inputs.get(parent_port) {
+            if name == "item" {
+                let Some(item_id) = scope.last() else {
+                    return;
+                };
+                let Some(Value::List(items)) = trace
+                    .get(map_path)
+                    .and_then(|node| node.inputs.get("items"))
+                    .map(|datum| &datum.value)
+                else {
+                    return;
+                };
+                let Some(position) = items.iter().position(|datum| datum.id.as_str() == item_id)
+                else {
+                    return;
+                };
+                let Some(Binding::Node {
+                    node: list_id,
+                    path: projection,
+                    ..
+                }) = map.spec().inputs.get("items")
+                else {
+                    return;
+                };
+                if !projection.is_empty() {
+                    return;
+                }
+                let mut list_path = map_path[..map_path.len() - 1].to_vec();
+                list_path.push(list_id.to_string());
+                let Some(list) = compiled_at_path(graph, &list_path) else {
+                    return;
+                };
+                let Operation::List { order, .. } = &list.spec().operation else {
+                    return;
+                };
+                let Some(selected) = order
+                    .get(position)
+                    .and_then(|port| list.spec().inputs.get(port))
+                else {
+                    return;
+                };
+                calibration_sources(graph, trace, &list_path, selected, visited, contributing);
+                return;
+            }
+            if let Some(parent_binding) = map.spec().inputs.get(name) {
                 calibration_sources(
                     graph,
                     trace,

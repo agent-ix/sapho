@@ -8,7 +8,7 @@ use sapho_core::{
     ModelResponse, NamedQuestion, NodeId, PrimitiveRegistry, Probability, Question, Result,
     SourceId, SourceRef, Value, ValueType,
 };
-use sapho_graph::{Binding, Comparator, GraphSpec, NodeSpec, Operation, compile};
+use sapho_graph::{Binding, Comparator, GraphBody, GraphSpec, NodeSpec, Operation, compile};
 use sapho_runtime::{Engine, NodeStatus, RunLimits};
 use std::{
     collections::BTreeMap,
@@ -293,4 +293,149 @@ async fn stale_model_refuses_before_guarded_ask_even_without_public_calibrated_o
                 && n.status == NodeStatus::Completed
                 && n.model.as_ref().and_then(|m| m.response.as_ref()).is_some())
     );
+}
+
+/// Trace: FR-084-AC-6, IT-017-SC-08
+#[tokio::test]
+async fn mapped_item_uses_only_its_own_ask_response() {
+    let question = NamedQuestion {
+        id: "q".into(),
+        question: Question::Boolean {
+            instructions: "Decide".into(),
+            yes: "Yes".into(),
+            no: "No".into(),
+        },
+    };
+    let mut nodes = vec![node(
+        "questions",
+        Operation::Questions {
+            questions: vec![question],
+        },
+        BTreeMap::new(),
+        None,
+    )];
+    let mut registry = BackendRegistry::default();
+    let mut backends = Vec::new();
+    for (suffix, model) in [("a", "model-a"), ("b", "model-b")] {
+        let backend = Arc::new(Scripted {
+            name: model,
+            calls: AtomicUsize::new(0),
+        });
+        registry
+            .register(
+                BackendId::new(format!("fast_{suffix}")).unwrap(),
+                BackendBinding {
+                    backend: backend.clone(),
+                    model: "requested".into(),
+                    expected_model: None,
+                    distribution_policy: DistributionPolicy::Strict {},
+                },
+            )
+            .unwrap();
+        backends.push(backend);
+        nodes.push(node(
+            &format!("ask_{suffix}"),
+            Operation::Ask {
+                backend: BackendId::new(format!("fast_{suffix}")).unwrap(),
+            },
+            BTreeMap::from([
+                (
+                    "state".into(),
+                    literal(
+                        Value::Record(BTreeMap::new()),
+                        ValueType::Record {
+                            fields: BTreeMap::new(),
+                        },
+                    ),
+                ),
+                ("questions".into(), from("questions", "result")),
+            ]),
+            None,
+        ));
+        nodes.push(node(
+            &format!("raw_{suffix}"),
+            Operation::Probability {
+                question: "q".into(),
+                labels: vec!["true".into()],
+            },
+            BTreeMap::from([("answers".into(), from(&format!("ask_{suffix}"), "answers"))]),
+            None,
+        ));
+    }
+    nodes.push(node(
+        "list",
+        Operation::List {
+            item_type: ValueType::Probability,
+            order: vec!["first".into(), "second".into()],
+        },
+        BTreeMap::from([
+            ("first".into(), from("raw_a", "result")),
+            ("second".into(), from("raw_b", "result")),
+        ]),
+        None,
+    ));
+    nodes.push(node(
+        "map",
+        Operation::Map {
+            graph: "each".into(),
+        },
+        BTreeMap::from([("items".into(), from("list", "result"))]),
+        None,
+    ));
+    let child = GraphBody {
+        inputs: BTreeMap::from([("item".into(), ValueType::Probability)]),
+        nodes: vec![node(
+            "calibrate",
+            Operation::Calibrate,
+            BTreeMap::from([
+                (
+                    "value".into(),
+                    Binding::Input {
+                        name: "item".into(),
+                        path: Vec::new(),
+                    },
+                ),
+                (
+                    "map".into(),
+                    literal(
+                        Value::CalibrationMap(Box::new(map())),
+                        ValueType::CalibrationMap,
+                    ),
+                ),
+            ]),
+            None,
+        )],
+        outputs: BTreeMap::from([("result".into(), from("calibrate", "result"))]),
+    };
+    let spec = GraphSpec {
+        inputs: BTreeMap::new(),
+        nodes,
+        outputs: BTreeMap::from([("mapped".into(), from("map", "result"))]),
+        subgraphs: BTreeMap::from([("each".into(), child)]),
+    };
+    let engine = Engine::new(
+        compile(&spec, &PrimitiveRegistry::default()).unwrap(),
+        registry,
+    )
+    .unwrap()
+    .with_calibration_identity_check();
+    let failure = engine
+        .run(&Inputs::new(), RunLimits::default())
+        .await
+        .unwrap_err();
+    assert_eq!(failure.error.code, ErrorCode::ModelMismatch);
+    assert!(failure.trace.nodes.iter().any(|node| {
+        node.path.len() == 4
+            && node.path[1] == "map"
+            && node.path[3] == "calibrate"
+            && node.status == NodeStatus::Completed
+    }));
+    assert!(failure.trace.nodes.iter().any(|node| {
+        node.path.len() == 4
+            && node.path[1] == "map"
+            && node.path[3] == "calibrate"
+            && node.status == NodeStatus::Failed
+    }));
+    assert_eq!(backends[0].calls.load(Ordering::SeqCst), 1);
+    assert_eq!(backends[1].calls.load(Ordering::SeqCst), 1);
 }
