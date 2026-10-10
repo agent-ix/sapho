@@ -49,6 +49,7 @@ fn score(id: &str, levels: usize) -> NamedQuestion {
 }
 fn ask(questions: Vec<NamedQuestion>, policy: DistributionPolicy) -> ModelRequest {
     ModelRequest {
+        sample_index: None,
         distribution_policy: policy,
         backend: BackendId::new("ollama").unwrap(),
         model: MODEL.into(),

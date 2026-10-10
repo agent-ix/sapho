@@ -7,6 +7,7 @@
 //! ```
 //! use sapho_core::{BackendId, DistributionPolicy, ModelRequest, Value};
 //! let request = ModelRequest {
+//!     sample_index: None,
 //!     backend: BackendId::new("judge")?, model: "clm-latest".into(), expected_model: None,
 //!     distribution_policy: DistributionPolicy::Strict {},
 //!     state: Value::Record(Default::default()), questions: vec![],

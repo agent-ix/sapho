@@ -1,0 +1,1 @@
+{"distribution_policy":{"kind":"strict"},"backend":"judge","model":"model-1","expected_model":"model-1","state":{"kind":"record","value":{}},"questions":[{"id":"q","question":{"kind":"boolean","instructions":"Does the declared property hold?","yes":"The property holds","no":"The property does not hold"}}]}

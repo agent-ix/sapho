@@ -397,6 +397,7 @@ fn conflicting_recorded_or_explicit_binding_metadata_is_refused_without_live_loo
         usage: None,
     };
     let request = ModelRequest {
+        sample_index: None,
         backend: BackendId::new("judge").unwrap(),
         model: "synthetic".into(),
         expected_model: None,
