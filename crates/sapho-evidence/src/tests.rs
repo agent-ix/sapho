@@ -159,11 +159,13 @@ fn roster_partitions_actual_models_and_projects_only_measured_fields() {
         let mut flag_lineage = vec![RosterContributor {
             binding: other.clone(),
             actual_model: Some("custom-model".into()),
+            question_kind: Some(RosterQuestionKind::Boolean),
         }];
         if index == 1 {
             flag_lineage.push(RosterContributor {
                 binding: judge.clone(),
                 actual_model: Some("B".into()),
+                question_kind: Some(RosterQuestionKind::Boolean),
             });
         }
         cases.insert(
@@ -179,6 +181,7 @@ fn roster_partitions_actual_models_and_projects_only_measured_fields() {
                                 vec![RosterContributor {
                                     binding: judge.clone(),
                                     actual_model: Some(name.into()),
+                                    question_kind: Some(RosterQuestionKind::Boolean),
                                 }]
                             })
                             .unwrap_or_default(),
@@ -203,6 +206,12 @@ fn roster_partitions_actual_models_and_projects_only_measured_fields() {
         10,
     )
     .unwrap();
+    let mut wrong_kind = mappings.clone();
+    wrong_kind.get_mut("result").unwrap().question_kind = RosterQuestionKind::Choice;
+    assert!(matches!(
+        roster(&data, Split::Development, &identity, "0.1", &outputs, &wrong_kind, &cases, 10),
+        Err(EvidenceError::InvalidRoster(message)) if message.contains("Question kind mismatch")
+    ));
     assert_eq!(report.entries.len(), 4);
     let a = report
         .entries

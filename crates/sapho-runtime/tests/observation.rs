@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use sapho_core::{
     Answer, BackendBinding, BackendId, BackendRegistry, Datum, DistributionPolicy, ErrorCode,
-    Inputs, ModelBackend, ModelRequest, ModelResponse, PrimitiveRegistry, Probability,
+    Inputs, ModelBackend, ModelRequest, ModelResponse, NodeId, PrimitiveRegistry, Probability,
     ProviderDescriptor, Result, SaphoError, Usage, Value, ValueType,
 };
 use sapho_graph::{Binding, GraphSpec, compile};
@@ -227,4 +227,81 @@ async fn observed_calls_keep_timing_and_descriptors_outside_trace() {
             .is_err()
     );
     assert_eq!(backend.calls.load(Ordering::SeqCst), before);
+}
+
+struct ParallelFailure {
+    slow: bool,
+    starts: Arc<AtomicUsize>,
+}
+#[async_trait]
+impl ModelBackend for ParallelFailure {
+    async fn infer(&self, _request: &ModelRequest) -> Result<ModelResponse> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(if self.slow { 200 } else { 20 })).await;
+        Err(SaphoError::new(
+            ErrorCode::BackendFailed,
+            "scripted parallel failure",
+        ))
+    }
+}
+
+/// Trace: FR-061-AC-2, FR-062-AC-1, IT-009-SC-01
+#[tokio::test]
+async fn parallel_failure_observes_started_sibling_with_live_duration() {
+    let mut spec = graph();
+    let mut sibling = spec
+        .nodes
+        .iter()
+        .find(|node| node.id.as_str() == "ask")
+        .unwrap()
+        .clone();
+    sibling.id = NodeId::new("other").unwrap();
+    sibling.operation = sapho_graph::Operation::Ask {
+        backend: BackendId::new("slow").unwrap(),
+    };
+    spec.nodes.push(sibling);
+    spec.outputs.insert(
+        "other".into(),
+        Binding::Node {
+            node: NodeId::new("other").unwrap(),
+            port: "answers".into(),
+            path: vec![],
+        },
+    );
+    let starts = Arc::new(AtomicUsize::new(0));
+    let mut registry = BackendRegistry::default();
+    for (name, slow) in [("judge", false), ("slow", true)] {
+        registry
+            .register(
+                BackendId::new(name).unwrap(),
+                BackendBinding {
+                    backend: Arc::new(ParallelFailure {
+                        slow,
+                        starts: starts.clone(),
+                    }),
+                    model: "requested".into(),
+                    expected_model: None,
+                    distribution_policy: DistributionPolicy::Strict {},
+                },
+            )
+            .unwrap();
+    }
+    let engine = Engine::new(
+        compile(&spec, &PrimitiveRegistry::default()).unwrap(),
+        registry,
+    )
+    .unwrap();
+    let (result, calls) = engine
+        .run_observed(
+            &input(),
+            RunLimits::default(),
+            &config(ObservationMode::Live),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.unwrap_err().error.code, ErrorCode::BackendFailed);
+    assert_eq!(starts.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.len(), 2);
+    assert!(calls.iter().all(|call| call.elapsed_micros.is_some()));
+    assert!(calls.iter().all(|call| call.actual_model.is_none()));
 }

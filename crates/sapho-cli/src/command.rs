@@ -9,13 +9,14 @@ use sapho_cli::{
 };
 use sapho_core::{
     BackendRegistry, ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry,
-    ProviderDescriptor, SaphoError, SourceId, ValueType, bounded_json, check_ports, decode_json,
-    measured_json_bytes,
+    ProviderDescriptor, Question, SaphoError, SourceId, ValueType, bounded_json, check_ports,
+    decode_json, measured_json_bytes,
 };
 use sapho_evidence::{
     Candidate, CaseOutcome, Dataset, EvidenceError, Measurement, Metric as ScoreMetric,
     RankedCandidate, Roster, RosterCall, RosterCase, RosterContributor, RosterMapping, RosterMode,
-    RosterSelection, Split, export_training, measure, project_roster_literal, rank, roster,
+    RosterQuestionKind, RosterSelection, Split, export_training, measure, project_roster_literal,
+    rank, roster,
 };
 use sapho_graph::{
     Binding, GraphFormat, GraphSpec, Operation, graph_semantic_identity, parse_config,
@@ -436,6 +437,17 @@ fn contributing_responses(
                         contributors.push(RosterContributor {
                             binding: backend.clone(),
                             actual_model: Some(response.model.clone()),
+                            question_kind: node.model.as_ref().and_then(|model| {
+                                let mut kinds = model.request.questions.iter().map(|named| {
+                                    match named.question {
+                                        Question::Boolean { .. } => RosterQuestionKind::Boolean,
+                                        Question::Choice { .. } => RosterQuestionKind::Choice,
+                                        Question::Score { .. } => RosterQuestionKind::Score,
+                                    }
+                                });
+                                let first = kinds.next()?;
+                                kinds.all(|kind| kind == first).then_some(first)
+                            }),
                         });
                     }
                 }
