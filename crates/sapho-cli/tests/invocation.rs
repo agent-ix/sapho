@@ -742,7 +742,7 @@ async fn shadow_is_observational_recordable_and_bounded_after_decision() {
             .count(),
         2
     );
-    let mut contaminated = spec;
+    let mut contaminated = spec.clone();
     let shadow = contaminated
         .nodes
         .iter_mut()
@@ -758,6 +758,45 @@ async fn shadow_is_observational_recordable_and_bounded_after_decision() {
     );
     let error = inspect(&contaminated, &PrimitiveRegistry::default()).unwrap_err();
     assert!(error.to_string().contains("Shadow input depends on an ask"));
+    let CliError::Engine(error) = error else {
+        panic!("typed compiler refusal")
+    };
+    assert_eq!(
+        error.context.get("shadow").map(String::as_str),
+        Some("shadow")
+    );
+    assert_eq!(
+        error.context.get("producer").map(String::as_str),
+        Some("ask")
+    );
+    let mut direct = spec;
+    direct
+        .nodes
+        .iter_mut()
+        .find(|n| n.id.as_str() == "shadow")
+        .unwrap()
+        .inputs
+        .insert(
+            "state".into(),
+            Binding::Node {
+                node: NodeId::new("ask2").unwrap(),
+                port: "answers".into(),
+                path: vec![],
+            },
+        );
+    let error = inspect(&direct, &PrimitiveRegistry::default()).unwrap_err();
+    let CliError::Engine(error) = error else {
+        panic!("typed compiler refusal")
+    };
+    assert_eq!(error.code, ErrorCode::TypeMismatch);
+    assert_eq!(
+        error.context.get("shadow").map(String::as_str),
+        Some("shadow")
+    );
+    assert_eq!(
+        error.context.get("producer").map(String::as_str),
+        Some("ask2")
+    );
 }
 struct FailingQuestions(Arc<AtomicUsize>);
 impl Primitive for FailingQuestions {
@@ -825,7 +864,7 @@ impl Primitive for SlowQuestions {
         _: &Inputs,
         _: &BTreeMap<String, Value>,
     ) -> Result<Inputs> {
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_secs(2));
         Err(SaphoError::new(ErrorCode::CodeFailed, "finished too late"))
     }
 }
@@ -1021,7 +1060,7 @@ async fn shadow_only_data_and_deadline_limits_preserve_completed_decision() {
         .unwrap();
     let slow = Runner::new(&spec, &slow_primitives, bindings).unwrap();
     let limits = RunLimits {
-        duration: std::time::Duration::from_millis(100),
+        duration: std::time::Duration::from_millis(500),
         ..RunLimits::default()
     };
     let timeout = slow.run(&input, limits, None).await;

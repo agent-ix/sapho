@@ -134,6 +134,37 @@ impl Compiler<'_> {
             }
             dependencies.insert(n.id.clone(), ds);
         }
+        // Report ask-derived shadow inputs before operand type checking. A direct
+        // Answers binding is also a type mismatch, but its security boundary
+        // needs the shadow and contributing producer in the refusal.
+        let by_id = body
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node))
+            .collect::<BTreeMap<_, _>>();
+        for shadow in &body.nodes {
+            if !matches!(shadow.operation, Operation::ShadowAsk { .. }) {
+                continue;
+            }
+            let mut ancestors = BTreeSet::new();
+            collect_dependencies(&shadow.id, &dependencies, &mut ancestors);
+            if let Some(producer) = dependencies[&shadow.id]
+                .iter()
+                .find(|id| matches!(by_id[*id].operation, Operation::Ask { .. }))
+                .or_else(|| {
+                    ancestors
+                        .iter()
+                        .find(|id| matches!(by_id[*id].operation, Operation::Ask { .. }))
+                })
+            {
+                return Err(SaphoError::new(
+                    ErrorCode::TypeMismatch,
+                    "Shadow input depends on an ask",
+                )
+                .with_context("shadow", shadow.id.to_string())
+                .with_context("producer", producer.to_string()));
+            }
+        }
         let mut done = BTreeSet::new();
         let mut types = BTreeMap::new();
         let mut stages = Vec::new();
