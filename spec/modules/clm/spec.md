@@ -31,6 +31,7 @@ Model downloads, installation, training, deployment, rank endpoint, temperature 
 - [StR-011](stakeholder/StR-011.md)
 - [FR-043](functional/FR-043.md): CLM request/response translation
 - [FR-044](functional/FR-044.md): bounded host-configured HTTP
+- [FR-047](functional/FR-047.md): verified official Decisions contract assessment, allocated to the separate [Decisions adapter](../decisions/spec.md)
 - [IT-006](integration/IT-006.md): transport/capture/replay
 
 ## References
