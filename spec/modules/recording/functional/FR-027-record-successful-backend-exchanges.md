@@ -39,6 +39,8 @@ The exact request includes DistributionPolicy. Export/load retains exact represe
 
 RecordingBackend decorates any ModelBackend. Record exact core request, raw core response (including distributions, actual model and, when the backend retained it, the raw exchange of request and response body text), and backend binding identity. The raw exchange never includes HTTP headers, URLs or credentials, and it counts toward the export byte ceiling like every other recorded byte. The check that refuses a conflicting response for an identical request compares everything except the raw exchange, because two live calls with identical requests always differ in body timestamps and duration counters; replay of a repeated request returns the first recorded exchange, raw exchange included. Recording has no automatic filesystem path. In-memory exchanges are exportable as a typed JSON recording; a caller can explicitly write to a new path using create_new. File existence/I/O failures are errors, not overwrite permission. Failed backend calls are not stored as successful exchanges; runtime traces retain their failure evidence. Concurrent completion may occur out of order; replay matching never depends on file order. Before exporting, validate request/response and impose a caller-supplied maximum serialized byte count.
 
+A successful shadow ask uses the same decorator, typed exchange and backend identity as an ordinary ask. Its observational role is graph/runtime metadata, not a change to ModelRequest or its replay fingerprint. A failed or skipped shadow adds no successful exchange; its status, reason and any raw evidence remain in the runtime trace. Existing recording JSON remains readable without a role field.
+
 ## Acceptance Criteria
 
 | ID | Criteria | Verification |
@@ -49,6 +51,7 @@ RecordingBackend decorates any ModelBackend. Record exact core request, raw core
 | FR-027-AC-4 | A recorded exchange whose response carries a raw exchange exports and reloads with the raw exchange unchanged; a byte ceiling that the recording fits without the raw exchange but not with it refuses the export. | Test (TC-027) |
 | FR-027-AC-5 | A recording made through the header-injecting loopback double of TC-006 contains neither its sentinel credential nor the header name. | Test (TC-027) |
 | FR-027-AC-6 | Two recorded exchanges with an identical request and responses that differ only in their raw exchanges are not a conflict, and replay of that request returns the first exchange's raw exchange byte for byte; two that differ in an answer value are refused as a conflict. | Test (TC-027) |
+| FR-027-AC-7 | A successful shadow call records an ordinary exact exchange; a failed or skipped shadow records no successful exchange, retains its failure in the runtime trace, and older recordings load unchanged. | Test |
 
 ## Dependencies
 
