@@ -177,7 +177,7 @@ def recipes():
     assert limited["error"]["code"] == "limit_exceeded"
     assert limited["trace"]["nodes"]
     selected = json.loads(invoke(["select", "files", "--root", "examples/graphs", "--include", "**/*.yaml", "--exclude", "**/review-conservative.yaml"]))
-    assert len(selected["items"]["value"]["value"]) == 7
+    assert len(selected["items"]["value"]["value"]) == 8
     file_run = json.loads(invoke(["run", "examples/graphs/files.yaml", "--typed-input"], data=json.dumps(selected)))
     assert file_run["outputs"]
     selected = json.loads(invoke(["select", "json", "--input", "examples/data/selection.json", "--pointer", "/records", "--schema", "examples/data/selection-schema.json"]))

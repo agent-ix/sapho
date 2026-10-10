@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Agent-IX
 //! Configuration vocabulary; no domain rules or inference execution.
 use sapho_core::{
-    BackendId, Datum, Degree, ErrorCode, NamedQuestion, NodeId, PrimitiveId, Result, SaphoError,
-    Value, ValueType,
+    BackendId, Datum, Degree, ErrorCode, NamedQuestion, NodeId, PrimitiveId, Probability, Result,
+    SaphoError, Value, ValueType,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -64,6 +64,33 @@ pub enum Reducer {
     /// Weight-normalized arithmetic mean.
     WeightedMean,
 }
+/// Projection of one shadow answer onto the mapped decision output type.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ShadowProjection {
+    /// Threshold projected true-outcome mass, including an exact tie.
+    Boolean {
+        /// Inclusive threshold in [0, 1].
+        threshold: Probability,
+    },
+    /// Retain projected true-outcome mass.
+    Probability,
+}
+/// A named observation from one shadow ask.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShadowObservation {
+    /// Unique name within the shadow ask.
+    pub name: String,
+    /// Existing public decision output to compare against.
+    pub output: String,
+    /// Question ID in the shadow request.
+    pub question: String,
+    /// Nonempty, distinct outcome labels whose mass is projected.
+    pub labels: Vec<String>,
+    /// Typed projection matching the mapped decision output.
+    pub projection: ShadowProjection,
+}
 /// Registered code, inference, collection and logic operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -94,6 +121,13 @@ pub enum Operation {
     Ask {
         /// Host-configured model binding.
         backend: BackendId,
+    },
+    /// Observational model call that cannot feed decision dataflow.
+    ShadowAsk {
+        /// Host-configured model binding.
+        backend: BackendId,
+        /// Values to compare with named decision outputs.
+        observations: Vec<ShadowObservation>,
     },
     /// Map a reusable subgraph over identified items.
     Map {

@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         exclude: vec!["**/review-conservative.yaml".into()],
     };
     let files = select_files(&root.join("examples/graphs"), &patterns, &limits, "items")?;
-    assert_eq!(count(&files, "items"), 7);
+    assert_eq!(count(&files, "items"), 8);
     let schema: ValueType = decode_json(
         include_bytes!("../../../examples/data/selection-schema.json"),
         1_048_576,
@@ -69,6 +69,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("Git patches: {}", count(&patches, "items"));
         }
     }
-    println!("selected YAML files=7; JSON records=2; missing member refused");
+    println!("selected YAML files=8; JSON records=2; missing member refused");
     Ok(())
 }

@@ -219,6 +219,27 @@ Boolean outputs report TP/TN/FP/FN and agreement with supplied labels. Probabili
 
 For model graphs, provide explicit `--bindings` for live evaluation or `--replay saved.json` for exact offline evaluation. Each case has its own declared RunLimits. Label provenance records your declaration of each label's kind (`model`, `agent`, `human` or `deterministic_check`), source and reference; Sapho does not certify that a label is true, and measure never scores a model against labels whose source is that same model.
 
+## Compare a shadow challenger
+
+[`shadow.yaml`](../examples/graphs/shadow.yaml) keeps the `result` decision and
+adds an observational `challenger` backend. Supply both backend names in
+bindings for a live `record`, then compare the same labelled cases offline:
+
+```sh
+sapho inspect examples/graphs/shadow.yaml
+sapho measure examples/graphs/shadow.yaml --dataset DATASET.json --replay RECORDING.json --split held_out --shadow shadow --shadow-output result --shadow-metric brier --shadow-min-scored 1 --shadow-margin 0.05
+```
+
+The normal `measurement` and command exit still describe the decision.
+`comparison` groups champion and challenger metrics by label provenance kind,
+shows each role's scored case IDs and self-source exclusions, and requires both
+roles to score the same IDs before reporting a win. Agreement favors higher
+values; Brier favors lower values. A zero-margin tie is not a win. ECE remains
+unavailable until the shared SAPHO-21 metric is implemented. A development
+comparison is marked `not_promotable`; held-out comparison is evaluation
+evidence, not a deployment action. Replay needs explicit binding metadata for
+a challenger with no successful exchange in the recording.
+
 ## Evaluate a large Dataset
 
 The case and byte ceilings are safety bounds, so their defaults stay at 1024 cases (`--max-cases`) and 8 MiB (`--max-artifact-bytes`, which also bounds the Dataset file). A Dataset of about fifteen thousand labelled cases is evaluated by raising both ceilings explicitly, so you choose the larger limit knowingly and nothing is silently cropped or retried. For a Dataset of up to 20,000 cases:

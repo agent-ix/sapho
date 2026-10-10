@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! In-memory execution evidence; this module never writes files (FR-017).
-use sapho_core::{Datum, Inputs, ModelRequest, ModelResponse, RawExchange, SaphoError};
+use sapho_core::{Datum, Inputs, ModelRequest, ModelResponse, NodeId, RawExchange, SaphoError};
 use sapho_graph::Operation;
 use serde::{Deserialize, Serialize};
 /// Terminal execution state of a node instance.
@@ -64,10 +64,32 @@ pub struct NodeTrace {
     /// Request and raw response for an ask node.
     pub model: Option<ModelEvidence>,
 }
+/// One projected shadow value or typed best-effort refusal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShadowTrace {
+    /// Observational ask node.
+    pub node: NodeId,
+    /// Observation name within that ask.
+    pub name: String,
+    /// Public decision output being compared.
+    pub output: String,
+    /// Completed, failed or skipped.
+    pub status: NodeStatus,
+    /// Projected value, when available.
+    pub value: Option<Datum>,
+    /// Typed refusal, when available.
+    pub error: Option<SaphoError>,
+    /// Exchange evidence of the shadow ask, when dispatched.
+    pub model: Option<ModelEvidence>,
+}
 /// Ordered deterministic content of a run, including a partial failed run.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Trace {
     /// Stable topological/declaration order; child paths follow their parent stage.
     pub nodes: Vec<NodeTrace>,
+    /// Projected shadow observations, absent from legacy no-shadow JSON.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadows: Vec<ShadowTrace>,
 }
