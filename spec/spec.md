@@ -69,7 +69,7 @@ The root `sapho` package is an embedding facade over these crates; it owns no in
 
 Each binding names a graph input, a node port, or a typed literal and may select a record-field path. Each operation declares its input/output port types. Guarded ports are Optional; consumers explicitly coalesce them. Model calls accept a Record state and ordered Questions and return validated Answers. Explicit ask nodes define batching; the executor never merges different ask nodes.
 
-A measured model roster is a separate, versioned evidence artifact. The host observes actual backend calls and optional live elapsed durations without adding timing to deterministic Trace or recording. A roster identifies its Dataset and split and profiles only outputs attributable to a declared binding. A generated selection of its entries can be embedded as an ordinary typed Record literal; that literal participates in the graph's canonical identity.
+A measured model roster is a separate, versioned evidence artifact. The host observes actual backend calls and optional live elapsed durations without adding timing to deterministic Trace or recording. A roster identifies its Dataset and split and profiles each output under its contributing response's binding and actual model identity. A generated selection of its entries can be embedded as an ordinary typed Record literal; that literal participates in the roster's versioned semantic graph identity. The existing path/raw-byte `GraphArtifact.source` identity remains unchanged in ordinary reports.
 
 ## Operation Catalog
 
