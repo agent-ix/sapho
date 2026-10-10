@@ -699,3 +699,34 @@ async fn declared_response_length_over_ceiling_refuses_before_collection() {
     );
     server.join().unwrap();
 }
+
+/// Trace: FR-088-AC-3, FR-089-AC-3
+#[tokio::test]
+async fn actual_model_mismatch_keeps_provider_text_only_in_private_raw_evidence() {
+    let mut response: Json = serde_json::from_slice(&message(answers())).unwrap();
+    response["model"] = json!("sentinel-private-provider-body");
+    let backend = ClaudeBackend::with_transport(
+        Fake::new(200, serde_json::to_vec(&response).unwrap()),
+        Limits::default(),
+    )
+    .unwrap();
+    let mut request = request();
+    request.expected_model = Some("expected-model".into());
+    let error = backend.infer(&request).await.expect_err("model mismatch");
+    assert_eq!(error.code, ErrorCode::ModelMismatch);
+    assert!(
+        error
+            .raw
+            .as_ref()
+            .unwrap()
+            .response
+            .contains("sentinel-private-provider-body")
+    );
+    assert!(!format!("{error:?}").contains("sentinel-private-provider-body"));
+    assert!(!format!("{error}").contains("sentinel-private-provider-body"));
+    assert!(
+        !serde_json::to_string(&error)
+            .unwrap()
+            .contains("sentinel-private-provider-body")
+    );
+}
