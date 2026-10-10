@@ -26,6 +26,7 @@ Owning component: `sapho-cli`. See the [workspace boundaries](../../spec.md).
 - [FR-035: Record and replay CLI evaluations](functional/FR-035.md)
 - [FR-079: Expand a declared literal grid into validated candidate graphs](functional/FR-079.md)
 - [FR-080: Publish sweep candidates without overwriting artifacts](functional/FR-080.md)
+- [FR-084: Write a development calibration literal from measured predictions](functional/FR-084.md)
 
 - [FR-045](functional/FR-045.md): host provider credentials
 - [FR-046](functional/FR-046.md): shared CLI foundations
