@@ -6,7 +6,7 @@ use sapho_core::{
     ItemId, ModelRequest, ModelResponse, NamedQuestion, NodeId, Probability, Question, SourceId,
     Value, ValueType,
 };
-use sapho_evidence::{Case, Dataset, LabelKind, LabelProvenance, Split};
+use sapho_evidence::{Case, Dataset, LabelKind, LabelProvenance, Split, calibration_cases_digest};
 use sapho_graph::{Binding, Comparator, GraphBody, GraphSpec, NodeSpec, Operation};
 use sapho_recording::{Exchange, Recording};
 use std::{collections::BTreeMap, path::Path, process::Command};
@@ -197,6 +197,55 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
         serde_json::to_vec(&data).unwrap(),
         serde_json::to_vec(&roundtrip).unwrap()
     );
+    assert_eq!(
+        map.fit_cases_digest,
+        calibration_cases_digest(&data, "raw_support", 1024).unwrap()
+    );
+    let formatted = root.path().join("dataset-formatted.json");
+    std::fs::write(&formatted, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+    let formatted_data: Dataset =
+        serde_json::from_slice(&std::fs::read(&formatted).unwrap()).unwrap();
+    assert_eq!(
+        map.fit_cases_digest,
+        calibration_cases_digest(&formatted_data, "raw_support", 1024).unwrap()
+    );
+    let mut changed_label = data.clone();
+    *changed_label.cases[0]
+        .labels
+        .get_mut("raw_support")
+        .unwrap() = false;
+    assert_ne!(
+        map.fit_cases_digest,
+        calibration_cases_digest(&changed_label, "raw_support", 1024).unwrap()
+    );
+    let mut changed_input = data.clone();
+    changed_input.cases[0].inputs.insert(
+        "text".into(),
+        Datum::new("input-0", Value::Text("changed-selected-input".into())).unwrap(),
+    );
+    assert_ne!(
+        map.fit_cases_digest,
+        calibration_cases_digest(&changed_input, "raw_support", 1024).unwrap()
+    );
+    let mut changed_provenance = data.clone();
+    changed_provenance.cases[0].label_provenance.reference = "changed-row".into();
+    assert_ne!(
+        map.fit_cases_digest,
+        calibration_cases_digest(&changed_provenance, "raw_support", 1024).unwrap()
+    );
+    let mut changed_held_out = data.clone();
+    changed_held_out.cases[20]
+        .labels
+        .insert("raw_support".into(), true);
+    changed_held_out.cases[20].label_provenance.reference = "changed-held-out".into();
+    changed_held_out.cases[20].inputs.insert(
+        "text".into(),
+        Datum::new("input-20", Value::Text("changed-held-out-input".into())).unwrap(),
+    );
+    assert_eq!(
+        map.fit_cases_digest,
+        calibration_cases_digest(&changed_held_out, "raw_support", 1024).unwrap()
+    );
     let mut calibrated = GraphSpec::parse(raw_graph()).unwrap();
     calibrated.nodes.push(NodeSpec {
         id: NodeId::new("calibrate").unwrap(),
@@ -231,6 +280,165 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
     );
     let calibrated_path = root.path().join("calibrated.json");
     std::fs::write(&calibrated_path, serde_json::to_vec(&calibrated).unwrap()).unwrap();
+    let no_source = GraphSpec {
+        inputs: BTreeMap::from([("raw".into(), ValueType::Probability)]),
+        nodes: vec![NodeSpec {
+            id: NodeId::new("calibrate").unwrap(),
+            operation: Operation::Calibrate,
+            inputs: BTreeMap::from([
+                (
+                    "value".into(),
+                    Binding::Input {
+                        name: "raw".into(),
+                        path: Vec::new(),
+                    },
+                ),
+                (
+                    "map".into(),
+                    Binding::Literal {
+                        value: Datum::new("calibration_map", Value::CalibrationMap(map.clone()))
+                            .unwrap(),
+                        value_type: ValueType::CalibrationMap,
+                    },
+                ),
+            ]),
+            guard: None,
+        }],
+        outputs: BTreeMap::from([(
+            "calibrated_support".into(),
+            Binding::Node {
+                node: NodeId::new("calibrate").unwrap(),
+                port: "result".into(),
+                path: Vec::new(),
+            },
+        )]),
+        subgraphs: BTreeMap::new(),
+    };
+    let no_source_path = root.path().join("no-source.json");
+    std::fs::write(&no_source_path, serde_json::to_vec(&no_source).unwrap()).unwrap();
+    let no_source_input = root.path().join("no-source-input.json");
+    let raw_input = Inputs::from([(
+        "raw".into(),
+        Datum::new("raw", Value::Probability(Probability::new(0.8).unwrap())).unwrap(),
+    )]);
+    std::fs::write(&no_source_input, serde_json::to_vec(&raw_input).unwrap()).unwrap();
+    let no_source_run = command(&[
+        "run",
+        path(&no_source_path),
+        "--typed-input",
+        "--input",
+        path(&no_source_input),
+    ]);
+    assert!(!no_source_run.status.success());
+    let no_source_failure: serde_json::Value =
+        serde_json::from_slice(&no_source_run.stdout).unwrap();
+    assert_eq!(no_source_failure["error"]["code"], "model_mismatch");
+    assert_eq!(no_source_failure["error"]["context"]["observed_count"], "0");
+    let mut two_source = calibrated.clone();
+    let first_probability = two_source
+        .nodes
+        .iter_mut()
+        .find(|node| node.id.as_str() == "probability")
+        .unwrap();
+    first_probability.guard = Some(Binding::Literal {
+        value: Datum::new("guard", Value::Boolean(true)).unwrap(),
+        value_type: ValueType::Boolean,
+    });
+    let mut second_ask = two_source
+        .nodes
+        .iter()
+        .find(|node| node.id.as_str() == "ask")
+        .unwrap()
+        .clone();
+    second_ask.id = NodeId::new("second_ask").unwrap();
+    second_ask.operation = Operation::Ask {
+        backend: BackendId::new("fast_b").unwrap(),
+    };
+    let mut second_probability = two_source
+        .nodes
+        .iter()
+        .find(|node| node.id.as_str() == "probability")
+        .unwrap()
+        .clone();
+    second_probability.id = NodeId::new("second_probability").unwrap();
+    second_probability.guard = None;
+    second_probability.inputs.insert(
+        "answers".into(),
+        Binding::Node {
+            node: second_ask.id.clone(),
+            port: "answers".into(),
+            path: Vec::new(),
+        },
+    );
+    two_source.nodes.extend([second_ask, second_probability]);
+    two_source.nodes.push(NodeSpec {
+        id: NodeId::new("choose_raw").unwrap(),
+        operation: Operation::Coalesce,
+        inputs: BTreeMap::from([
+            (
+                "value".into(),
+                Binding::Node {
+                    node: NodeId::new("probability").unwrap(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            ),
+            (
+                "default".into(),
+                Binding::Node {
+                    node: NodeId::new("second_probability").unwrap(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            ),
+        ]),
+        guard: None,
+    });
+    two_source
+        .nodes
+        .iter_mut()
+        .find(|node| node.id.as_str() == "calibrate")
+        .unwrap()
+        .inputs
+        .insert(
+            "value".into(),
+            Binding::Node {
+                node: NodeId::new("choose_raw").unwrap(),
+                port: "result".into(),
+                path: Vec::new(),
+            },
+        );
+    let two_source_path = root.path().join("two-source.json");
+    std::fs::write(&two_source_path, serde_json::to_vec(&two_source).unwrap()).unwrap();
+    let mut two_exchanges = exchanges.clone();
+    let mut second_exchange = two_exchanges.exchanges[0].clone();
+    second_exchange.request.backend = BackendId::new("fast_b").unwrap();
+    second_exchange.response.model = "model-b".into();
+    two_exchanges.exchanges.push(second_exchange);
+    let two_recording = root.path().join("two-source-recording.json");
+    std::fs::write(
+        &two_recording,
+        two_exchanges.to_json(8 * 1_048_576).unwrap(),
+    )
+    .unwrap();
+    let two_source_input = root.path().join("two-source-input.json");
+    std::fs::write(&two_source_input, b"{\"text\":\"case-text-0\"}").unwrap();
+    let two_source_replay = command(&[
+        "replay",
+        path(&two_source_path),
+        "--recording",
+        path(&two_recording),
+        "--input",
+        path(&two_source_input),
+    ]);
+    assert!(!two_source_replay.status.success());
+    let two_source_failure: serde_json::Value =
+        serde_json::from_slice(&two_source_replay.stdout).unwrap();
+    assert_eq!(two_source_failure["error"]["code"], "model_mismatch");
+    assert_eq!(
+        two_source_failure["error"]["context"]["observed_count"],
+        "2"
+    );
     let mut guarded = calibrated.clone();
     let mut unrelated_ask = guarded
         .nodes
@@ -708,6 +916,85 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
             .any(|node| node["operation"]["kind"] == "ask"
                 && node["model"]["response"]["model"] == "model-b")
     );
+    #[cfg(feature = "clm")]
+    {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            loop {
+                let mut buffer = [0; 1024];
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&buffer[..n]);
+                if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&bytes[..index]);
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|value| value.trim().parse().unwrap())
+                        })
+                        .unwrap();
+                    if bytes.len() >= index + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let body = br#"{"model":"model-b","answers":{"q":{"type":"noul","noul":0.05}},"usage":{"input_tokens":1,"output_tokens":0,"billing_units":1}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+        });
+        let bindings = root.path().join("live-bindings.yaml");
+        std::fs::write(
+            &bindings,
+            "fast_a:\n  provider: clm\n  model: requested\n  distribution_policy: {kind: strict}\n",
+        )
+        .unwrap();
+        let live_mismatch = Command::new(env!("CARGO_BIN_EXE_sapho"))
+            .env_clear()
+            .env("CLM_BASE_URL", endpoint)
+            .env("CLM_API_KEY", "synthetic-credential")
+            .args([
+                "run",
+                path(&calibrated_path),
+                "--input",
+                path(&input_path),
+                "--bindings",
+                path(&bindings),
+            ])
+            .output()
+            .unwrap();
+        server.join().unwrap();
+        assert!(!live_mismatch.status.success());
+        let live_report: serde_json::Value = serde_json::from_slice(&live_mismatch.stdout).unwrap();
+        assert_eq!(live_report["error"]["code"], "model_mismatch");
+        assert_eq!(live_report["error"]["context"]["map_id"], map.map_id);
+        assert_eq!(live_report["error"]["context"]["expected_model"], "model-a");
+        assert_eq!(live_report["error"]["context"]["observed_model"], "model-b");
+        assert_eq!(
+            live_report["error"]["context"]["expected_binding"],
+            "fast_a"
+        );
+        assert_eq!(
+            live_report["error"]["context"]["observed_binding"],
+            "fast_a"
+        );
+    }
     let mut changed_prediction = exchanges.clone();
     changed_prediction.exchanges[0].response.answers.insert(
         "q".into(),
