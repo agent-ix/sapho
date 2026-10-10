@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Agent-IX
+# Ask fast on every case; ask expert only when fast confidence lies in [0.2, 0.8).
+inputs:
+  statement: {kind: text}
+nodes:
+  - id: state
+    operation: {kind: record}
+    inputs: {statement: {kind: input, name: statement}}
+  - id: questions
+    operation:
+      kind: questions
+      questions:
+        - id: accepted
+          question: {kind: boolean, instructions: Is this statement acceptable?, yes: Acceptable, no: Unacceptable}
+  - id: fast
+    operation: {kind: ask, backend: fast}
+    inputs:
+      state: {kind: node, node: state, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: fast_confidence
+    operation: {kind: probability, question: accepted, labels: ["true"]}
+    inputs: {answers: {kind: node, node: fast, port: answers}}
+  - id: above_low
+    operation: {kind: compare, comparator: greater_equal}
+    inputs:
+      a: {kind: node, node: fast_confidence, port: result}
+      b:
+        kind: literal
+        value: {id: low, value: {kind: probability, value: 0.2}}
+        value_type: {kind: probability}
+  - id: below_high
+    operation: {kind: compare, comparator: less}
+    inputs:
+      a: {kind: node, node: fast_confidence, port: result}
+      b:
+        kind: literal
+        value: {id: high, value: {kind: probability, value: 0.8}}
+        value_type: {kind: probability}
+  - id: uncertain
+    operation: {kind: and}
+    inputs:
+      a: {kind: node, node: above_low, port: result}
+      b: {kind: node, node: below_high, port: result}
+  - id: expert
+    guard: {kind: node, node: uncertain, port: result}
+    operation: {kind: ask, backend: expert}
+    inputs:
+      state: {kind: node, node: state, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: chosen_answers
+    operation: {kind: coalesce}
+    inputs:
+      value: {kind: node, node: expert, port: answers}
+      default: {kind: node, node: fast, port: answers}
+  - id: chosen_model
+    operation: {kind: coalesce}
+    inputs:
+      value: {kind: node, node: expert, port: model}
+      default: {kind: node, node: fast, port: model}
+  - id: confidence
+    operation: {kind: probability, question: accepted, labels: ["true"]}
+    inputs: {answers: {kind: node, node: chosen_answers, port: result}}
+outputs:
+  answers: {kind: node, node: chosen_answers, port: result}
+  model: {kind: node, node: chosen_model, port: result}
+  confidence: {kind: node, node: confidence, port: result}
+  asked_expert: {kind: node, node: uncertain, port: result}

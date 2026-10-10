@@ -8,6 +8,8 @@ mod ears;
 mod raw;
 #[path = "scenarios/recording.rs"]
 mod recording;
+#[path = "scenarios/router.rs"]
+mod router;
 #[path = "scenarios/runtime.rs"]
 mod runtime;
 

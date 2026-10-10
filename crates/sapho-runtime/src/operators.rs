@@ -17,6 +17,33 @@ pub(crate) fn items(value: &Value) -> Result<&[Datum]> {
         Err(mismatch("Operand is not a collection"))
     }
 }
+/// Select one present Optional without treating false, zero or empty values as absence.
+pub(crate) fn merge_present(input: &Inputs) -> Result<Value> {
+    let present = input
+        .iter()
+        .filter_map(|(name, datum)| match &datum.value {
+            Value::Optional(Some(value)) => Some(Ok((name.as_str(), value.as_ref()))),
+            Value::Optional(None) => None,
+            _ => Some(Err(mismatch("MergePresent needs Optional operands"))),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if present.len() != 1 {
+        return Err(SaphoError::new(
+            ErrorCode::InvalidValue,
+            "MergePresent needs exactly one present operand",
+        )
+        .with_context("present_count", present.len().to_string())
+        .with_context(
+            "present_operands",
+            present
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>()
+                .join(","),
+        ));
+    }
+    Ok(present[0].1.clone())
+}
 fn boolean(value: &Value) -> Result<bool> {
     if let Value::Boolean(v) = value {
         Ok(*v)
@@ -160,7 +187,8 @@ pub(crate) fn logic(op: &Operation, input: &Inputs) -> Result<Value> {
         | Operation::Filter
         | Operation::Pairs
         | Operation::Join { .. }
-        | Operation::Collect => return Err(mismatch("Not a logic operation")),
+        | Operation::Collect
+        | Operation::MergePresent {} => return Err(mismatch("Not a logic operation")),
     })
 }
 pub(crate) fn filtered(inputs: &Inputs) -> Result<Vec<Datum>> {

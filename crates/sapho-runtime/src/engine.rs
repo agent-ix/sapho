@@ -486,6 +486,16 @@ impl Engine {
             | Operation::Coalesce => {
                 one_output(path, operators::logic(&node.spec().operation, ins)?, ins)
             }
+            Operation::MergePresent {} => {
+                let node_path = serde_json::to_string(path)
+                    .map_err(|error| SaphoError::new(ErrorCode::CodeFailed, error.to_string()))?;
+                one_output(
+                    path,
+                    operators::merge_present(ins)
+                        .map_err(|error| error.with_context("node_path", node_path))?,
+                    ins,
+                )
+            }
             Operation::Ask { .. } => Err(SaphoError::new(
                 ErrorCode::BackendFailed,
                 "Ask must run through inference scheduler",

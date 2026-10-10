@@ -33,6 +33,23 @@ nodes:
           value: true
       value_type:
         kind: boolean
+- id: disabled
+  operation: {kind: not}
+  inputs:
+    value: {kind: input, name: enabled}
+- id: fallback_present
+  guard: {kind: node, node: disabled, port: result}
+  operation: {kind: not}
+  inputs:
+    value:
+      kind: literal
+      value: {id: "false", value: {kind: boolean, value: false}}
+      value_type: {kind: boolean}
+- id: merged
+  operation: {kind: merge_present}
+  inputs:
+    conditional: {kind: node, node: conditional, port: result}
+    fallback: {kind: node, node: fallback_present, port: result}
 outputs:
   optional:
     kind: node
@@ -42,4 +59,5 @@ outputs:
     kind: node
     node: fallback
     port: result
+  merged: {kind: node, node: merged, port: result}
 subgraphs: {}

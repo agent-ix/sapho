@@ -459,6 +459,29 @@ impl Compiler<'_> {
                     one("result", *inner),
                 )
             }
+            Operation::MergePresent {} => {
+                if !(2..=32).contains(&ins.len()) {
+                    return Err(SaphoError::new(
+                        ErrorCode::Config,
+                        "MergePresent needs two to 32 operands",
+                    ));
+                }
+                let inner = ins
+                    .values()
+                    .next()
+                    .and_then(|ty| match ty {
+                        ValueType::Optional { inner } => Some(inner.as_ref()),
+                        _ => None,
+                    })
+                    .ok_or_else(|| mismatch("MergePresent needs Optional operands"))?;
+                if ins
+                    .values()
+                    .any(|ty| ty != &ValueType::optional(inner.clone()))
+                {
+                    return Err(mismatch("MergePresent operands need one exact inner type"));
+                }
+                (ins.clone(), one("result", inner.clone()))
+            }
         };
         Ok((Signature { inputs, outputs }, primitive, mapped))
     }
