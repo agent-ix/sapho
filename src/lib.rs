@@ -55,3 +55,7 @@ pub use sapho_runtime as runtime;
 #[cfg(feature = "clm")]
 /// Host-configured CLM System One backend.
 pub use sapho_clm as clm;
+
+#[cfg(feature = "claude")]
+/// Host-configured Claude Messages backend.
+pub use sapho_claude as claude;

@@ -17,6 +17,8 @@ pub enum Provider {
     Jev,
     /// Host-configured CLM System One service.
     Clm,
+    /// Hosted Claude Messages API, with host-only bearer and workspace headers.
+    Claude,
     /// A running Ollama server; the URL comes from `OLLAMA_BASE_URL`, never from a document.
     Ollama,
 }
@@ -254,6 +256,7 @@ pub fn live_bindings(
         let backend: Arc<dyn sapho_core::ModelBackend> = match binding.provider {
             Provider::Jev => prepare_jev()?,
             Provider::Clm => prepare_clm()?,
+            Provider::Claude => prepare_claude()?,
             Provider::Ollama => prepare_ollama(binding)?,
         };
         registry.register(id.clone(), binding.attach(backend))?;
@@ -301,7 +304,7 @@ fn prepare_ollama(binding: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBa
 fn prepare_ollama(_: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
     Err(CliError::Feature(Provider::Ollama))
 }
-#[cfg(any(feature = "jev", feature = "clm"))]
+#[cfg(any(feature = "jev", feature = "clm", feature = "claude"))]
 fn credential(provider: Provider) -> Result<Option<ix_cli_kit::secrets::SecretValue>, CliError> {
     crate::resolve_credential(
         provider,
@@ -309,6 +312,28 @@ fn credential(provider: Provider) -> Result<Option<ix_cli_kit::secrets::SecretVa
         None,
         provider.credential_environment().and_then(std::env::var_os),
     )
+}
+#[cfg(feature = "claude")]
+fn prepare_claude() -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    let secret =
+        credential(Provider::Claude)?.ok_or(CliError::CredentialMissing(Provider::Claude))?;
+    let workspace_id = std::env::var("ANTHROPIC_WORKSPACE_ID")
+        .map(Some)
+        .or_else(|error| match error {
+            std::env::VarError::NotPresent => Ok(None),
+            std::env::VarError::NotUnicode(_) => Err(CliError::ProviderConfiguration),
+        })?;
+    sapho_claude::ClaudeBackend::new(
+        &secret,
+        workspace_id.as_deref(),
+        sapho_claude::Limits::default(),
+    )
+    .map(|backend| Arc::new(backend) as Arc<dyn sapho_core::ModelBackend>)
+    .map_err(|_| CliError::ProviderConfiguration)
+}
+#[cfg(not(feature = "claude"))]
+fn prepare_claude() -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    Err(CliError::Feature(Provider::Claude))
 }
 #[cfg(feature = "clm")]
 fn prepare_clm() -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {

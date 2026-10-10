@@ -949,6 +949,7 @@ are available when you only need part of the API:
 | `sapho-runtime` | You need the executor directly. | `sapho::runtime` |
 | `sapho-recording` | You add recording/replay to a model backend. | `sapho::recording` |
 | `sapho-clm` | You configure a bounded host-managed CLM service. | `sapho::clm` with feature `clm` |
+| `sapho-claude` | You use host-configured Claude Messages for typed independent readings. | `sapho::claude` with feature `claude` |
 | `sapho-systemone` | Jev and CLM share source-free request translation using SDK-owned types. | Adapter implementation dependency |
 | `sapho-jev` | You connect a host-configured TypeSafe SDK client to Jev. | `sapho::jev` with feature `jev` |
 

@@ -12,6 +12,7 @@ impl Provider {
         match self {
             Self::Jev => Some("TYPESAFE_API_KEY"),
             Self::Clm => Some("CLM_API_KEY"),
+            Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Ollama => None,
         }
     }
@@ -19,6 +20,7 @@ impl Provider {
         match self {
             Self::Jev => Some("jev-api-key"),
             Self::Clm => Some("clm-api-key"),
+            Self::Claude => Some("anthropic-api-key"),
             Self::Ollama => None,
         }
     }
@@ -51,7 +53,7 @@ pub fn resolve_credential<B: CredentialBackend>(
     {
         return Err(CliError::CredentialInvalid);
     }
-    if provider == Provider::Jev && secret.is_none() {
+    if matches!(provider, Provider::Jev | Provider::Claude) && secret.is_none() {
         return Err(CliError::CredentialMissing(provider));
     }
     Ok(secret)

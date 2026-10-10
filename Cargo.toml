@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-ollama", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli"]
+members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-claude", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-ollama", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli"]
 resolver = "3"
 
 [workspace.package]
@@ -37,6 +37,7 @@ ix-cli-kit = { git = "https://github.com/agent-ix/ix-cli-kit", rev = "8e6781eb39
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 sapho-systemone = { path = "crates/sapho-systemone", version = "0.1.0" }
 sapho-clm = { path = "crates/sapho-clm", version = "0.1.0" }
+sapho-claude = { path = "crates/sapho-claude", version = "0.1.0" }
 sapho-jev = { path = "crates/sapho-jev", version = "0.1.0" }
 
 [workspace.lints.rust]
@@ -59,6 +60,7 @@ workspace = true
 default = []
 jev = ["dep:sapho-jev"]
 clm = ["dep:sapho-clm"]
+claude = ["dep:sapho-claude"]
 
 [dependencies]
 sapho-core.workspace = true
@@ -67,6 +69,7 @@ sapho-runtime.workspace = true
 sapho-recording.workspace = true
 sapho-jev = { workspace = true, optional = true }
 sapho-clm = { workspace = true, optional = true }
+sapho-claude = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "net", "io-util"] }
