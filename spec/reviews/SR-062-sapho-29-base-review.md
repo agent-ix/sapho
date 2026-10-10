@@ -23,6 +23,7 @@ Reviewed the public ModelRequest, Ask compile ports, runtime scheduling/RunLimit
 | FND-005 | medium | The held-out gate uses primary plus two additional whole-graph runs, while an Ask samples one node. | FR-076 |
 | FND-006 | high | Concurrent failures could change the returned error and truncate dispatched evidence according to completion timing. | FR-076, IT-014 |
 | FND-007 | medium | Public List identity uses string ItemIds and paired answer/model lists need an exact join key and source rule. | FR-075, IT-014 |
+| FND-008 | high | Per-Ask full-width waves and separate request prechecks could exceed run-wide concurrency or request ceilings when ready Asks overlap. | FR-076, IT-014 |
 
 ## Dispositions
 
@@ -30,6 +31,8 @@ FND-001: FR-075 puts `samples` on Ask; FR-074 keeps the index only in core ident
 
 FND-006: FR-076 now uses fixed concurrency waves, waits for the whole dispatched wave, selects the lowest failing index and retains all wave outcomes; IT-014-SC-03/05 check k=4 replay, dual failure, timeout and un-dispatched calls. FND-007: FR-075 defines canonical decimal ItemIds, paired ordering and inherited SourceRefs; IT-014-SC-07 checks exact typed JSON round-trip and downstream join.
 
+FND-008: FR-076 now defines one shared Engine::run admission ledger and permit pool for sibling Asks and Map children. Atomic whole-Ask reservations cap all admitted work, actual dispatch consumes reservations, unused slots are released, and each infer holds one shared permit. IT-014-SC-08 checks two parallel repeated Asks at exact and insufficient request ceilings, adversarial response order, active high-water mark and mapped-child accounting.
+
 ## Verdict
 
-Ready for planner review of the public contract and executable acceptance cases. `quire validate --scope . 'spec/**/*.md'` exited 0; `quire matrix --scope .` exited 0 and showed all thirteen new ACs untagged; `git diff --check` exited 0. IT-014 is planned evidence, not executed implementation evidence. `filament open` failed at the OS URL opener with error -10661, so visual IDE opening could not be checked. Dataset serde/validate and the EARS export boundary remain outside this change.
+Ready for planner review of the public contract and executable acceptance cases. `quire validate --scope . 'spec/**/*.md'` exited 0; `quire matrix --scope .` exited 0 and showed all fourteen new ACs untagged; `git diff --check` exited 0. IT-014 is planned evidence, not executed implementation evidence. `filament open` failed at the OS URL opener with error -10661, so visual IDE opening could not be checked. Dataset serde/validate and the EARS export boundary remain outside this change.
