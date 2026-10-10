@@ -26,6 +26,9 @@ Owning component: `sapho-evidence` for dataset validation, scoring, ranking and 
 - [FR-038: Export curated training cases](functional/FR-038.md)
 - [FR-083: Fit a deterministic development calibration map and score it](functional/FR-083.md)
 - [FR-062: Compute an attributable model roster](functional/FR-062.md)
+- [FR-065: Measure probability calibration against declared labels](functional/FR-065.md)
+- [FR-066: Report risk and coverage at confidence thresholds](functional/FR-066.md)
+- [IT-010: Verify probability calibration and risk coverage](integration/IT-010.md)
 
 ## References
 
