@@ -327,6 +327,28 @@ fn shadow_graph() -> GraphSpec {
     });
     spec
 }
+/// Trace: FR-057-AC-7, IT-008-SC-09
+#[test]
+fn shadow_ask_is_root_only_and_mapped_placement_refuses_at_compile_time() {
+    let shadow = shadow_graph();
+    assert!(inspect(&shadow, &PrimitiveRegistry::default()).is_ok());
+    let mut outer = offline();
+    let mut inputs = shadow.inputs.clone();
+    inputs.insert("item".into(), ValueType::Text);
+    outer.subgraphs.insert(
+        "mapped".into(),
+        GraphBody {
+            inputs,
+            nodes: shadow.nodes,
+            outputs: shadow.outputs,
+        },
+    );
+    let failure = compile(&outer, &PrimitiveRegistry::default())
+        .err()
+        .unwrap();
+    assert_eq!(failure.code, ErrorCode::Config);
+    assert!(failure.message.contains("mapped subgraphs"));
+}
 fn shadow_backends(
     champion: Arc<dyn ModelBackend>,
     challenger: Arc<dyn ModelBackend>,
@@ -344,6 +366,53 @@ fn shadow_backends(
         )
         .unwrap();
     registry
+}
+/// Trace: FR-057-AC-5, FR-058-AC-2, IT-008-SC-02
+#[tokio::test]
+async fn guarded_shadow_projects_present_answer_and_skips_false_guard() {
+    for guard in [true, false] {
+        let mut spec = shadow_graph();
+        spec.nodes
+            .iter_mut()
+            .find(|node| node.id.as_str() == "shadow")
+            .unwrap()
+            .guard = Some(Binding::Literal {
+            value: Datum::new("shadow-guard", Value::Boolean(guard)).unwrap(),
+            value_type: ValueType::Boolean,
+        });
+        let champion = Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        });
+        let challenger = Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        });
+        let outcome = Runner::new(
+            &spec,
+            &PrimitiveRegistry::default(),
+            shadow_backends(champion.clone(), challenger.clone()),
+        )
+        .unwrap()
+        .run(&text_input("guarded case"), RunLimits::default(), None)
+        .await;
+        assert_eq!(outcome.exit, ExitStatus::Completed);
+        assert_eq!(champion.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(challenger.calls.load(Ordering::SeqCst), usize::from(guard));
+        assert_eq!(outcome.trace.shadows.len(), 1);
+        let observation = &outcome.trace.shadows[0];
+        if guard {
+            assert_eq!(observation.status, sapho_runtime::NodeStatus::Completed);
+            assert_eq!(
+                observation.value.as_ref().unwrap().value,
+                Value::Probability(Probability::new(0.8).unwrap())
+            );
+            assert!(observation.error.is_none());
+        } else {
+            assert_eq!(observation.status, sapho_runtime::NodeStatus::Skipped);
+            assert!(observation.value.is_none());
+        }
+    }
 }
 /// Trace: FR-057-AC-1, FR-057-AC-2, FR-057-AC-3, FR-057-AC-5,
 /// FR-058-AC-1, FR-058-AC-2, FR-058-AC-3, FR-058-AC-5,

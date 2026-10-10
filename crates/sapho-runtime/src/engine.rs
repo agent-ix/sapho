@@ -740,11 +740,23 @@ fn shadow_observation(
                 .ok_or_else(|| {
                     SaphoError::new(ErrorCode::MissingAnswer, "Shadow answers absent")
                 })?;
-            let Value::Answers(answers) = &answers.value else {
-                return Err(SaphoError::new(
-                    ErrorCode::TypeMismatch,
-                    "Shadow answers type mismatch",
-                ));
+            let answers = match &answers.value {
+                Value::Answers(answers) => answers,
+                Value::Optional(Some(inner)) => match inner.as_ref() {
+                    Value::Answers(answers) => answers,
+                    _ => {
+                        return Err(SaphoError::new(
+                            ErrorCode::TypeMismatch,
+                            "Shadow answers type mismatch",
+                        ));
+                    }
+                },
+                _ => {
+                    return Err(SaphoError::new(
+                        ErrorCode::TypeMismatch,
+                        "Shadow answers type mismatch",
+                    ));
+                }
             };
             let probability = answers.probability(&observation.question, &observation.labels)?;
             let value = match observation.projection {
