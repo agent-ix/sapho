@@ -38,6 +38,8 @@ pub struct RosterContributor {
     pub binding: BackendId,
     /// Actual reported model identity, when present.
     pub actual_model: Option<String>,
+    /// Question family of the contributing request, absent when its questions mix families.
+    pub question_kind: Option<RosterQuestionKind>,
 }
 /// Whether a call used live inference or exact recording replay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -584,6 +586,11 @@ pub fn roster(
                             Some(UnattributedReason::UnknownActualModel)
                         }
                         [one] => {
+                            if one.question_kind != Some(mapping.question_kind) {
+                                return Err(EvidenceError::InvalidRoster(format!(
+                                    "Question kind mismatch for mapped output {output}"
+                                )));
+                            }
                             let key = (one.binding.clone(), one.actual_model.clone());
                             let backed = evidence.calls.iter().any(|call| {
                                 call.completed

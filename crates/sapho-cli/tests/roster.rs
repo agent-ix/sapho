@@ -516,6 +516,29 @@ fn production_roster_live_replay_and_literal_roundtrip() {
     );
     assert_eq!(rejected.status.code(), Some(2));
     assert!(!root.path().join("never.json").exists());
+    let wrong_kind = root.path().join("wrong-kind.yaml");
+    std::fs::write(&wrong_kind, "score: {binding: alpha, question_kind: choice}\nflag: {binding: beta, question_kind: boolean}\n").unwrap();
+    let rejected = command(
+        &[
+            "roster",
+            path(&graph_path),
+            "--dataset",
+            path(&dataset_path),
+            "--bindings",
+            path(&bindings_path),
+            "--replay",
+            path(&replay_path),
+            "--split",
+            "held_out",
+            "--mapping",
+            path(&wrong_kind),
+            "--output",
+            path(&root.path().join("wrong-kind-roster.json")),
+        ],
+        Some("not-a-url"),
+    );
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(!root.path().join("wrong-kind-roster.json").exists());
 }
 
 struct CustomBackend {
@@ -610,6 +633,7 @@ async fn custom_host_roster_needs_no_stock_provider_or_secret_field() {
         vec![RosterContributor {
             binding: BackendId::new("alpha").unwrap(),
             actual_model: Some("custom-alpha".into()),
+            question_kind: Some(RosterQuestionKind::Boolean),
         }],
     );
     lineage.insert(
@@ -617,6 +641,7 @@ async fn custom_host_roster_needs_no_stock_provider_or_secret_field() {
         vec![RosterContributor {
             binding: BackendId::new("beta").unwrap(),
             actual_model: Some("custom-beta".into()),
+            question_kind: Some(RosterQuestionKind::Boolean),
         }],
     );
     let mapped_calls = calls

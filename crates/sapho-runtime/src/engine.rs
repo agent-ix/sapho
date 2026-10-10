@@ -17,7 +17,7 @@ use sapho_graph::{
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -167,7 +167,7 @@ impl Engine {
             cancelled: Arc::new(AtomicBool::new(false)),
             clock: config.map(|c| c.clock.clone()),
             durations: BTreeMap::new(),
-            dispatched: BTreeSet::new(),
+            started: Arc::new(Mutex::new(BTreeMap::new())),
         };
         if let Err(error) = state.data(inputs) {
             return (
@@ -205,7 +205,20 @@ impl Engine {
             }
         };
         let observations = config.map_or_else(Vec::new, |c| {
-            observation::collect(&state.trace, &state.durations, &state.dispatched, c)
+            let started = state
+                .started
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let attempted = started.keys().copied().collect::<BTreeSet<_>>();
+            if c.mode == observation::ObservationMode::Live {
+                for (index, at) in started.iter() {
+                    state.durations.entry(*index).or_insert_with(|| {
+                        u64::try_from(c.clock.now().saturating_duration_since(*at).as_micros())
+                            .unwrap_or(u64::MAX)
+                    });
+                }
+            }
+            observation::collect(&state.trace, &state.durations, &attempted, c)
         });
         (result, observations)
     }
@@ -358,11 +371,19 @@ impl Engine {
                     let mut futures = FuturesUnordered::new();
                     let deadline = tokio::time::Instant::from_std(state.deadline);
                     let clock = state.clock.clone();
+                    let started_calls = state.started.clone();
                     for (order, (_, index, _, _, backend, request)) in chunk.iter().enumerate() {
-                        state.dispatched.insert(*index);
                         let clock = clock.clone();
+                        let started_calls = started_calls.clone();
+                        let index = *index;
                         futures.push(async move {
                             let started = clock.as_ref().map(|clock| clock.now());
+                            if let Some(at) = started {
+                                started_calls
+                                    .lock()
+                                    .unwrap_or_else(|poison| poison.into_inner())
+                                    .insert(index, at);
+                            }
                             let response =
                                 tokio::time::timeout_at(deadline, backend.infer(request))
                                     .await
@@ -920,7 +941,7 @@ struct RunState {
     cancelled: Arc<AtomicBool>,
     clock: Option<Arc<dyn ObservationClock>>,
     durations: BTreeMap<usize, u64>,
-    dispatched: BTreeSet<usize>,
+    started: Arc<Mutex<BTreeMap<usize, Instant>>>,
 }
 impl Drop for RunState {
     fn drop(&mut self) {
