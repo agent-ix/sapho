@@ -16,7 +16,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let limits = SelectionLimits::default();
     let patterns = Patterns {
         include: vec!["**/*.yaml".into()],
-        exclude: vec!["**/review-conservative.yaml".into()],
+        exclude: vec![
+            "**/review-conservative.yaml".into(),
+            "**/router.yaml".into(),
+            "**/escalation.yaml".into(),
+        ],
     };
     let files = select_files(&root.join("examples/graphs"), &patterns, &limits, "items")?;
     assert_eq!(count(&files, "items"), 7);
