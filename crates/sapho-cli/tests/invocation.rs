@@ -485,7 +485,7 @@ fn labelled() -> Dataset {
         ],
     }
 }
-/// Trace: FR-036-AC-1, FR-036-AC-2, FR-036-AC-3, FR-036-AC-5, FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, FR-038-AC-1, FR-038-AC-2, FR-038-AC-3
+/// Trace: FR-036-AC-1, FR-036-AC-2, FR-036-AC-3, FR-036-AC-5, FR-037-AC-1, FR-037-AC-2, FR-037-AC-3, FR-038-AC-1, FR-038-AC-2, FR-038-AC-3, FR-073-AC-5
 #[tokio::test]
 async fn real_measure_tune_export_use_selected_labels_and_never_evaluate_heldout_in_tune() {
     let root = tempfile::tempdir().unwrap();
@@ -787,7 +787,7 @@ fn live_provider_is_explicitly_refused_when_jev_feature_is_absent() {
     assert_eq!(result(&refusal)["error"]["kind"], "feature");
 }
 
-/// Trace: NFR-005-M-2, FR-034-AC-3, FR-033-AC-2
+/// Trace: NFR-005-M-2, FR-034-AC-3, FR-033-AC-2, FR-073-AC-5
 #[tokio::test]
 async fn custom_host_inspection_captures_contract_without_executing_native_work() {
     struct Invert(Arc<AtomicUsize>);

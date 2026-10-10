@@ -252,6 +252,7 @@ pub fn live_bindings_with_services<B: CredentialBackend>(
     services: &ServiceConfig,
     store: &SecretStore<B>,
 ) -> Result<BackendRegistry, CliError> {
+    services.validate()?;
     let mut registry = BackendRegistry::default();
     for id in required {
         let binding = bindings.get(id).ok_or_else(|| {
