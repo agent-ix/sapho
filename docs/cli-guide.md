@@ -219,6 +219,39 @@ Boolean outputs report TP/TN/FP/FN and agreement with supplied labels. Probabili
 
 For model graphs, provide explicit `--bindings` for live evaluation or `--replay saved.json` for exact offline evaluation. Each case has its own declared RunLimits. Label provenance records your declaration of each label's kind (`model`, `agent`, `human` or `deterministic_check`), source and reference; Sapho does not certify that a label is true, and measure never scores a model against labels whose source is that same model.
 
+## Measure a model roster
+
+Declare which binding and question family produced each public output in a YAML or JSON mapping:
+
+```yaml
+score: {binding: alpha, question_kind: boolean}
+flag: {binding: beta, question_kind: boolean}
+```
+
+Run the selected split live with explicit bindings, or replay an existing recording offline:
+
+```sh
+sapho roster GRAPH --dataset dataset.json --bindings bindings.yaml --split development --mapping mapping.yaml --output roster.json
+sapho roster GRAPH --dataset dataset.json --replay recording.json --split held_out --mapping mapping.yaml --output held-roster.json
+```
+
+The versioned roster identifies the Dataset, split, Sapho version and `graph_semantic_identity`. Entries are sorted by binding and reported actual model. A response-less call stays in the unknown-actual-model entry and contributes no case score. A case/output is scored under one entry only when its trace lineage contains exactly one completed response from the declared binding. Ambiguous or missing lineage is listed as unattributed. Usage totals and means count only reported values; replay latency is absent with `replay_only`. ECE remains absent with `not_computed` until the shared calibration metric is available. The semantic identity hashes the parsed typed graph, while ordinary `measure` and `GraphArtifact.source` retain their existing path and raw-byte source identity.
+
+Ordinary `measure` also includes a `per_kind` view with the same counts and formulas for each declared label kind. Its existing top-level output totals and source fields remain available.
+
+To embed selected measured profiles as ordinary checked graph data, supply a JSON selection array and write a `Binding::Literal` document:
+
+```json
+[{"field":"first","binding":"alpha","actual_model":"alpha-v1"},
+ {"field":"second","binding":"beta","actual_model":"beta-v1"}]
+```
+
+```sh
+sapho roster-literal --roster roster.json --selection selection.json --output literal.json
+```
+
+The generated Record has numeric `calls`, optional usage and latency fields, optional per-output/per-label-kind agreement, Brier and ECE, and text identity fields. Absent values remain typed Optionals. Provider metadata is limited to validated provider and adapter identifiers; endpoint and credential fields are refused. Copy the generated literal into a graph binding, then run `sapho validate` before evaluation. A copied literal is data, not a certification that the graph was measured.
+
 ## Evaluate a large Dataset
 
 The case and byte ceilings are safety bounds, so their defaults stay at 1024 cases (`--max-cases`) and 8 MiB (`--max-artifact-bytes`, which also bounds the Dataset file). A Dataset of about fifteen thousand labelled cases is evaluated by raising both ceilings explicitly, so you choose the larger limit knowingly and nothing is silently cropped or retried. For a Dataset of up to 20,000 cases:

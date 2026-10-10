@@ -39,6 +39,49 @@ fn graph(nodes: Vec<NodeSpec>, output_binding: Binding) -> GraphSpec {
         subgraphs: BTreeMap::new(),
     }
 }
+/// Trace: FR-063-AC-2, FR-063-AC-5, IT-009-SC-04
+#[test]
+fn semantic_identity_normalizes_representation_and_keeps_ordered_nodes() {
+    let yaml = GraphSpec::parse(include_str!("../../../examples/reference/facts.yaml")).unwrap();
+    let json = serde_json::to_string_pretty(&yaml).unwrap();
+    let parsed = GraphSpec::parse_with_format(&json, GraphFormat::Json).unwrap();
+    assert_eq!(
+        graph_semantic_identity(&yaml).unwrap(),
+        graph_semantic_identity(&parsed).unwrap()
+    );
+    let mut numeric = graph(vec![], lit(Value::Number(1.0), ValueType::Number));
+    let baseline = graph_semantic_identity(&numeric).unwrap();
+    let json = serde_json::to_string(&numeric).unwrap();
+    let exponent =
+        GraphSpec::parse_with_format(&json.replace("1.0", "1e0"), GraphFormat::Json).unwrap();
+    assert_eq!(baseline, graph_semantic_identity(&exponent).unwrap());
+    numeric
+        .outputs
+        .insert("result".into(), lit(Value::Number(2.0), ValueType::Number));
+    assert_ne!(baseline, graph_semantic_identity(&numeric).unwrap());
+    let first = node(
+        "first",
+        Operation::Not,
+        BTreeMap::from([(
+            "value".into(),
+            lit(Value::Boolean(true), ValueType::Boolean),
+        )]),
+    );
+    let second = node(
+        "second",
+        Operation::Not,
+        BTreeMap::from([(
+            "value".into(),
+            lit(Value::Boolean(false), ValueType::Boolean),
+        )]),
+    );
+    let a = graph(vec![first.clone(), second.clone()], output("second"));
+    let b = graph(vec![second, first], output("second"));
+    assert_ne!(
+        graph_semantic_identity(&a).unwrap(),
+        graph_semantic_identity(&b).unwrap()
+    );
+}
 fn err(spec: &GraphSpec) -> ErrorCode {
     compile(spec, &PrimitiveRegistry::default())
         .err()
