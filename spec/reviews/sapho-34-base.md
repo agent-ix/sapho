@@ -20,6 +20,7 @@ The requirements define a deterministic labelled slice/window report and a separ
 | FND-002 | low | The initial draft incorrectly claimed recording export might deduplicate repeated exchanges. `RecordingBackend` appends each validated success, `Recording::to_json` exports its Vec, and only ReplayBackend's lookup index deduplicates. The report now counts every retained exchange, including identical repeats, with a 3-observation fixture. | FR-068-AC-6; IT-011-SC-05 |
 | FND-003 | low | Label-free mean/share movement cannot establish calibration drift or accuracy. The report does not synthesize labels, ECE, risk, alerts or recalibration. | FR-068 |
 | FND-004 | low | The 14 new criteria are untagged in the computed matrix until implementation tests bind them. | FR-067; FR-068 |
+| FND-006 | low | Exact selector identity can be URL-shaped, while report exclusion applies to independent transport endpoint, credential and copied URL metadata. Bound window and selector identity to 256 UTF-8 bytes before projection; test exact preservation and separate sentinel absence. | FR-068-AC-4; IT-011-SC-07 |
 | FND-005 | low | Independently valid recordings can reuse a question ID with different typed definitions or answer kinds. The selector now requires one exact Question definition and refuses mismatch across either set before computing any distance. | FR-068-AC-7; IT-011-SC-06 |
 
 ## Review Evidence
