@@ -801,6 +801,91 @@ fn compiled_at_path(graph: &Arc<CompiledGraph>, path: &[String]) -> Option<Compi
         .find(|node| node.spec().id.as_str() == path[index])
         .cloned()
 }
+fn contains_item(value: &Value, item_id: &str) -> bool {
+    matches!(value, Value::List(items) if items.iter().any(|item| item.id.as_str() == item_id || contains_item(&item.value, item_id)))
+}
+fn calibration_item_sources(
+    graph: &Arc<CompiledGraph>,
+    trace: &BTreeMap<Vec<String>, &NodeTrace>,
+    owner: &[String],
+    binding: &Binding,
+    item_id: &str,
+    visited: &mut BTreeSet<Vec<String>>,
+    contributing: &mut Vec<(sapho_core::BackendId, Option<String>)>,
+) {
+    let Binding::Node {
+        node,
+        port,
+        path: projection,
+    } = binding
+    else {
+        return;
+    };
+    if port != "result" || !projection.is_empty() {
+        return;
+    }
+    let mut source_path = owner[..owner.len() - 1].to_vec();
+    source_path.push(node.to_string());
+    let (Some(source), Some(evidence)) = (
+        compiled_at_path(graph, &source_path),
+        trace.get(&source_path),
+    ) else {
+        return;
+    };
+    if evidence.status != NodeStatus::Completed {
+        return;
+    }
+    match &source.spec().operation {
+        Operation::List { order, .. } => {
+            let Some(Value::List(items)) = evidence.outputs.get("result").map(|d| &d.value) else {
+                return;
+            };
+            let matches = items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| {
+                    item.id.as_str() == item_id || contains_item(&item.value, item_id)
+                })
+                .collect::<Vec<_>>();
+            let [(position, item)] = matches.as_slice() else {
+                return;
+            };
+            let Some(selected) = order
+                .get(*position)
+                .and_then(|name| source.spec().inputs.get(name))
+            else {
+                return;
+            };
+            if item.id.as_str() == item_id {
+                calibration_sources(graph, trace, &source_path, selected, visited, contributing);
+            } else {
+                calibration_item_sources(
+                    graph,
+                    trace,
+                    &source_path,
+                    selected,
+                    item_id,
+                    visited,
+                    contributing,
+                );
+            }
+        }
+        Operation::Filter | Operation::Collect => {
+            if let Some(items) = source.spec().inputs.get("items") {
+                calibration_item_sources(
+                    graph,
+                    trace,
+                    &source_path,
+                    items,
+                    item_id,
+                    visited,
+                    contributing,
+                );
+            }
+        }
+        _ => {}
+    }
+}
 fn calibration_sources(
     graph: &Arc<CompiledGraph>,
     trace: &BTreeMap<Vec<String>, &NodeTrace>,
@@ -824,43 +909,17 @@ fn calibration_sources(
                 let Some(item_id) = scope.last() else {
                     return;
                 };
-                let Some(Value::List(items)) = trace
-                    .get(map_path)
-                    .and_then(|node| node.inputs.get("items"))
-                    .map(|datum| &datum.value)
-                else {
-                    return;
-                };
-                let Some(position) = items.iter().position(|datum| datum.id.as_str() == item_id)
-                else {
-                    return;
-                };
-                let Some(Binding::Node {
-                    node: list_id,
-                    path: projection,
-                    ..
-                }) = map.spec().inputs.get("items")
-                else {
-                    return;
-                };
-                if !projection.is_empty() {
-                    return;
+                if let Some(items) = map.spec().inputs.get("items") {
+                    calibration_item_sources(
+                        graph,
+                        trace,
+                        map_path,
+                        items,
+                        item_id,
+                        visited,
+                        contributing,
+                    );
                 }
-                let mut list_path = map_path[..map_path.len() - 1].to_vec();
-                list_path.push(list_id.to_string());
-                let Some(list) = compiled_at_path(graph, &list_path) else {
-                    return;
-                };
-                let Operation::List { order, .. } = &list.spec().operation else {
-                    return;
-                };
-                let Some(selected) = order
-                    .get(position)
-                    .and_then(|port| list.spec().inputs.get(port))
-                else {
-                    return;
-                };
-                calibration_sources(graph, trace, &list_path, selected, visited, contributing);
                 return;
             }
             if let Some(parent_binding) = map.spec().inputs.get(name) {
