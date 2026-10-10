@@ -38,6 +38,7 @@ Owning component: `sapho-cli`. See the [workspace boundaries](../../spec.md).
 - [FR-073](functional/FR-073.md): distinct generic service dispatch and replay compatibility
 - [IT-013](integration/IT-013.md): two-port capture, third-service configuration and offline replay
 - [FR-078: Publish validated router and escalation graphs](functional/FR-078.md)
+- [FR-090](functional/FR-090.md): required-only Claude binding and offline replay
 
 ## References
 
