@@ -29,6 +29,9 @@ Owning component: `sapho-evidence` for dataset validation, scoring, ranking and 
 - [FR-065: Measure probability calibration against declared labels](functional/FR-065.md)
 - [FR-066: Report risk and coverage at confidence thresholds](functional/FR-066.md)
 - [IT-010: Verify probability calibration and risk coverage](integration/IT-010.md)
+- [FR-067: Report labelled metrics by declared slice and window](functional/FR-067.md)
+- [FR-068: Compare confidence distributions without labels](functional/FR-068.md)
+- [IT-011: Verify slice metrics and recording confidence drift](integration/IT-011.md)
 
 ## References
 
