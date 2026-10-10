@@ -409,7 +409,7 @@ fn production_roundtrip(provider: Provider) {
     let (model, provider_name, endpoint_env) = match provider {
         Provider::Clm => ("clm-latest", "clm", "CLM_BASE_URL"),
         Provider::Jev => ("jev-latest", "jev", "TYPESAFE_BASE_URL"),
-        Provider::Ollama => return,
+        Provider::Ollama | Provider::Decisions => return,
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
@@ -719,5 +719,127 @@ fn a_build_without_ollama_support_refuses_a_required_binding_before_any_access()
     assert!(matches!(
         live_bindings(&[id], &bindings),
         Err(CliError::Feature(Provider::Ollama))
+    ));
+}
+
+struct DecisionsStore {
+    calls: AtomicUsize,
+    result: Option<SecretValue>,
+}
+impl CredentialBackend for &DecisionsStore {
+    fn get(
+        &self,
+        scope: &AppScope,
+        key: &SecretKey,
+    ) -> std::result::Result<Option<SecretValue>, SecretError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(scope.as_str(), "agent-ix/sapho");
+        assert_eq!(key.as_str(), "openai-api-key");
+        Ok(self.result.clone())
+    }
+    fn set(
+        &self,
+        _: &AppScope,
+        _: &SecretKey,
+        _: &SecretValue,
+    ) -> std::result::Result<(), SecretError> {
+        panic!("no writes")
+    }
+    fn delete(
+        &self,
+        _: &AppScope,
+        _: &SecretKey,
+    ) -> std::result::Result<DeleteStatus, SecretError> {
+        panic!("no deletes")
+    }
+    fn status(&self, _: &AppScope, _: &SecretKey) -> std::result::Result<Presence, SecretError> {
+        panic!("no status")
+    }
+}
+/// Trace: FR-087-AC-1, FR-087-AC-2, IT-018-SC-04
+#[test]
+fn decisions_credential_precedence_and_binding_metadata_are_private() {
+    let native = DecisionsStore {
+        calls: AtomicUsize::new(0),
+        result: Some(SecretValue::new("store-sentinel")),
+    };
+    let store = SecretStore::new(&native);
+    let explicit = resolve_credential(
+        Provider::Decisions,
+        &store,
+        Some(SecretValue::new("explicit-sentinel")),
+        Some("env-sentinel".into()),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(explicit.expose_secret(), "explicit-sentinel");
+    let env = resolve_credential(
+        Provider::Decisions,
+        &store,
+        None,
+        Some("env-sentinel".into()),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(env.expose_secret(), "env-sentinel");
+    assert_eq!(native.calls.load(Ordering::SeqCst), 0);
+    let stored = resolve_credential(Provider::Decisions, &store, None, None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.expose_secret(), "store-sentinel");
+    assert_eq!(native.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        Provider::Decisions.credential_environment(),
+        Some("OPENAI_API_KEY")
+    );
+    let absent = DecisionsStore {
+        calls: AtomicUsize::new(0),
+        result: None,
+    };
+    assert!(matches!(
+        resolve_credential(Provider::Decisions, &SecretStore::new(&absent), None, None),
+        Err(CliError::CredentialMissing(Provider::Decisions))
+    ));
+    for invalid in [
+        serde_json::json!({"provider":"decisions","distribution_policy":{"kind":"strict"}}),
+        serde_json::json!({"provider":"decisions","model":"gpt-6-luna","distribution_policy":{"kind":"strict"},"endpoint":"https://example.com"}),
+        serde_json::json!({"provider":"decisions","model":"gpt-6-luna","distribution_policy":{"kind":"strict"},"api_key":"sentinel"}),
+    ] {
+        assert!(serde_json::from_value::<BindingConfig>(invalid).is_err());
+    }
+    let id = BackendId::new("judge").unwrap();
+    let good: BindingConfig = serde_json::from_value(serde_json::json!({
+        "provider":"decisions","model":"gpt-6-luna","distribution_policy":{"kind":"strict"}
+    }))
+    .unwrap();
+    live_bindings(&[], &BTreeMap::from([(id.clone(), good.clone())])).unwrap();
+    let mut wrong = good;
+    wrong.model = "other".into();
+    let error = live_bindings(
+        &[id],
+        &BTreeMap::from([(BackendId::new("judge").unwrap(), wrong)]),
+    )
+    .err()
+    .unwrap();
+    #[cfg(feature = "decisions")]
+    assert!(matches!(error, CliError::Engine(_)));
+    #[cfg(not(feature = "decisions"))]
+    assert!(matches!(error, CliError::Feature(Provider::Decisions)));
+}
+/// Trace: FR-087-AC-1, IT-018-SC-04
+#[cfg(not(feature = "decisions"))]
+#[test]
+fn decisions_feature_absence_refuses_before_credential_lookup() {
+    let id = BackendId::new("judge").unwrap();
+    let binding: BindingConfig = serde_json::from_value(serde_json::json!({
+        "provider":"decisions","model":"gpt-6-luna","distribution_policy":{"kind":"strict"}
+    }))
+    .unwrap();
+    assert!(matches!(
+        live_bindings(
+            std::slice::from_ref(&id),
+            &BTreeMap::from([(id.clone(), binding)])
+        ),
+        Err(CliError::Feature(Provider::Decisions))
     ));
 }
