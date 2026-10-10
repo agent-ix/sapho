@@ -123,7 +123,7 @@ judge:
   distribution_policy: {kind: strict}
 ```
 
-`provider` is `jev`, `clm` or `ollama`. Jev and Ollama require an explicit
+`provider` is `jev`, `clm`, `systemone` or `ollama`. Jev, System One and Ollama require an explicit
 nonempty `model`; CLM may omit it and defaults to `clm-latest`. An `ollama`
 entry also takes `think` (false), `num_ctx` (32768), `num_predict` (512) and
 `timeout_seconds` (600); its server URL comes from `OLLAMA_BASE_URL` (default
@@ -141,6 +141,8 @@ only performed for required live providers. `CLM_BASE_URL` defaults to
 `http://127.0.0.1:8700`; the adapter appends `/v1/systemone`. Remote services
 require HTTPS. Endpoint/auth details and Rust construction are in the
 [API reference](api-reference.md#model-adapters).
+
+For `systemone`, live commands select a bounded JSON host file using `--service-config FILE` or `SAPHO_SERVICE_CONFIG` (path only). Its `services` object maps exact backend IDs to `base_url`, optional OS-store `credential_key`, and optional complete `limits` (`timeout_ms`, `request_bytes`, `response_bytes`, `in_flight`). Limits cannot exceed 30000 ms, 1 MiB, 8 MiB and 4. The host loads only required services, never for replay; see [the guide](cli-guide.md#bind-multiple-system-one-services).
 
 Replay infers binding identity from recorded requests; explicit metadata must
 agree. An empty/partial recording may require metadata for missing backend

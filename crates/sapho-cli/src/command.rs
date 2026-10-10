@@ -3,9 +3,10 @@
 //! Process orchestration: all acquisition/persistence surrounds, never enters, async work.
 use crate::args::*;
 use sapho_cli::{
-    ArtifactWriter, Bindings, CliError, ExitStatus, GraphArtifact, RunReport, Runner, inspect,
-    live_bindings, load_graph, plain_inputs, read_bytes, read_bytes_with_timeout,
-    recording_bindings, replay_bindings_json, select_format,
+    ArtifactWriter, Bindings, CliError, ExitStatus, GraphArtifact, MAX_SERVICE_CONFIG_BYTES,
+    Provider, RunReport, Runner, ServiceConfig, inspect, live_bindings_with_services, load_graph,
+    plain_inputs, read_bytes, read_bytes_with_timeout, recording_bindings, replay_bindings_json,
+    select_format,
 };
 use sapho_core::{
     BackendRegistry, ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry, SaphoError,
@@ -89,6 +90,35 @@ fn bindings(path: Option<&Path>) -> Result<Bindings, CliError> {
     )
     .map_err(CliError::from)
 }
+fn live_registry(
+    required: &[sapho_core::BackendId],
+    metadata: &Bindings,
+    explicit: Option<&Path>,
+) -> Result<BackendRegistry, CliError> {
+    let needs_services = required.iter().any(|id| {
+        metadata
+            .get(id)
+            .is_some_and(|binding| binding.provider == Provider::Systemone)
+    });
+    let services = if needs_services {
+        let environment = std::env::var_os("SAPHO_SERVICE_CONFIG");
+        let path = explicit
+            .map(std::path::PathBuf::from)
+            .or_else(|| environment.map(std::path::PathBuf::from))
+            .ok_or_else(|| {
+                SaphoError::new(ErrorCode::Config, "Service configuration path absent")
+            })?;
+        ServiceConfig::from_json(&read_bytes(&path, MAX_SERVICE_CONFIG_BYTES)?)?
+    } else {
+        ServiceConfig::default()
+    };
+    live_bindings_with_services(
+        required,
+        metadata,
+        &services,
+        &ix_cli_kit::secrets::SecretStore::system(),
+    )
+}
 fn dataset(path: &Path, max_bytes: usize, max_cases: usize) -> Result<Dataset, CliError> {
     let data: Dataset = decode_json(&read_bytes(path, max_bytes)?, max_bytes)?;
     data.validate(max_cases)?;
@@ -107,13 +137,14 @@ fn prepare<F: FnOnce() -> Result<BackendRegistry, CliError>>(
     graph: &GraphSpec,
     metadata: &Bindings,
     replay: Option<F>,
+    service_config: Option<&Path>,
 ) -> Result<(Runner, Vec<sapho_core::BackendId>), CliError> {
     let primitives = PrimitiveRegistry::default();
     let inspection = inspect(graph, &primitives)?;
     let registry = if let Some(replay) = replay {
         replay()?
     } else {
-        live_bindings(&inspection.backends, metadata)?
+        live_registry(&inspection.backends, metadata, service_config)?
     };
     Ok((
         Runner::new(graph, &primitives, registry)?,
@@ -182,7 +213,11 @@ fn invoke(run: RunArgs, invocation: Invocation) -> Result<Response, CliError> {
         let registry = if let Some(replay) = replay {
             replay
         } else {
-            live_bindings(&inspection.backends, &metadata)?
+            live_registry(
+                &inspection.backends,
+                &metadata,
+                run.service_config.as_deref(),
+            )?
         };
         let (registry, recorders) = if matches!(invocation, Invocation::Record(_)) {
             recording_bindings(
@@ -355,6 +390,7 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
             &graph.definition,
             &metadata,
             replay.map(|registry| move || Ok(registry)),
+            options.service_config.as_deref(),
         )?
     };
     let destination = claim(options.output.as_deref())?;
@@ -458,6 +494,7 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
                                 )
                             }
                         }),
+                        options.service_config.as_deref(),
                     )
                 };
                 match prepared {

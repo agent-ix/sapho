@@ -23,17 +23,21 @@ mod bindings;
 mod error;
 mod host;
 mod io;
+mod services;
 #[cfg(feature = "ollama")]
 pub use bindings::ollama_base_url;
 pub use bindings::{
-    BindingConfig, Bindings, OllamaOptions, Provider, live_bindings, recording_bindings,
-    replay_bindings, replay_bindings_json,
+    BindingConfig, Bindings, OllamaOptions, Provider, live_bindings, live_bindings_with_services,
+    recording_bindings, replay_bindings, replay_bindings_json,
 };
 pub use error::CliError;
 pub use host::{ExitStatus, Inspection, RunReport, Runner, inspect, plain_inputs};
 pub use io::{
     ArtifactWriter, GraphArtifact, load_graph, read_bytes, read_bytes_with_timeout, select_format,
     write_new,
+};
+pub use services::{
+    MAX_SERVICE_CONFIG_BYTES, ServiceConfig, ServiceEntry, ServiceLimits, service_credential,
 };
 
 mod credentials;
