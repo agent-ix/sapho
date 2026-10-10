@@ -334,8 +334,8 @@ fn generated_candidates_tune_like_handwritten_and_replay_unchanged_requests() {
         requests.push(trace);
     }
     assert!(requests.windows(2).all(|pair| pair[0] == pair[1]));
-    for pair in metadata.chunks_exact(2) {
-        assert_ne!(pair[0], pair[1]);
+    for index in (0..metadata.len()).step_by(2) {
+        assert_ne!(metadata[index], metadata[index + 1]);
     }
 }
 
