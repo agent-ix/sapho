@@ -162,7 +162,8 @@ async fn three_kinds_roundtrip_exact_values_and_data_independent_schema() {
 /// Trace: FR-088-AC-3
 #[tokio::test]
 async fn malformed_refusal_cutoff_and_mass_are_whole_ask_failures_with_safe_raw() {
-    let mutations: Vec<(&str, Box<dyn Fn(&mut Json)>)> = vec![
+    type Mutation = (&'static str, Box<dyn Fn(&mut Json)>);
+    let mutations: Vec<Mutation> = vec![
         ("refusal", Box::new(|v| v["stop_reason"] = json!("refusal"))),
         (
             "cutoff",
@@ -223,7 +224,7 @@ async fn malformed_refusal_cutoff_and_mass_are_whole_ask_failures_with_safe_raw(
         mutate(&mut body);
         let fake = Fake::new(200, serde_json::to_vec(&body).unwrap());
         let backend = ClaudeBackend::with_transport(fake, Limits::default()).unwrap();
-        let error = backend.infer(&request()).await.err().expect(name);
+        let error = backend.infer(&request()).await.expect_err(name);
         assert!(
             matches!(
                 error.code,
@@ -341,6 +342,30 @@ fn endpoint_headers_and_configuration_bounds_are_checked() {
             ..Limits::default()
         },
         Limits {
+            in_flight: 0,
+            ..Limits::default()
+        },
+        Limits {
+            request_bytes: 0,
+            ..Limits::default()
+        },
+        Limits {
+            request_bytes: 1_048_577,
+            ..Limits::default()
+        },
+        Limits {
+            response_bytes: 0,
+            ..Limits::default()
+        },
+        Limits {
+            response_bytes: 8 * 1_048_576 + 1,
+            ..Limits::default()
+        },
+        Limits {
+            max_tokens: 0,
+            ..Limits::default()
+        },
+        Limits {
             max_tokens: 4097,
             ..Limits::default()
         },
@@ -350,6 +375,17 @@ fn endpoint_headers_and_configuration_bounds_are_checked() {
             Err(ConfigurationError::InvalidLimits)
         ));
     }
+    assert!(
+        ClaudeBackend::new(
+            &secret,
+            None,
+            Limits {
+                max_tokens: 4096,
+                ..Limits::default()
+            }
+        )
+        .is_ok()
+    );
 }
 
 /// Trace: FR-089-AC-1, FR-089-AC-4
@@ -573,4 +609,93 @@ async fn timeout_cancels_call_and_restores_permit() {
     );
     assert!(backend.infer(&request()).await.is_ok());
     assert_eq!(transport.0.load(Ordering::SeqCst), 2);
+}
+
+/// Trace: FR-089-AC-3
+#[tokio::test]
+async fn http_statuses_and_oversized_success_map_without_body_disclosure() {
+    for (status, expected) in [
+        (400, ErrorCode::ServiceValidation),
+        (401, ErrorCode::Unauthorized),
+        (403, ErrorCode::Unauthorized),
+        (422, ErrorCode::ServiceValidation),
+        (429, ErrorCode::RateLimited),
+        (500, ErrorCode::BackendFailed),
+        (302, ErrorCode::BackendFailed),
+    ] {
+        let body = b"sentinel-secret private-content".to_vec();
+        let backend =
+            ClaudeBackend::with_transport(Fake::new(status, body), Limits::default()).unwrap();
+        let error = backend
+            .infer(&request())
+            .await
+            .expect_err("status must refuse");
+        assert_eq!(error.code, expected, "status {status}");
+        assert_eq!(error.context["http_status"], status.to_string());
+        assert!(error.raw.is_none());
+        assert!(!format!("{error:?}").contains("sentinel-secret"));
+        assert!(
+            !serde_json::to_string(&error)
+                .unwrap()
+                .contains("private-content")
+        );
+    }
+    let limits = Limits {
+        response_bytes: 16,
+        ..Limits::default()
+    };
+    let backend =
+        ClaudeBackend::with_transport(Fake::new(200, message(answers())), limits).unwrap();
+    assert_eq!(
+        backend.infer(&request()).await.expect_err("overflow").code,
+        ErrorCode::LimitExceeded
+    );
+    let backend =
+        ClaudeBackend::with_transport(Fake::new(200, b"invalid json".to_vec()), Limits::default())
+            .unwrap();
+    assert_eq!(
+        backend.infer(&request()).await.expect_err("malformed").code,
+        ErrorCode::InvalidAnswer
+    );
+}
+
+/// Trace: FR-089-AC-2
+#[tokio::test(flavor = "multi_thread")]
+async fn declared_response_length_over_ceiling_refuses_before_collection() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/v1/messages", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = [0u8; 2048];
+        let _ = stream.read(&mut bytes).unwrap();
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n")
+            .unwrap();
+    });
+    let backend = ClaudeBackend::at_endpoint(
+        &url,
+        &SecretValue::new("private"),
+        None,
+        Limits {
+            response_bytes: 100,
+            ..Limits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        backend
+            .infer(&request())
+            .await
+            .expect_err("declared overflow")
+            .code,
+        ErrorCode::LimitExceeded
+    );
+    server.join().unwrap();
 }

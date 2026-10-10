@@ -188,3 +188,23 @@ async fn cli_registry_records_and_replays_without_claude_transport() {
         matches!(replay_bindings_json(&bytes, Some(&changed), 1_048_576), Err(CliError::Engine(e)) if e.code == ErrorCode::RecordingMismatch)
     );
 }
+
+/// Trace: FR-090-AC-4
+#[test]
+fn offline_metadata_and_dataset_contracts_stay_separate() {
+    use sapho_evidence::Dataset;
+    let dataset = Dataset {
+        id: SourceId::new("curated").unwrap(),
+        cases: Vec::new(),
+    };
+    dataset.validate(1).unwrap();
+    let serialized = serde_json::to_vec(&dataset).unwrap();
+    let loaded: Dataset = serde_json::from_slice(&serialized).unwrap();
+    assert_eq!(loaded, dataset);
+    let binding: Bindings = sapho_graph::parse_config(
+        "reader:\n  provider: claude\n  model: claude-sonnet-4-6\n  distribution_policy: {kind: strict}\n",
+        sapho_graph::GraphFormat::Yaml,
+    ).unwrap();
+    assert!(live_bindings(&[], &binding).is_ok());
+    assert!(replay_bindings(&Recording::default(), Some(&binding), 4096).is_ok());
+}
