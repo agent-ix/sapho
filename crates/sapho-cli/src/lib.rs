@@ -24,6 +24,7 @@ mod error;
 mod host;
 mod io;
 mod services;
+mod sweep;
 #[cfg(feature = "ollama")]
 pub use bindings::ollama_base_url;
 pub use bindings::{
@@ -41,6 +42,7 @@ pub use io::{
 pub use services::{
     MAX_SERVICE_CONFIG_BYTES, ServiceConfig, ServiceEntry, ServiceLimits, service_credential,
 };
+pub use sweep::{SweepReport, sweep};
 
 mod credentials;
 pub use credentials::{resolve_credential, resolve_endpoint};
