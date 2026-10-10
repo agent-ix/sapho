@@ -24,6 +24,9 @@ Owning component: `sapho-evidence` for dataset validation, scoring, ranking and 
 - [FR-036: Measure declared outputs against labelled cases](functional/FR-036.md)
 - [FR-037: Compare bounded development candidates](functional/FR-037.md)
 - [FR-038: Export curated training cases](functional/FR-038.md)
+- [FR-069: Pre-register a held-out promotion gate](functional/FR-069.md)
+- [FR-070: Evaluate every pre-registered promotion bar](functional/FR-070.md)
+- [IT-012: Verify a bound held-out gate and process verdict](integration/IT-012.md)
 
 ## References
 
