@@ -25,6 +25,7 @@ Owning component: `sapho-evidence` for dataset validation, scoring, ranking and 
 - [FR-037: Compare bounded development candidates](functional/FR-037.md)
 - [FR-038: Export curated training cases](functional/FR-038.md)
 - [FR-083: Fit a deterministic development calibration map and score it](functional/FR-083.md)
+- [FR-062: Compute an attributable model roster](functional/FR-062.md)
 
 ## References
 
