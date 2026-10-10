@@ -27,6 +27,16 @@ use sapho_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod drift;
+pub mod slice;
+pub use drift::{
+    ConfidenceWindow, DriftReport, DriftSelector, DriftWindow, compare_confidence_windows,
+};
+pub use slice::{
+    DeltaValue, MetricDeltas, RiskDeltas, SliceEntry, SliceKey, SliceReport, WindowAssignment,
+    WindowReport, WindowSlice, WindowSpec, report_slices,
+};
+
 /// Refusals distinguish dataset, coverage and candidate failures at this crate boundary.
 #[derive(Debug, thiserror::Error, Serialize)]
 #[serde(tag = "kind", content = "detail", rename_all = "snake_case")]
@@ -70,6 +80,23 @@ pub enum EvidenceError {
     /// A risk-coverage threshold list is not finite, ordered or within the supported range.
     #[error("Invalid risk-coverage thresholds")]
     InvalidThresholds,
+    /// A slice path or minimum count is invalid.
+    #[error("Invalid slice selector or minimum count")]
+    InvalidSliceSelector,
+    /// A selected case has a present value that cannot serve as a slice key.
+    #[error("Invalid slice value for case {case} at {path}")]
+    InvalidSliceValue {
+        /// Case carrying the invalid value.
+        case: ItemId,
+        /// Exact dotted selector path.
+        path: String,
+    },
+    /// Reference/current membership is incomplete, duplicate or names an unselected case.
+    #[error("Invalid window membership")]
+    InvalidWindowMembership,
+    /// A confidence drift selector, threshold or projected observation is invalid.
+    #[error("Invalid confidence drift input")]
+    InvalidDriftInput,
 }
 /// Explicit development/held-out partition; tuning and exports always select development.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -730,5 +757,9 @@ pub fn export_training(
     }
     Ok(bytes)
 }
+#[cfg(test)]
+mod drift_tests;
+#[cfg(test)]
+mod slice_tests;
 #[cfg(test)]
 mod tests;
