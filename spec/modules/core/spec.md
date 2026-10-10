@@ -30,6 +30,7 @@ Owning crate: `sapho-core`. Internal prerequisites: none. See the [workspace bou
 
 - [FR-032: Decode plain data by a declared type](functional/FR-032.md)
 - [FR-048: Define a one-call structured extraction port](functional/FR-048.md)
+- [FR-081: Represent calibrated probability and a checked calibration map](functional/FR-081.md)
 
 ## References
 
