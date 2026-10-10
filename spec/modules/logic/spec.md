@@ -28,6 +28,7 @@ Owning crate: `sapho-runtime`. Internal prerequisites: core, graph. See the [wor
 - [FR-022: Combine heuristic degrees](functional/FR-022-combine-heuristic-degrees.md)
 - [FR-023: Complement a heuristic degree](functional/FR-023-complement-a-heuristic-degree.md)
 - [FR-024: Coalesce explicit optional values](functional/FR-024-coalesce-explicit-optional-values.md)
+- [FR-077: Merge exactly one present guarded value](functional/FR-077.md)
 
 ## References
 
