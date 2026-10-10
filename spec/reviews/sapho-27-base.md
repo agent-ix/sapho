@@ -26,7 +26,7 @@ The changed public Sapho contracts define an observational graph operation, deci
 
 ## Dispositions
 
-FND-006: ordinary CaseOutcome model identities come only from decision-phase responses; comparison receives shadow identities separately and applies self-source exclusion per role. Unequal scored sets cannot report a win. The synthetic model-source fixture checks ordinary measurement bytes and exit before/after adding shadow.
+FND-006: ordinary CaseOutcome model identities come only from decision-phase responses; comparison receives shadow identities separately and applies self-source exclusion per role. Unequal scored sets cannot report a win. The synthetic model-source fixture checks the decision-only model list, serialized ordinary `Measurement` value and exit before/after adding shadow; graph identity and run-document bytes may differ.
 
 FND-007: the compiler partitions the full shadow-only producer closure into the shadow plan and reuses completed decision-stage shared producers. Runtime schedules shadow-only producers after a successful decision, charges shared limits then, and retains their failure/skip in shadow trace without changing decision bytes or exit. IT-008 exercises native failure and node/data/time exhaustion.
 
