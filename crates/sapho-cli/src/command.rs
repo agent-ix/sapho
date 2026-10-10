@@ -13,7 +13,8 @@ use sapho_core::{
 };
 use sapho_evidence::{
     Candidate, CaseOutcome, Dataset, EvidenceError, Measurement, Metric as ScoreMetric,
-    RankedCandidate, Split, export_training, measure, rank,
+    RankedCandidate, ShadowComparison, ShadowComparisonRequest, ShadowMetric, Split,
+    compare_shadow, export_training, measure, rank,
 };
 use sapho_graph::{GraphFormat, GraphSpec, parse_config};
 use sapho_recording::{Recording, RecordingBackend, ReplayBackend};
@@ -232,6 +233,7 @@ fn invoke(run: RunArgs, invocation: Invocation) -> Result<Response, CliError> {
 struct CaseRun {
     id: ItemId,
     outcome: CaseOutcome,
+    shadow: Option<CaseOutcome>,
     document: Vec<u8>,
 }
 /// The per-case documents of a report, each held compressed and expanded only while it is
@@ -271,6 +273,7 @@ async fn run_cases(
     data: &Dataset,
     split: Split,
     limits: &Limits,
+    shadow: Option<(&str, &str)>,
 ) -> Result<Vec<CaseRun>, CliError> {
     let mut runs = Vec::new();
     for case in data.selected(split) {
@@ -284,10 +287,64 @@ async fn run_cases(
         runs.push(CaseRun {
             id: case.id.clone(),
             outcome: outcome(&report),
+            shadow: shadow.map(|(id, output)| shadow_outcome(&report, id, output)),
             document: compress(&json)?,
         });
     }
     Ok(runs)
+}
+fn shadow_outcome(report: &RunReport, id: &str, output: &str) -> CaseOutcome {
+    let found = report
+        .trace
+        .shadows
+        .iter()
+        .filter(|observation| observation.node.as_str() == id && observation.output == output)
+        .collect::<Vec<_>>();
+    let models = found
+        .iter()
+        .filter_map(|observation| observation.model.as_ref()?.response.as_ref())
+        .map(|response| ModelIdentity {
+            name: response.model.clone(),
+        })
+        .collect();
+    match found.as_slice() {
+        [observation] if observation.status == sapho_runtime::NodeStatus::Completed => {
+            if let Some(value) = &observation.value {
+                CaseOutcome::Completed {
+                    outputs: Inputs::from([(output.into(), value.clone())]),
+                    models,
+                }
+            } else {
+                CaseOutcome::Failed {
+                    error: SaphoError::new(
+                        ErrorCode::MissingAnswer,
+                        "Shadow observation value absent",
+                    ),
+                    models,
+                }
+            }
+        }
+        [observation] => CaseOutcome::Failed {
+            error: observation.error.clone().unwrap_or_else(|| {
+                SaphoError::new(ErrorCode::MissingAnswer, "Shadow observation unavailable")
+            }),
+            models,
+        },
+        [] => CaseOutcome::Failed {
+            error: SaphoError::new(
+                ErrorCode::MissingAnswer,
+                "Selected shadow observation absent",
+            ),
+            models,
+        },
+        _ => CaseOutcome::Failed {
+            error: SaphoError::new(
+                ErrorCode::DuplicateId,
+                "Several shadow observations map to selected output",
+            ),
+            models,
+        },
+    }
 }
 /// Every model that answered during the run, as its backend reported it.
 fn models(report: &RunReport) -> Vec<ModelIdentity> {
@@ -295,7 +352,10 @@ fn models(report: &RunReport) -> Vec<ModelIdentity> {
         .trace
         .nodes
         .iter()
-        .filter_map(|node| node.model.as_ref()?.response.as_ref())
+        .filter_map(|node| {
+            matches!(node.operation, sapho_graph::Operation::Ask { .. })
+                .then_some(node.model.as_ref()?.response.as_ref()?)
+        })
         .map(|response| ModelIdentity {
             name: response.model.clone(),
         })
@@ -318,19 +378,31 @@ fn outcome(report: &RunReport) -> CaseOutcome {
     }
 }
 /// Separate what scoring needs from the finished per-case documents, in case order.
-fn split(runs: Vec<CaseRun>) -> (BTreeMap<ItemId, CaseOutcome>, Documents) {
+fn split(
+    runs: Vec<CaseRun>,
+) -> (
+    BTreeMap<ItemId, CaseOutcome>,
+    BTreeMap<ItemId, CaseOutcome>,
+    Documents,
+) {
     let mut outcomes = BTreeMap::new();
+    let mut shadows = BTreeMap::new();
     let mut documents = Vec::with_capacity(runs.len());
     for run in runs {
+        if let Some(shadow) = run.shadow {
+            shadows.insert(run.id.clone(), shadow);
+        }
         outcomes.insert(run.id, run.outcome);
         documents.push(run.document);
     }
-    (outcomes, Documents(documents))
+    (outcomes, shadows, Documents(documents))
 }
 #[derive(Serialize)]
 struct MeasurementReport {
     graph: GraphArtifact,
     measurement: Measurement,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comparison: Option<ShadowComparison>,
     runs: Documents,
 }
 fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
@@ -357,9 +429,41 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
             replay.map(|registry| move || Ok(registry)),
         )?
     };
+    let selection = args.shadow.as_deref().zip(args.shadow_output.as_deref());
+    if args.shadow.is_some() != args.shadow_output.is_some() {
+        return Err(SaphoError::new(
+            ErrorCode::Config,
+            "Shadow comparison requires --shadow and --shadow-output",
+        )
+        .into());
+    }
+    if let Some((shadow, output)) = selection {
+        let count = runner
+            .inspection()
+            .shadows
+            .iter()
+            .filter(|declared| declared.node.as_str() == shadow)
+            .flat_map(|declared| &declared.observations)
+            .filter(|observation| observation.output == output)
+            .count();
+        if count != 1 {
+            return Err(SaphoError::new(
+                ErrorCode::Config,
+                "Comparison must select exactly one declared shadow observation",
+            )
+            .with_context("shadow", shadow)
+            .with_context("output", output)
+            .into());
+        }
+    }
     let destination = claim(options.output.as_deref())?;
-    let (outcomes, runs) =
-        split(runtime.block_on(run_cases(&runner, &data, selected, &options.limits))?);
+    let (outcomes, shadows, runs) = split(runtime.block_on(run_cases(
+        &runner,
+        &data,
+        selected,
+        &options.limits,
+        selection,
+    ))?);
     let measurement = measure(
         &data,
         selected,
@@ -367,6 +471,30 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         &outcomes,
         options.max_cases,
     )?;
+    let comparison = selection
+        .map(|(shadow, output)| {
+            let request = ShadowComparisonRequest {
+                output: output.into(),
+                shadow: shadow.into(),
+                metric: args
+                    .shadow_metric
+                    .map(ShadowMetric::from)
+                    .unwrap_or(ShadowMetric::Agreement),
+                min_scored: args.shadow_min_scored,
+                margin: args.shadow_margin,
+            };
+            compare_shadow(
+                &data,
+                selected,
+                &runner.inspection().signature.outputs,
+                &outcomes,
+                &shadows,
+                &request,
+                options.max_cases,
+            )
+            .map_err(CliError::from)
+        })
+        .transpose()?;
     let exit = if measurement.complete() {
         ExitStatus::Completed
     } else {
@@ -376,6 +504,7 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         MeasurementReport {
             graph,
             measurement,
+            comparison,
             runs,
         },
         exit,
@@ -481,7 +610,7 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
         let mut result = Vec::new();
         for runner in &prepared {
             result.push(if let Some(runner) = runner {
-                run_cases(runner, &data, Split::Development, &options.limits).await?
+                run_cases(runner, &data, Split::Development, &options.limits, None).await?
             } else {
                 Vec::new()
             });
@@ -491,7 +620,7 @@ fn tuning(args: TuneArgs) -> Result<Response, CliError> {
     let mut scored = Vec::new();
     for ((report, runner), runs) in reports.iter_mut().zip(prepared).zip(runs) {
         if let Some(runner) = runner {
-            let (outcomes, runs) = split(runs);
+            let (outcomes, _, runs) = split(runs);
             let measurement = measure(
                 &data,
                 Split::Development,

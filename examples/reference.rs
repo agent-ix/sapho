@@ -86,9 +86,10 @@ fn operation_case(operation: &Operation) -> &'static str {
         | Operation::Collect => "collections",
         Operation::Coalesce => "guards",
         Operation::Code { .. } => "native",
-        Operation::Questions { .. } | Operation::Ask { .. } | Operation::Probability { .. } => {
-            "questions"
-        }
+        Operation::Questions { .. }
+        | Operation::Ask { .. }
+        | Operation::ShadowAsk { .. }
+        | Operation::Probability { .. } => "questions",
     }
 }
 /// The reference case that asks each question kind, exhaustive like `operation_case`.

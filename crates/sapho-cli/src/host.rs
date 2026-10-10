@@ -6,7 +6,7 @@ use sapho_core::{
     BackendId, BackendRegistry, ErrorCode, Inputs, NodeId, PrimitiveId, PrimitiveRegistry,
     SaphoError, Signature, Value, check_ports, decode_plain,
 };
-use sapho_graph::{CompiledGraph, GraphSpec, Operation, compile};
+use sapho_graph::{CompiledGraph, GraphSpec, Operation, ShadowObservation, compile};
 use sapho_runtime::{Engine, RunLimits, Trace};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -40,6 +40,9 @@ pub struct StageGroup {
     pub scope: Vec<String>,
     /// Dependency stages preserving declaration-order ties.
     pub stages: Vec<Vec<NodeId>>,
+    /// Shadow-only stages evaluated after the decision, when present.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadow_stages: Vec<Vec<NodeId>>,
 }
 /// Pure compile/inspection report without native work, credentials or inference.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,6 +56,20 @@ pub struct Inspection {
     pub backends: Vec<BackendId>,
     /// Native implementations required to compile all declared definitions.
     pub primitives: Vec<PrimitiveId>,
+    /// Observational asks and their declared output mappings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadows: Vec<ShadowInspection>,
+}
+/// One compiled shadow ask visible before any inference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShadowInspection {
+    /// Shadow ask node identity.
+    pub node: NodeId,
+    /// Backend binding name.
+    pub backend: BackendId,
+    /// Typed projections onto public decision outputs.
+    pub observations: Vec<ShadowObservation>,
 }
 fn describe(graph: &CompiledGraph, spec: &GraphSpec) -> Inspection {
     fn visit(
@@ -68,9 +85,16 @@ fn describe(graph: &CompiledGraph, spec: &GraphSpec) -> Inspection {
                 .iter()
                 .map(|stage| stage.iter().map(|n| n.spec().id.clone()).collect())
                 .collect(),
+            shadow_stages: graph
+                .shadow_stages()
+                .iter()
+                .map(|stage| stage.iter().map(|n| n.spec().id.clone()).collect())
+                .collect(),
         });
-        for node in graph.stages().iter().flatten() {
-            if let Operation::Ask { backend } = &node.spec().operation {
+        for node in graph.stages().iter().chain(graph.shadow_stages()).flatten() {
+            if let Operation::Ask { backend } | Operation::ShadowAsk { backend, .. } =
+                &node.spec().operation
+            {
                 backends.insert(backend.clone());
             }
             if let Some(child) = node.mapped_graph() {
@@ -95,11 +119,32 @@ fn describe(graph: &CompiledGraph, spec: &GraphSpec) -> Inspection {
             }
         })
         .collect::<BTreeSet<_>>();
+    let shadows = graph
+        .shadow_stages()
+        .iter()
+        .flatten()
+        .filter_map(|node| {
+            if let Operation::ShadowAsk {
+                backend,
+                observations,
+            } = &node.spec().operation
+            {
+                Some(ShadowInspection {
+                    node: node.spec().id.clone(),
+                    backend: backend.clone(),
+                    observations: observations.clone(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
     Inspection {
         signature: graph.signature().clone(),
         groups,
         backends: backends.into_iter().collect(),
         primitives: primitives.into_iter().collect(),
+        shadows,
     }
 }
 /// Validate and describe a graph using the host's explicit primitive registry; no execution.

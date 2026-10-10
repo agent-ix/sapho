@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Pure dependency ordering, signature checking and native implementation binding.
-use crate::{Binding, Comparator, GraphBody, GraphSpec, NodeSpec, Operation, Reducer};
+use crate::{
+    Binding, Comparator, GraphBody, GraphSpec, NodeSpec, Operation, Reducer, ShadowProjection,
+};
 use sapho_core::{
     ErrorCode, NodeId, Primitive, PrimitiveRegistry, Result, SaphoError, Signature, ValueType,
     validate_name, validate_questions,
@@ -18,6 +20,8 @@ pub struct CompiledGraph {
     pub(crate) signature: Signature,
     /// Stable topological stages, each in declaration order.
     pub(crate) stages: Vec<Vec<CompiledNode>>,
+    /// Shadow-only dependency stages, followed by observational asks.
+    pub(crate) shadow_stages: Vec<Vec<CompiledNode>>,
     /// Named graph output bindings.
     pub(crate) outputs: BTreeMap<String, Binding>,
     map_depth: usize,
@@ -214,8 +218,143 @@ impl Compiler<'_> {
                 "Graph has no named outputs",
             ));
         }
+        for n in &body.nodes {
+            if let Operation::ShadowAsk { observations, .. } = &n.operation {
+                if observations.is_empty() {
+                    return Err(SaphoError::new(
+                        ErrorCode::Config,
+                        "Shadow ask needs observations",
+                    ));
+                }
+                let mut names = BTreeSet::new();
+                for observation in observations {
+                    validate_name(&observation.name)?;
+                    if !names.insert(&observation.name)
+                        || observation.question.is_empty()
+                        || observation.labels.is_empty()
+                        || observation.labels.iter().any(String::is_empty)
+                        || observation.labels.iter().collect::<BTreeSet<_>>().len()
+                            != observation.labels.len()
+                    {
+                        return Err(SaphoError::new(
+                            ErrorCode::Config,
+                            "Invalid shadow observation",
+                        )
+                        .with_context("shadow", n.id.to_string()));
+                    }
+                    let expected = match observation.projection {
+                        ShadowProjection::Boolean { .. } => ValueType::Boolean,
+                        ShadowProjection::Probability => ValueType::Probability,
+                    };
+                    if outputs.get(&observation.output) != Some(&expected) {
+                        return Err(SaphoError::new(
+                            ErrorCode::TypeMismatch,
+                            "Shadow observation output mismatch",
+                        )
+                        .with_context("shadow", n.id.to_string())
+                        .with_context("output", &observation.output));
+                    }
+                }
+            }
+        }
+        let shadow_ids = body
+            .nodes
+            .iter()
+            .filter_map(|n| {
+                matches!(n.operation, Operation::ShadowAsk { .. }).then_some(n.id.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        if depth > 0 && !shadow_ids.is_empty() {
+            return Err(SaphoError::new(
+                ErrorCode::Config,
+                "Shadow asks in mapped subgraphs are not supported",
+            ));
+        }
+        let by_id = body
+            .nodes
+            .iter()
+            .map(|n| (n.id.clone(), n))
+            .collect::<BTreeMap<_, _>>();
+        for n in &body.nodes {
+            if !shadow_ids.contains(&n.id)
+                && let Some(shadow) = dependencies[&n.id]
+                    .iter()
+                    .find(|id| shadow_ids.contains(*id))
+            {
+                return Err(SaphoError::new(
+                    ErrorCode::TypeMismatch,
+                    "Decision depends on shadow ask",
+                )
+                .with_context("shadow", shadow.to_string())
+                .with_context("node", n.id.to_string()));
+            }
+        }
+        for (name, binding) in &body.outputs {
+            if let Binding::Node { node, .. } = binding
+                && shadow_ids.contains(node)
+            {
+                return Err(SaphoError::new(
+                    ErrorCode::TypeMismatch,
+                    "Decision output depends on shadow ask",
+                )
+                .with_context("shadow", node.to_string())
+                .with_context("output", name));
+            }
+        }
+        let mut shadow_ancestors = BTreeSet::new();
+        for shadow in &shadow_ids {
+            collect_dependencies(shadow, &dependencies, &mut shadow_ancestors);
+            for ancestor in &shadow_ancestors {
+                let ask_derived = match &by_id[ancestor].operation {
+                    Operation::Ask { .. } | Operation::ShadowAsk { .. } => true,
+                    Operation::Map { graph } => {
+                        self.cache.get(graph).is_some_and(|g| contains_ask(g))
+                    }
+                    _ => false,
+                };
+                if ask_derived {
+                    return Err(SaphoError::new(
+                        ErrorCode::TypeMismatch,
+                        "Shadow input depends on an ask",
+                    )
+                    .with_context("shadow", shadow.to_string())
+                    .with_context("producer", ancestor.to_string()));
+                }
+            }
+        }
+        let mut decision_required = BTreeSet::new();
+        for n in &body.nodes {
+            if !shadow_ids.contains(&n.id) && !shadow_ancestors.contains(&n.id) {
+                decision_required.insert(n.id.clone());
+                collect_dependencies(&n.id, &dependencies, &mut decision_required);
+            }
+        }
+        for binding in body.outputs.values() {
+            if let Binding::Node { node, .. } = binding {
+                decision_required.insert(node.clone());
+                collect_dependencies(node, &dependencies, &mut decision_required);
+            }
+        }
+        let (stages, shadow_stages): (Vec<_>, Vec<_>) = stages
+            .into_iter()
+            .map(|stage| {
+                let (decision, shadow): (Vec<_>, Vec<_>) = stage
+                    .into_iter()
+                    .partition(|n| decision_required.contains(&n.spec.id));
+                (decision, shadow)
+            })
+            .unzip();
+        let stages = stages
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+        let shadow_stages = shadow_stages
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
         let map_depth = stages
             .iter()
+            .chain(shadow_stages.iter())
             .flatten()
             .filter_map(|n| n.mapped_graph.as_ref())
             .map(|g| g.map_depth + 1)
@@ -231,6 +370,7 @@ impl Compiler<'_> {
                 outputs,
             },
             stages,
+            shadow_stages,
             outputs: body.outputs.clone(),
         })
     }
@@ -288,7 +428,7 @@ impl Compiler<'_> {
                 validate_questions(questions)?;
                 (BTreeMap::new(), one("result", ValueType::Questions))
             }
-            Operation::Ask { backend } => {
+            Operation::Ask { backend } | Operation::ShadowAsk { backend, .. } => {
                 backend.validate()?;
                 let state = operand(ins, "state")?.clone();
                 if !matches!(state, ValueType::Record { .. }) {
@@ -538,6 +678,35 @@ fn mismatch(message: &str) -> SaphoError {
 fn limit(message: &str) -> SaphoError {
     SaphoError::new(ErrorCode::LimitExceeded, message)
 }
+fn collect_dependencies(
+    node: &NodeId,
+    dependencies: &BTreeMap<NodeId, BTreeSet<NodeId>>,
+    into: &mut BTreeSet<NodeId>,
+) {
+    if let Some(direct) = dependencies.get(node) {
+        for dependency in direct {
+            if into.insert(dependency.clone()) {
+                collect_dependencies(dependency, dependencies, into);
+            }
+        }
+    }
+}
+fn contains_ask(graph: &CompiledGraph) -> bool {
+    graph
+        .stages
+        .iter()
+        .chain(&graph.shadow_stages)
+        .flatten()
+        .any(|node| {
+            matches!(
+                node.spec.operation,
+                Operation::Ask { .. } | Operation::ShadowAsk { .. }
+            ) || node
+                .mapped_graph
+                .as_ref()
+                .is_some_and(|child| contains_ask(child))
+        })
+}
 
 impl CompiledGraph {
     /// Borrow the compiled input/output contract.
@@ -547,6 +716,10 @@ impl CompiledGraph {
     /// Borrow immutable topological stages.
     pub fn stages(&self) -> &[Vec<CompiledNode>] {
         &self.stages
+    }
+    /// Borrow shadow-only stages, ordered after decision work.
+    pub fn shadow_stages(&self) -> &[Vec<CompiledNode>] {
+        &self.shadow_stages
     }
     /// Borrow checked output bindings.
     pub fn outputs(&self) -> &BTreeMap<String, Binding> {
