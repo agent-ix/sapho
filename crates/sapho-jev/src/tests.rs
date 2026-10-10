@@ -18,6 +18,7 @@ fn request() -> ModelRequest {
         end: Some(17),
     });
     ModelRequest {
+        sample_index: None,
         distribution_policy: sapho_core::DistributionPolicy::Strict {},
         backend: BackendId::new("hosted").unwrap(),
         model: "requested-alias".into(),

@@ -385,6 +385,9 @@ pub struct ModelRequest {
     pub state: Value,
     /// Ordered question block: one explicit batch.
     pub questions: Vec<NamedQuestion>,
+    /// Exact repeated-Ask identity, omitted on the legacy one-call path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_index: Option<u32>,
 }
 impl ModelRequest {
     /// Validate the request before transport or recording.

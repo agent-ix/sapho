@@ -314,7 +314,7 @@ impl Engine {
                         self.finish(node, index, outputs, true, state, &mut values)?;
                         continue;
                     }
-                    if let Operation::Ask { backend } = &node.spec().operation {
+                    if let Operation::Ask { backend, .. } = &node.spec().operation {
                         let prepared = (|| {
                             let binding = self.backends.get(backend)?;
                             let state_value = operators::operand(&ins, "state")?.clone();
@@ -327,6 +327,7 @@ impl Engine {
                                 ));
                             };
                             let request = ModelRequest {
+                                sample_index: None,
                                 distribution_policy: binding.distribution_policy,
                                 backend: backend.clone(),
                                 model: binding.model,
@@ -812,7 +813,7 @@ impl Engine {
 }
 fn validate_backends(graph: &CompiledGraph, backends: &BackendRegistry) -> Result<()> {
     for node in graph.stages().iter().chain(graph.shadow_stages()).flatten() {
-        if let Operation::Ask { backend } | Operation::ShadowAsk { backend, .. } =
+        if let Operation::Ask { backend, .. } | Operation::ShadowAsk { backend, .. } =
             &node.spec().operation
         {
             backends.get(backend)?;

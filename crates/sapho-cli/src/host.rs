@@ -94,7 +94,7 @@ fn describe(graph: &CompiledGraph, spec: &GraphSpec) -> Inspection {
                 .collect(),
         });
         for node in graph.stages().iter().chain(graph.shadow_stages()).flatten() {
-            if let Operation::Ask { backend } | Operation::ShadowAsk { backend, .. } =
+            if let Operation::Ask { backend, .. } | Operation::ShadowAsk { backend, .. } =
                 &node.spec().operation
             {
                 backends.insert(backend.clone());

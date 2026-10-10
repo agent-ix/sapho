@@ -205,6 +205,7 @@ fn missing_clm_feature_refuses_without_credentials() {
 #[tokio::test]
 async fn explicit_clm_replay_checks_only_model_and_policy_without_guessing_provider() {
     let request = ModelRequest {
+        sample_index: None,
         backend: BackendId::new("decision").unwrap(),
         model: "clm-latest".into(),
         expected_model: None,
@@ -288,6 +289,7 @@ async fn explicit_clm_replay_checks_only_model_and_policy_without_guessing_provi
 async fn replay_read_from_json_binds_the_same_identities_and_refuses_the_same_conflicts() {
     let exchange = |model: &str, text: &str| {
         let request = ModelRequest {
+            sample_index: None,
             backend: BackendId::new("decision").unwrap(),
             model: model.into(),
             expected_model: None,

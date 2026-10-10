@@ -459,7 +459,35 @@ impl Compiler<'_> {
                 validate_questions(questions)?;
                 (BTreeMap::new(), one("result", ValueType::Questions))
             }
-            Operation::Ask { backend } | Operation::ShadowAsk { backend, .. } => {
+            Operation::Ask { backend, samples } => {
+                backend.validate()?;
+                if *samples == 0 || *samples > u64::from(u32::MAX) + 1 {
+                    return Err(mismatch("Ask samples out of range"));
+                }
+                let state = operand(ins, "state")?.clone();
+                if !matches!(state, ValueType::Record { .. }) {
+                    return Err(mismatch("Ask state must be Record"));
+                }
+                (
+                    BTreeMap::from([
+                        ("state".into(), state),
+                        ("questions".into(), ValueType::Questions),
+                    ]),
+                    if *samples == 1 {
+                        BTreeMap::from([
+                            ("answers".into(), ValueType::Answers),
+                            ("model".into(), ValueType::Text),
+                        ])
+                    } else {
+                        BTreeMap::from([
+                            ("answers".into(), ValueType::list(ValueType::Answers)),
+                            ("models".into(), ValueType::list(ValueType::Text)),
+                            ("disagreement".into(), ValueType::Degree),
+                        ])
+                    },
+                )
+            }
+            Operation::ShadowAsk { backend, .. } => {
                 backend.validate()?;
                 let state = operand(ins, "state")?.clone();
                 if !matches!(state, ValueType::Record { .. }) {
