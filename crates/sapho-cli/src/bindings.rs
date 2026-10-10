@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Credential-free binding metadata, explicit capture and offline exact replay.
-use crate::CliError;
+use crate::{CliError, ServiceConfig};
+use ix_cli_kit::secrets::{CredentialBackend, SecretStore};
 use sapho_core::{
     BackendBinding, BackendId, BackendRegistry, DistributionPolicy, ErrorCode, SaphoError,
 };
@@ -17,6 +18,8 @@ pub enum Provider {
     Jev,
     /// Host-configured CLM System One service.
     Clm,
+    /// Named host-configured System One contract service.
+    Systemone,
     /// A running Ollama server; the URL comes from `OLLAMA_BASE_URL`, never from a document.
     Ollama,
 }
@@ -235,6 +238,20 @@ pub fn live_bindings(
     required: &[BackendId],
     bindings: &Bindings,
 ) -> Result<BackendRegistry, CliError> {
+    live_bindings_with_services(
+        required,
+        bindings,
+        &ServiceConfig::default(),
+        &SecretStore::system(),
+    )
+}
+/// Prepare required live bindings using host-only named services and a synchronous secret store.
+pub fn live_bindings_with_services<B: CredentialBackend>(
+    required: &[BackendId],
+    bindings: &Bindings,
+    services: &ServiceConfig,
+    store: &SecretStore<B>,
+) -> Result<BackendRegistry, CliError> {
     let mut registry = BackendRegistry::default();
     for id in required {
         let binding = bindings.get(id).ok_or_else(|| {
@@ -254,11 +271,35 @@ pub fn live_bindings(
         let backend: Arc<dyn sapho_core::ModelBackend> = match binding.provider {
             Provider::Jev => prepare_jev()?,
             Provider::Clm => prepare_clm()?,
+            Provider::Systemone => prepare_systemone(id, services, store)?,
             Provider::Ollama => prepare_ollama(binding)?,
         };
         registry.register(id.clone(), binding.attach(backend))?;
     }
     Ok(registry)
+}
+#[cfg(feature = "clm")]
+fn prepare_systemone<B: CredentialBackend>(
+    id: &BackendId,
+    services: &ServiceConfig,
+    store: &SecretStore<B>,
+) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    let entry = services.required(id)?;
+    let secret = crate::service_credential(entry, store)?;
+    let limits = entry
+        .limits
+        .map_or_else(sapho_clm::Limits::default, |value| value.adapter());
+    sapho_clm::ClmBackend::new(&entry.base_url, secret.as_ref(), limits)
+        .map(|backend| Arc::new(backend) as Arc<dyn sapho_core::ModelBackend>)
+        .map_err(|_| crate::services::config_error(id, "Invalid service transport"))
+}
+#[cfg(not(feature = "clm"))]
+fn prepare_systemone<B: CredentialBackend>(
+    _: &BackendId,
+    _: &ServiceConfig,
+    _: &SecretStore<B>,
+) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    Err(CliError::Feature(Provider::Systemone))
 }
 /// The Ollama server URL: the `OLLAMA_BASE_URL` value when set and nonempty, else the
 /// loopback default. An empty value counts as unset.

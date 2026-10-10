@@ -12,6 +12,7 @@ impl Provider {
         match self {
             Self::Jev => Some("TYPESAFE_API_KEY"),
             Self::Clm => Some("CLM_API_KEY"),
+            Self::Systemone => None,
             Self::Ollama => None,
         }
     }
@@ -19,6 +20,7 @@ impl Provider {
         match self {
             Self::Jev => Some("jev-api-key"),
             Self::Clm => Some("clm-api-key"),
+            Self::Systemone => None,
             Self::Ollama => None,
         }
     }

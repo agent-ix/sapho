@@ -409,7 +409,7 @@ fn production_roundtrip(provider: Provider) {
     let (model, provider_name, endpoint_env) = match provider {
         Provider::Clm => ("clm-latest", "clm", "CLM_BASE_URL"),
         Provider::Jev => ("jev-latest", "jev", "TYPESAFE_BASE_URL"),
-        Provider::Ollama => return,
+        Provider::Ollama | Provider::Systemone => return,
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
