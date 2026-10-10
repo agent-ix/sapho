@@ -8,15 +8,24 @@ use sapho_cli::{
     recording_bindings, replay_bindings_json, select_format,
 };
 use sapho_core::{
-    BackendRegistry, ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry, SaphoError,
-    SourceId, ValueType, bounded_json, check_ports, decode_json, measured_json_bytes,
+    BackendRegistry, ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry,
+    ProviderDescriptor, Question, SaphoError, SourceId, ValueType, bounded_json, check_ports,
+    decode_json, measured_json_bytes,
 };
 use sapho_evidence::{
     Candidate, CaseOutcome, Dataset, EvidenceError, Measurement, Metric as ScoreMetric,
-    RankedCandidate, Split, export_training, measure, rank,
+    RankedCandidate, Roster, RosterCall, RosterCase, RosterContributor, RosterMapping, RosterMode,
+    RosterQuestionKind, RosterSelection, Split, export_training, measure, project_roster_literal,
+    rank, roster,
 };
-use sapho_graph::{GraphFormat, GraphSpec, parse_config};
+use sapho_graph::{
+    Binding, GraphFormat, GraphSpec, Operation, graph_semantic_identity, parse_config,
+};
 use sapho_recording::{Recording, RecordingBackend, ReplayBackend};
+use sapho_runtime::{
+    ModelCallObservation, NodeStatus, ObservationConfig, ObservationMode, SystemObservationClock,
+    Trace,
+};
 use serde::Serialize;
 use serde_json::value::RawValue;
 use std::{
@@ -383,6 +392,248 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         destination,
     )
 }
+fn contributing_responses(
+    graph: &GraphSpec,
+    trace: &Trace,
+) -> BTreeMap<String, Vec<RosterContributor>> {
+    let by_path = trace
+        .nodes
+        .iter()
+        .map(|node| (node.path.clone(), node))
+        .collect::<BTreeMap<_, _>>();
+    graph
+        .outputs
+        .iter()
+        .map(|(output, binding)| {
+            let mut pending = Vec::new();
+            if let Binding::Node { node, .. } = binding {
+                pending.push(vec!["root".into(), node.to_string()]);
+            }
+            let mut visited = std::collections::BTreeSet::new();
+            while let Some(path) = pending.pop() {
+                if !visited.insert(path.clone()) {
+                    continue;
+                }
+                if let Some(node) = by_path.get(&path) {
+                    pending.extend(node.dependencies.iter().cloned());
+                    if matches!(node.operation, Operation::Map { .. }) {
+                        pending.extend(
+                            by_path
+                                .keys()
+                                .filter(|child| {
+                                    child.len() > path.len() && child.starts_with(&path)
+                                })
+                                .cloned(),
+                        );
+                    }
+                }
+            }
+            let questions = visited
+                .iter()
+                .filter_map(|path| match &by_path.get(path)?.operation {
+                    Operation::Probability { question, .. } => Some(question.as_str()),
+                    _ => None,
+                })
+                .collect::<std::collections::BTreeSet<_>>();
+            let contributors = visited
+                .iter()
+                .filter_map(|path| {
+                    let node = by_path.get(path)?;
+                    let Operation::Ask { backend } = &node.operation else {
+                        return None;
+                    };
+                    if node.status != NodeStatus::Completed {
+                        return None;
+                    }
+                    let model = node.model.as_ref()?;
+                    let response = model.response.as_ref()?;
+                    let mut kinds = model
+                        .request
+                        .questions
+                        .iter()
+                        .filter(|named| {
+                            questions.is_empty() || questions.contains(named.id.as_str())
+                        })
+                        .map(|named| match named.question {
+                            Question::Boolean { .. } => RosterQuestionKind::Boolean,
+                            Question::Choice { .. } => RosterQuestionKind::Choice,
+                            Question::Score { .. } => RosterQuestionKind::Score,
+                        });
+                    let first = kinds.next();
+                    let question_kind = first.filter(|first| kinds.all(|kind| kind == *first));
+                    Some(RosterContributor {
+                        binding: backend.clone(),
+                        actual_model: Some(response.model.clone()),
+                        question_kind,
+                    })
+                })
+                .collect();
+            (output.clone(), contributors)
+        })
+        .collect()
+}
+fn roster_call(call: ModelCallObservation) -> RosterCall {
+    RosterCall {
+        path: call.path,
+        binding: call.binding,
+        actual_model: call.actual_model,
+        completed: call.status == NodeStatus::Completed,
+        usage: call.usage,
+        elapsed_micros: call.elapsed_micros,
+        descriptor: call.descriptor,
+        mode: match call.mode {
+            ObservationMode::Live => RosterMode::Live,
+            ObservationMode::Replay => RosterMode::Replay,
+        },
+    }
+}
+fn stock_descriptors(metadata: &Bindings) -> BTreeMap<sapho_core::BackendId, ProviderDescriptor> {
+    metadata
+        .iter()
+        .map(|(id, config)| {
+            let name = match config.provider {
+                sapho_cli::Provider::Jev => "jev",
+                sapho_cli::Provider::Clm => "clm",
+                sapho_cli::Provider::Ollama => "ollama",
+            };
+            (
+                id.clone(),
+                ProviderDescriptor {
+                    provider: Some(name.into()),
+                    adapter: Some(name.into()),
+                },
+            )
+        })
+        .collect()
+}
+fn roster_command(args: RosterArgs) -> Result<Response, CliError> {
+    let options = &args.options;
+    let output_path = options
+        .output
+        .as_deref()
+        .ok_or_else(|| SaphoError::new(ErrorCode::Config, "Roster requires --output"))?;
+    let selected = Split::from(args.split);
+    let data = dataset(
+        &options.dataset,
+        options.limits.max_artifact_bytes,
+        options.max_cases,
+    )?;
+    if data.selected(selected).next().is_none() {
+        return Err(EvidenceError::EmptySplit(selected).into());
+    }
+    let graph = load_graph(&args.graph.graph, args.graph.format.map(GraphFormat::from))?;
+    let mapping_text = read_bytes(&args.mapping, 1_048_576)?;
+    let mappings: BTreeMap<String, RosterMapping> = parse_config(
+        std::str::from_utf8(&mapping_text)
+            .map_err(|_| SaphoError::new(ErrorCode::Config, "Roster mapping must be UTF-8"))?,
+        select_format(&args.mapping, None)?,
+    )?;
+    let metadata = bindings(options.bindings.as_deref())?;
+    let replay = options
+        .replay
+        .as_deref()
+        .map(|path| replay_registry(path, &metadata, options.limits.max_artifact_bytes))
+        .transpose()?;
+    let mode = if replay.is_some() {
+        ObservationMode::Replay
+    } else {
+        ObservationMode::Live
+    };
+    let runtime = runtime()?;
+    let (runner, required) = {
+        let _entered = runtime.enter();
+        prepare(
+            &graph.definition,
+            &metadata,
+            replay.map(|registry| move || Ok(registry)),
+        )?
+    };
+    for (output, mapping) in &mappings {
+        sapho_core::validate_name(output)?;
+        if !runner.inspection().signature.outputs.contains_key(output)
+            || !required.contains(&mapping.binding)
+        {
+            return Err(
+                SaphoError::new(ErrorCode::Config, "Invalid roster output mapping")
+                    .with_context("output", output)
+                    .into(),
+            );
+        }
+    }
+    let config = ObservationConfig {
+        mode,
+        descriptors: stock_descriptors(&metadata),
+        clock: Arc::new(SystemObservationClock),
+    };
+    config.validate()?;
+    let destination = claim(Some(output_path))?;
+    let report = (|| -> Result<Roster, CliError> {
+        let mut cases = BTreeMap::new();
+        for case in data.selected(selected) {
+            let (report, calls) = runtime.block_on(runner.run_observed(
+                &case.inputs,
+                options.limits.run(),
+                None,
+                &config,
+            ))?;
+            let lineage = contributing_responses(&graph.definition, &report.trace);
+            cases.insert(
+                case.id.clone(),
+                RosterCase {
+                    outcome: outcome(&report),
+                    calls: calls.into_iter().map(roster_call).collect(),
+                    lineage,
+                },
+            );
+        }
+        let identity = graph_semantic_identity(&graph.definition)?;
+        Ok(roster(
+            &data,
+            selected,
+            &identity,
+            env!("CARGO_PKG_VERSION"),
+            &runner.inspection().signature.outputs,
+            &mappings,
+            &cases,
+            options.max_cases,
+        )?)
+    })();
+    let report = match report {
+        Ok(report) => report,
+        Err(error) => {
+            if let Some(destination) = destination {
+                destination.discard()?;
+            }
+            return Err(error);
+        }
+    };
+    respond(
+        report,
+        ExitStatus::Completed,
+        options.limits.max_artifact_bytes,
+        destination,
+    )
+}
+fn roster_literal_command(args: RosterLiteralArgs) -> Result<Response, CliError> {
+    let report: Roster = decode_json(
+        &read_bytes(&args.roster, args.max_artifact_bytes)?,
+        args.max_artifact_bytes,
+    )?;
+    let selections: Vec<RosterSelection> =
+        decode_json(&read_bytes(&args.selection, 1_048_576)?, 1_048_576)?;
+    let projected = project_roster_literal(&report, &selections, args.max_artifact_bytes)?;
+    let literal = Binding::Literal {
+        value: projected.value,
+        value_type: projected.value_type,
+    };
+    let destination = claim(Some(&args.output))?;
+    respond(
+        literal,
+        ExitStatus::Completed,
+        args.max_artifact_bytes,
+        destination,
+    )
+}
 #[derive(Serialize)]
 struct CandidateReport {
     id: SourceId,
@@ -649,6 +900,8 @@ pub(crate) fn execute(cli: Cli) -> Result<Response, CliError> {
         Command::Record { run, recording } => invoke(run, Invocation::Record(recording)),
         Command::Replay { run, recording } => invoke(run, Invocation::Replay(recording)),
         Command::Measure(args) => measurement(args),
+        Command::Roster(args) => roster_command(args),
+        Command::RosterLiteral(args) => roster_literal_command(args),
         Command::Tune(args) => tuning(args),
         Command::ExportTraining {
             dataset: path,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Cooperative bounded orchestration, including dependent map subgraphs.
+use crate::observation::{self, ModelCallObservation, ObservationClock, ObservationConfig};
 use crate::{ModelEvidence, NodeStatus, NodeTrace, Trace, operators};
 use futures::{
     future::BoxFuture,
@@ -12,9 +13,9 @@ use sapho_core::{
 };
 use sapho_graph::{Binding, CompiledGraph, CompiledNode, Operation};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -110,18 +111,49 @@ impl Engine {
         inputs: &Inputs,
         limits: RunLimits,
     ) -> std::result::Result<RunResult, RunFailure> {
+        self.run_internal(inputs, limits, None).await.0
+    }
+    /// Execute with a separate model-call observation sidecar.
+    pub async fn run_observed(
+        &self,
+        inputs: &Inputs,
+        limits: RunLimits,
+        config: &ObservationConfig,
+    ) -> Result<(
+        std::result::Result<RunResult, RunFailure>,
+        Vec<ModelCallObservation>,
+    )> {
+        config.validate()?;
+        Ok(self.run_internal(inputs, limits, Some(config)).await)
+    }
+    async fn run_internal(
+        &self,
+        inputs: &Inputs,
+        limits: RunLimits,
+        config: Option<&ObservationConfig>,
+    ) -> (
+        std::result::Result<RunResult, RunFailure>,
+        Vec<ModelCallObservation>,
+    ) {
         let fail = |error| RunFailure {
             error,
             trace: Trace::default(),
         };
-        limits.validate().map_err(fail)?;
-        check_ports(&self.graph.signature().inputs, inputs).map_err(fail)?;
-        let deadline = Instant::now().checked_add(limits.duration).ok_or_else(|| {
-            fail(SaphoError::new(
-                ErrorCode::InvalidValue,
-                "Duration exceeds monotonic clock range",
-            ))
-        })?;
+        if let Err(error) = limits
+            .validate()
+            .and_then(|()| check_ports(&self.graph.signature().inputs, inputs))
+        {
+            return (Err(fail(error)), Vec::new());
+        }
+        let Some(deadline) = Instant::now().checked_add(limits.duration) else {
+            return (
+                Err(fail(SaphoError::new(
+                    ErrorCode::InvalidValue,
+                    "Duration exceeds monotonic clock range",
+                ))),
+                Vec::new(),
+            );
+        };
         let mut state = RunState {
             limits,
             deadline,
@@ -131,12 +163,20 @@ impl Engine {
             bytes: 0,
             trace: Trace::default(),
             cancelled: Arc::new(AtomicBool::new(false)),
+            clock: config.map(|c| c.clock.clone()),
+            durations: BTreeMap::new(),
+            started: Arc::new(Mutex::new(BTreeMap::new())),
         };
-        state.data(inputs).map_err(|error| RunFailure {
-            error,
-            trace: state.trace.clone(),
-        })?;
-        match self
+        if let Err(error) = state.data(inputs) {
+            return (
+                Err(RunFailure {
+                    error,
+                    trace: state.trace.clone(),
+                }),
+                Vec::new(),
+            );
+        }
+        let result = match self
             .graph_run(&self.graph, inputs.clone(), vec!["root".into()], &mut state)
             .await
         {
@@ -158,7 +198,24 @@ impl Engine {
                     trace: state.trace.clone(),
                 })
             }
-        }
+        };
+        let observations = config.map_or_else(Vec::new, |c| {
+            let started = state
+                .started
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let attempted = started.keys().copied().collect::<BTreeSet<_>>();
+            if c.mode == observation::ObservationMode::Live {
+                for (index, at) in started.iter() {
+                    state.durations.entry(*index).or_insert_with(|| {
+                        u64::try_from(c.clock.now().saturating_duration_since(*at).as_micros())
+                            .unwrap_or(u64::MAX)
+                    });
+                }
+            }
+            observation::collect(&state.trace, &state.durations, &attempted, c)
+        });
+        (result, observations)
     }
     fn graph_run<'a>(
         &'a self,
@@ -308,8 +365,20 @@ impl Engine {
                 for chunk in asks.chunks(state.limits.concurrency) {
                     let mut futures = FuturesUnordered::new();
                     let deadline = tokio::time::Instant::from_std(state.deadline);
-                    for (order, (_, _, _, _, backend, request)) in chunk.iter().enumerate() {
+                    let clock = state.clock.clone();
+                    let started_calls = state.started.clone();
+                    for (order, (_, index, _, _, backend, request)) in chunk.iter().enumerate() {
+                        let clock = clock.clone();
+                        let started_calls = started_calls.clone();
+                        let index = *index;
                         futures.push(async move {
+                            let started = clock.as_ref().map(|clock| clock.now());
+                            if let Some(at) = started {
+                                started_calls
+                                    .lock()
+                                    .unwrap_or_else(|poison| poison.into_inner())
+                                    .insert(index, at);
+                            }
                             let response =
                                 tokio::time::timeout_at(deadline, backend.infer(request))
                                     .await
@@ -320,14 +389,25 @@ impl Engine {
                                         )
                                     })
                                     .and_then(|r| r);
-                            (order, response)
+                            let elapsed = started.and_then(|start| {
+                                clock
+                                    .as_ref()
+                                    .map(|clock| clock.now().saturating_duration_since(start))
+                            });
+                            (order, response, elapsed)
                         });
                     }
-                    while let Some((order, result)) = futures.next().await {
+                    while let Some((order, result, elapsed)) = futures.next().await {
                         let (node, index, np, ins, _, request) =
                             chunk.get(order).ok_or_else(|| {
                                 SaphoError::new(ErrorCode::BackendFailed, "Model task order absent")
                             })?;
+                        if let Some(elapsed) = elapsed {
+                            state.durations.insert(
+                                *index,
+                                u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+                            );
+                        }
                         let processed = (|| {
                             let response = result?;
                             if let Some(evidence) = &mut state.trace_entry(*index)?.model {
@@ -613,6 +693,9 @@ struct RunState {
     bytes: usize,
     trace: Trace,
     cancelled: Arc<AtomicBool>,
+    clock: Option<Arc<dyn ObservationClock>>,
+    durations: BTreeMap<usize, u64>,
+    started: Arc<Mutex<BTreeMap<usize, Instant>>>,
 }
 impl Drop for RunState {
     fn drop(&mut self) {

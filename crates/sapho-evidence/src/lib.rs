@@ -26,6 +26,8 @@ use sapho_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+mod roster;
+pub use roster::*;
 
 /// Refusals distinguish dataset, coverage and candidate failures at this crate boundary.
 #[derive(Debug, thiserror::Error, Serialize)]
@@ -67,6 +69,9 @@ pub enum EvidenceError {
         /// Selected output.
         output: String,
     },
+    /// Roster mapping, attribution or observation mode is inconsistent.
+    #[error("Invalid roster evidence: {0}")]
+    InvalidRoster(String),
 }
 /// Explicit development/held-out partition; tuning and exports always select development.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +83,7 @@ pub enum Split {
     HeldOut,
 }
 /// Who made a label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LabelKind {
     /// A model's answer.
@@ -283,6 +288,9 @@ pub struct Measurement {
     pub self_source: Vec<ItemId>,
     /// Separate coverage and metrics for each output.
     pub outputs: BTreeMap<String, OutputMeasurement>,
+    /// The same score and coverage formulas on each declared label kind's cases.
+    #[serde(default)]
+    pub per_kind: BTreeMap<String, BTreeMap<LabelKind, OutputMeasurement>>,
     /// Observed values, labels and failures.
     pub predictions: Vec<Prediction>,
 }
@@ -302,6 +310,31 @@ pub fn measure(
     outcomes: &BTreeMap<ItemId, CaseOutcome>,
     max_cases: usize,
 ) -> Result<Measurement, EvidenceError> {
+    let mut report = measure_inner(dataset, split, schemas, outcomes, max_cases, None)?;
+    let kinds = dataset
+        .selected(split)
+        .map(|case| case.label_provenance.kind)
+        .collect::<BTreeSet<_>>();
+    for kind in kinds {
+        let view = measure_inner(dataset, split, schemas, outcomes, max_cases, Some(kind))?;
+        for (output, measurement) in view.outputs {
+            report
+                .per_kind
+                .entry(output)
+                .or_default()
+                .insert(kind, measurement);
+        }
+    }
+    Ok(report)
+}
+fn measure_inner(
+    dataset: &Dataset,
+    split: Split,
+    schemas: &BTreeMap<String, ValueType>,
+    outcomes: &BTreeMap<ItemId, CaseOutcome>,
+    max_cases: usize,
+    selected_kind: Option<LabelKind>,
+) -> Result<Measurement, EvidenceError> {
     dataset.validate(max_cases)?;
     for schema in schemas.values() {
         schema.validate()?;
@@ -312,10 +345,14 @@ pub fn measure(
         selected_cases: 0,
         self_source: Vec::new(),
         outputs: BTreeMap::new(),
+        per_kind: BTreeMap::new(),
         predictions: Vec::new(),
     };
     let mut squared_errors = BTreeMap::<String, f64>::new();
-    for case in dataset.selected(split) {
+    for case in dataset
+        .selected(split)
+        .filter(|case| selected_kind.is_none_or(|kind| case.label_provenance.kind == kind))
+    {
         report.selected_cases += 1;
         let answering = match outcomes.get(&case.id) {
             Some(CaseOutcome::Completed { models, .. } | CaseOutcome::Failed { models, .. }) => {
@@ -404,7 +441,9 @@ pub fn measure(
                     }
                 }
             }
-            report.predictions.push(prediction);
+            if selected_kind.is_none() {
+                report.predictions.push(prediction);
+            }
         }
     }
     for (name, counts) in &mut report.outputs {
