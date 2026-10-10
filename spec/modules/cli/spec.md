@@ -29,6 +29,9 @@ Owning component: `sapho-cli`. See the [workspace boundaries](../../spec.md).
 - [FR-046](functional/FR-046.md): shared CLI foundations
 - [FR-055](functional/FR-055.md): the `ollama` provider for local models
 - [FR-056](functional/FR-056.md): explicit ceilings for Datasets of about fifteen thousand cases
+- [FR-072](functional/FR-072.md): per-binding System One host service configuration
+- [FR-073](functional/FR-073.md): distinct generic service dispatch and replay compatibility
+- [IT-013](integration/IT-013.md): two-port capture, third-service configuration and offline replay
 
 ## References
 
