@@ -24,6 +24,9 @@ Owning component: `sapho-evidence` for dataset validation, scoring, ranking and 
 - [FR-036: Measure declared outputs against labelled cases](functional/FR-036.md)
 - [FR-037: Compare bounded development candidates](functional/FR-037.md)
 - [FR-038: Export curated training cases](functional/FR-038.md)
+- [FR-065: Measure probability calibration against declared labels](functional/FR-065.md)
+- [FR-066: Report risk and coverage at confidence thresholds](functional/FR-066.md)
+- [IT-010: Verify probability calibration and risk coverage](integration/IT-010.md)
 
 ## References
 
