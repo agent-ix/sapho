@@ -2429,6 +2429,26 @@ fn registered_gate_precedes_synthetic_cases_and_reports_three_exit_codes() {
         String::from_utf8_lossy(&registered.stderr)
     );
     assert!(receipt_path.exists());
+    let receipt_before = std::fs::read(&receipt_path).unwrap();
+    assert_eq!(
+        cli(
+            &[
+                "gate-register",
+                path(&graph_path),
+                "--dataset",
+                path(&data_path),
+                "--gate",
+                path(&gate_path),
+                "--receipt",
+                path(&receipt_path)
+            ],
+            None
+        )
+        .status
+        .code(),
+        Some(2)
+    );
+    assert_eq!(std::fs::read(&receipt_path).unwrap(), receipt_before);
     let report = cli(
         &[
             "gate-evaluate",
@@ -2703,4 +2723,27 @@ fn gate_refuses_output_subset_and_reused_replay_content() {
     );
     assert_eq!(repeated.status.code(), Some(2));
     assert_eq!(result(&repeated)["error"]["kind"], "evidence");
+    let whitespace = root.path().join("whitespace.json");
+    std::fs::write(&whitespace, b"{\n  \"exchanges\": []\n}").unwrap();
+    let same_typed_content = cli(
+        &[
+            "gate-evaluate",
+            path(&graph_path),
+            "--dataset",
+            path(&dataset_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&receipt_path),
+            "--replay",
+            path(&recording),
+            "--repeat-replay",
+            path(&whitespace),
+            "--repeat-replay",
+            path(&recording),
+        ],
+        None,
+    );
+    assert_eq!(same_typed_content.status.code(), Some(2));
+    assert_eq!(result(&same_typed_content)["error"]["kind"], "evidence");
 }

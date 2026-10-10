@@ -343,6 +343,12 @@ pub fn evaluate_gate(
 ) -> Result<GateReport, EvidenceError> {
     let gate = &registration.gate;
     gate.validate()?;
+    if registration.gate_semantic_identity != semantic(gate, b"sapho.gate.v1\n", "gate-v1:sha256:")?
+    {
+        return Err(EvidenceError::InvalidGate(
+            "Receipt gate snapshot identity mismatch".into(),
+        ));
+    }
     if gate.dataset != dataset.id
         || gate.dataset_content_digest != dataset_content_digest(dataset, max_cases)?
         || gate.graph_semantic_identity != graph_identity
@@ -587,6 +593,65 @@ mod tests {
             .collect();
         measure(data, Split::HeldOut, &schemas(), &outcomes, 100).unwrap()
     }
+    /// Trace: FR-070-AC-3, FR-070-AC-6, IT-012-SC-04
+    #[test]
+    fn absent_classes_scores_and_repetitions_remain_not_computed() {
+        let data = fixture(&[false, false]);
+        let bytes = gate(&data, bars());
+        let receipt =
+            register_gate(&bytes, &data, "graph-v1:sha256:fixture", &schemas(), 100).unwrap();
+        let complete = measured(&data, &[0.1, 0.2]);
+        let one_repeat = evaluate_gate(
+            &receipt,
+            &data,
+            "graph-v1:sha256:fixture",
+            &schemas(),
+            &complete,
+            std::slice::from_ref(&complete),
+            100,
+        )
+        .unwrap();
+        assert!(!one_repeat.complete);
+        assert_eq!(
+            one_repeat.outputs["result"].true_recall.status,
+            BarStatus::NotComputed
+        );
+        assert_eq!(
+            one_repeat.outputs["result"].disagreement.status,
+            BarStatus::NotComputed
+        );
+        let no_scores = measured(&data, &[]);
+        let absent = evaluate_gate(
+            &receipt,
+            &data,
+            "graph-v1:sha256:fixture",
+            &schemas(),
+            &no_scores,
+            &[no_scores.clone(), no_scores.clone()],
+            100,
+        )
+        .unwrap();
+        assert_eq!(
+            absent.outputs["result"].scored_count.status,
+            BarStatus::NotComputed
+        );
+        assert_eq!(
+            absent.outputs["result"].margin.status,
+            BarStatus::NotComputed
+        );
+        assert!(
+            evaluate_gate(
+                &receipt,
+                &data,
+                "graph-v1:sha256:other",
+                &schemas(),
+                &complete,
+                &[complete.clone(), complete.clone()],
+                100
+            )
+            .is_err()
+        );
+    }
     /// Trace: FR-069-AC-1, FR-069-AC-2, FR-069-AC-3, FR-069-AC-4, FR-069-AC-5, FR-069-AC-6, IT-012-SC-01, IT-012-SC-05
     #[test]
     fn receipt_binds_exact_bytes_semantics_dataset_and_complete_output_set() {
@@ -626,14 +691,30 @@ mod tests {
         ]);
         assert!(register_gate(&bytes, &data, "graph-v1:sha256:fixture", &extra, 100).is_err());
         let duplicate = String::from_utf8(bytes).unwrap().replacen(
-            "\"result\":{",
-            "\"result\":{},\"result\":{",
+            "\"outputs\":{",
+            &format!(
+                "\"outputs\":{{\"result\":{},",
+                serde_json::to_string(&bars()).unwrap()
+            ),
             1,
         );
         assert!(serde_json::from_str::<PromotionGate>(&duplicate).is_err());
         let mut development = registered.gate.clone();
         development.split = Split::Development;
         assert!(development.validate().is_err());
+        let mut invalid = registered.gate.clone();
+        invalid
+            .outputs
+            .get_mut("result")
+            .unwrap()
+            .minimum_true_recall = 0.0;
+        assert!(invalid.validate().is_err());
+        let mut unknown = serde_json::to_value(&registered.gate).unwrap();
+        unknown
+            .as_object_mut()
+            .unwrap()
+            .insert("model".into(), Json::String("forbidden".into()));
+        assert!(serde_json::from_value::<PromotionGate>(unknown).is_err());
         assert!(
             serde_json::to_value(&registered.gate)
                 .unwrap()

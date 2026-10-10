@@ -1001,9 +1001,11 @@ fn gate_evaluate(args: GateEvaluateArgs) -> Result<Response, CliError> {
     let mut seen = std::collections::BTreeSet::new();
     for path in replay_paths {
         let bytes = read_bytes(path, options.limits.max_artifact_bytes)?;
-        if !seen.insert(format!("{:x}", Sha256::digest(&bytes))) {
+        let recording = Recording::from_json(&bytes, options.limits.max_artifact_bytes)?;
+        let normalized = bounded_json(&recording, options.limits.max_artifact_bytes)?;
+        if !seen.insert(format!("{:x}", Sha256::digest(normalized))) {
             return Err(EvidenceError::InvalidGate(
-                "Repeated replay evidence has the same content".into(),
+                "Repeated replay evidence has the same typed content".into(),
             )
             .into());
         }
