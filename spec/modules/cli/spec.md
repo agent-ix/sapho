@@ -34,6 +34,7 @@ Owning component: `sapho-cli`. See the [workspace boundaries](../../spec.md).
 - [FR-072](functional/FR-072.md): per-binding System One host service configuration
 - [FR-073](functional/FR-073.md): distinct generic service dispatch and replay compatibility
 - [IT-013](integration/IT-013.md): two-port capture, third-service configuration and offline replay
+- [FR-078: Publish validated router and escalation graphs](functional/FR-078.md)
 
 ## References
 
