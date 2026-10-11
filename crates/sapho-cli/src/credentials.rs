@@ -14,7 +14,6 @@ impl Provider {
             Self::Clm => Some("CLM_API_KEY"),
             Self::Systemone => None,
             Self::Decisions => Some("OPENAI_API_KEY"),
-            Self::Systemone => None,
             Self::Ollama => None,
         }
     }
@@ -24,7 +23,6 @@ impl Provider {
             Self::Clm => Some("clm-api-key"),
             Self::Systemone => None,
             Self::Decisions => Some("openai-api-key"),
-            Self::Systemone => None,
             Self::Ollama => None,
         }
     }
