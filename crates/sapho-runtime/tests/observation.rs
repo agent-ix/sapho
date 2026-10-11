@@ -39,7 +39,11 @@ impl ModelBackend for Scripted {
             return Err(SaphoError::new(ErrorCode::BackendFailed, "scripted"));
         }
         Ok(ModelResponse {
-            model: "actual-a".into(),
+            model: if request.backend.as_str() == "challenger" {
+                "actual-shadow".into()
+            } else {
+                "actual-a".into()
+            },
             raw: None,
             answers: request
                 .questions
@@ -82,6 +86,67 @@ nodes:
       questions: {kind: node, node: questions, port: result}
 outputs: {answer: {kind: node, node: ask, port: answers}}
 "#,
+    )
+    .unwrap()
+}
+fn shadow_graph() -> GraphSpec {
+    GraphSpec::parse(
+        r#"
+inputs: {text: {kind: text}}
+nodes:
+  - id: state
+    operation: {kind: record}
+    inputs: {text: {kind: input, name: text}}
+  - id: questions
+    operation:
+      kind: questions
+      questions:
+        - id: q
+          question: {kind: boolean, instructions: "Does it hold?", yes: Holds, no: Absent}
+  - id: ask
+    operation: {kind: ask, backend: judge}
+    inputs:
+      state: {kind: node, node: state, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: prediction
+    operation: {kind: probability, question: q, labels: ["true"]}
+    inputs: {answers: {kind: node, node: ask, port: answers}}
+  - id: shadow
+    operation:
+      kind: shadow_ask
+      backend: challenger
+      observations:
+        - name: candidate
+          output: result
+          question: q
+          labels: ["true"]
+          projection: {kind: probability}
+    inputs:
+      state: {kind: node, node: state, port: result}
+      questions: {kind: node, node: questions, port: result}
+outputs: {result: {kind: node, node: prediction, port: result}}
+"#,
+    )
+    .unwrap()
+}
+fn shadow_engine(champion: Arc<Scripted>, challenger: Arc<Scripted>) -> Engine {
+    let mut registry = BackendRegistry::default();
+    for (name, backend) in [("judge", champion), ("challenger", challenger)] {
+        registry
+            .register(
+                BackendId::new(name).unwrap(),
+                BackendBinding {
+                    backend,
+                    model: "requested".into(),
+                    expected_model: None,
+                    distribution_policy: DistributionPolicy::Strict {},
+                },
+            )
+            .unwrap();
+    }
+    Engine::new(
+        compile(&shadow_graph(), &PrimitiveRegistry::default()).unwrap(),
+        registry,
     )
     .unwrap()
 }
@@ -227,6 +292,91 @@ async fn observed_calls_keep_timing_and_descriptors_outside_trace() {
             .is_err()
     );
     assert_eq!(backend.calls.load(Ordering::SeqCst), before);
+}
+
+/// Trace: FR-061-AC-1, FR-061-AC-2, FR-061-AC-3, FR-062-AC-1, IT-009-SC-01
+#[tokio::test]
+async fn observed_shadow_attempts_join_champion_calls_without_changing_decision() {
+    let champion = Arc::new(Scripted {
+        fail: false,
+        calls: AtomicUsize::new(0),
+    });
+    let challenger = Arc::new(Scripted {
+        fail: false,
+        calls: AtomicUsize::new(0),
+    });
+    let runner = shadow_engine(champion.clone(), challenger.clone());
+    let (live_result, live) = runner
+        .run_observed(
+            &input(),
+            RunLimits::default(),
+            &config(ObservationMode::Live),
+        )
+        .await
+        .unwrap();
+    let live_result = live_result.unwrap();
+    assert_eq!(live.len(), 2);
+    assert_eq!(live[0].path, vec!["root", "ask"]);
+    assert_eq!(live[1].path, vec!["root", "shadow"]);
+    assert_eq!(live[0].binding.as_str(), "judge");
+    assert_eq!(live[1].binding.as_str(), "challenger");
+    assert_eq!(live[0].actual_model.as_deref(), Some("actual-a"));
+    assert_eq!(live[1].actual_model.as_deref(), Some("actual-shadow"));
+    assert!(
+        live.iter()
+            .all(|call| call.usage.as_ref().unwrap().input_tokens == 11)
+    );
+    assert!(live.iter().all(|call| call.elapsed_micros == Some(10)));
+    let ordinary = runner.run(&input(), RunLimits::default()).await.unwrap();
+    assert_eq!(live_result.outputs, ordinary.outputs);
+    assert_eq!(live_result.trace, ordinary.trace);
+    let (replayed_result, replay) = runner
+        .run_observed(
+            &input(),
+            RunLimits::default(),
+            &config(ObservationMode::Replay),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replayed_result.unwrap().outputs, live_result.outputs);
+    assert_eq!(replay.len(), 2);
+    assert!(replay.iter().all(|call| call.elapsed_micros.is_none()));
+    let (limited_result, limited) = runner
+        .run_observed(
+            &input(),
+            RunLimits {
+                model_requests: 1,
+                ..RunLimits::default()
+            },
+            &config(ObservationMode::Live),
+        )
+        .await
+        .unwrap();
+    assert_eq!(limited_result.unwrap().outputs, live_result.outputs);
+    assert_eq!(limited.len(), 1);
+    assert_eq!(limited[0].binding.as_str(), "judge");
+    let failing_shadow = shadow_engine(
+        champion,
+        Arc::new(Scripted {
+            fail: true,
+            calls: AtomicUsize::new(0),
+        }),
+    );
+    let (failed_result, failed) = failing_shadow
+        .run_observed(
+            &input(),
+            RunLimits::default(),
+            &config(ObservationMode::Live),
+        )
+        .await
+        .unwrap();
+    assert_eq!(failed_result.unwrap().outputs, live_result.outputs);
+    assert_eq!(failed.len(), 2);
+    assert_eq!(failed[1].status, sapho_runtime::NodeStatus::Failed);
+    assert!(failed[1].actual_model.is_none());
+    assert!(failed[1].usage.is_none());
+    assert_eq!(failed[1].elapsed_micros, Some(10));
+    assert!(challenger.calls.load(Ordering::SeqCst) >= 3);
 }
 
 struct ParallelFailure {

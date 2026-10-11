@@ -557,6 +557,14 @@ impl Engine {
                                 response: None,
                                 raw: None,
                             });
+                            let started = state.clock.as_ref().map(|clock| clock.now());
+                            if let Some(at) = started {
+                                state
+                                    .started
+                                    .lock()
+                                    .unwrap_or_else(|poison| poison.into_inner())
+                                    .insert(index, at);
+                            }
                             let response = tokio::time::timeout_at(
                                 tokio::time::Instant::from_std(state.deadline),
                                 binding.backend.infer(&request),
@@ -567,7 +575,16 @@ impl Engine {
                                     ErrorCode::DeadlineExceeded,
                                     "Shadow model deadline exceeded",
                                 )
-                            })??;
+                            })
+                            .and_then(|response| response);
+                            if let (Some(started), Some(clock)) = (started, state.clock.as_ref()) {
+                                let elapsed = clock.now().saturating_duration_since(started);
+                                state.durations.insert(
+                                    index,
+                                    u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+                                );
+                            }
+                            let response = response?;
                             if let Some(evidence) = &mut state.trace_entry(index)?.model {
                                 evidence.response = Some(response.clone());
                             }

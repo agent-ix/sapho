@@ -93,7 +93,9 @@ pub(crate) fn collect(
             }
             let model = node.model.as_ref()?;
             let binding = match &node.operation {
-                Operation::Ask { backend } => backend.clone(),
+                Operation::Ask { backend } | Operation::ShadowAsk { backend, .. } => {
+                    backend.clone()
+                }
                 _ => return None,
             };
             Some(ModelCallObservation {
