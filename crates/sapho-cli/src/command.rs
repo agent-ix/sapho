@@ -508,7 +508,7 @@ fn raw_output_ask_binding(graph: &GraphSpec, output: &str) -> Result<BackendId, 
         let node = by_id
             .get(&id)
             .ok_or_else(|| SaphoError::new(ErrorCode::Config, "Output dependency absent"))?;
-        if let Operation::Ask { backend } = &node.operation {
+        if let Operation::Ask { backend, .. } = &node.operation {
             asks.push(backend.clone());
         }
         if matches!(node.operation, Operation::Map { .. }) {

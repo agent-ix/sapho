@@ -1683,7 +1683,7 @@ fn calibration_sources(
             if evidence.status != NodeStatus::Completed {
                 return;
             }
-            if let Operation::Ask { backend } = &compiled.spec().operation {
+            if let Operation::Ask { backend, .. } = &compiled.spec().operation {
                 contributing.push((
                     backend.clone(),
                     evidence
