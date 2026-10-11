@@ -286,6 +286,80 @@ async fn bounds_and_provider_400_refuse_without_fallback() {
     );
     assert_eq!(fake.calls().len(), 1);
 }
+
+/// Trace: FR-088-AC-3, FR-088-AC-4, IT-019-SC-02
+#[tokio::test]
+async fn option_and_answer_value_boundaries_refuse_exactly_once() {
+    let fake = Fake::new(200, message(answers()));
+    let backend = ClaudeBackend::with_transport(fake.clone(), Limits::default()).unwrap();
+    for (name, question) in [
+        (
+            "choice_options",
+            Question::Choice {
+                instructions: "Choose".into(),
+                options: (0..17)
+                    .map(|index| ChoiceOption {
+                        label: format!("option_{index}"),
+                        description: "Description".into(),
+                    })
+                    .collect(),
+            },
+        ),
+        (
+            "score_levels",
+            Question::Score {
+                instructions: "Score".into(),
+                levels: (0..17).map(|index| format!("level_{index}")).collect(),
+            },
+        ),
+    ] {
+        let mut invalid = request();
+        invalid.questions[1].question = question;
+        let error = backend.infer(&invalid).await.expect_err(name);
+        assert_eq!(error.code, ErrorCode::InvalidValue, "{name}");
+        assert!(fake.calls().is_empty(), "{name} reached transport");
+    }
+
+    for (name, mutate) in [
+        ("boolean_negative", (0usize, "probability", json!(-0.1))),
+        ("boolean_above_one", (0, "probability", json!(1.1))),
+        ("choice_confidence", (1, "confidence", json!(1.1))),
+        ("score_expected", (2, "expected", json!(3.0))),
+        ("score_confidence", (2, "confidence", json!(-0.1))),
+    ] {
+        let mut answer = answers();
+        answer["answers"][mutate.0][mutate.1] = mutate.2;
+        let transport = Fake::new(200, message(answer));
+        let backend = ClaudeBackend::with_transport(transport.clone(), Limits::default()).unwrap();
+        let error = backend.infer(&request()).await.expect_err(name);
+        assert_eq!(error.code, ErrorCode::InvalidAnswer, "{name}");
+        assert_eq!(transport.calls().len(), 1, "{name}");
+    }
+    for (name, literal) in [("nan", "NaN"), ("infinite", "1e999")] {
+        let body = String::from_utf8(message(answers())).unwrap();
+        let body = body.replace(
+            "\\\"probability\\\":0.8",
+            &format!("\\\"probability\\\":{literal}"),
+        );
+        let transport = Fake::new(200, body.into_bytes());
+        let backend = ClaudeBackend::with_transport(transport.clone(), Limits::default()).unwrap();
+        assert_eq!(
+            backend.infer(&request()).await.expect_err(name).code,
+            ErrorCode::InvalidAnswer,
+            "{name}"
+        );
+        assert_eq!(transport.calls().len(), 1);
+    }
+    let mut answer = answers();
+    answer["answers"][0]["id"] = json!("unknown");
+    let transport = Fake::new(200, message(answer));
+    let backend = ClaudeBackend::with_transport(transport.clone(), Limits::default()).unwrap();
+    assert_eq!(
+        backend.infer(&request()).await.expect_err("extra ID").code,
+        ErrorCode::InvalidAnswer
+    );
+    assert_eq!(transport.calls().len(), 1);
+}
 /// Trace: FR-089-AC-1, FR-089-AC-2, FR-089-AC-4
 #[test]
 fn endpoint_headers_and_configuration_bounds_are_checked() {
@@ -322,6 +396,17 @@ fn endpoint_headers_and_configuration_bounds_are_checked() {
         validate_workspace_id("wrkspc_x\r\nX: y"),
         Err(ConfigurationError::InvalidWorkspace)
     );
+    for workspace in ["", "wrkspc_", "other_123"] {
+        assert_eq!(
+            validate_workspace_id(workspace),
+            Err(ConfigurationError::InvalidWorkspace)
+        );
+        assert!(matches!(
+            ClaudeBackend::new(&secret, Some(workspace), Limits::default()),
+            Err(ConfigurationError::InvalidWorkspace)
+        ));
+    }
+    assert!(ClaudeBackend::new(&secret, None, Limits::default()).is_ok());
     assert!(matches!(
         ClaudeBackend::new(&SecretValue::new("a".repeat(8193)), None, Limits::default()),
         Err(ConfigurationError::InvalidCredential)
@@ -658,6 +743,73 @@ async fn http_statuses_and_oversized_success_map_without_body_disclosure() {
         backend.infer(&request()).await.expect_err("malformed").code,
         ErrorCode::InvalidAnswer
     );
+}
+
+/// Trace: FR-089-AC-1, FR-089-AC-3, FR-089-AC-4, IT-019-SC-03
+#[tokio::test(flavor = "multi_thread")]
+async fn native_transport_refuses_redirect_and_redacts_connect_failure() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+    };
+    let target = TcpListener::bind("127.0.0.1:0").unwrap();
+    target.set_nonblocking(true).unwrap();
+    let target_url = format!("http://{}/v1/messages", target.local_addr().unwrap());
+    let source = TcpListener::bind("127.0.0.1:0").unwrap();
+    let source_url = format!("http://{}/v1/messages", source.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = source.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut capture = [0u8; 8192];
+        let size = stream.read(&mut capture).unwrap();
+        assert!(size > 0);
+        assert!(
+            String::from_utf8_lossy(&capture[..size]).starts_with("POST /v1/messages HTTP/1.1")
+        );
+        write!(stream, "HTTP/1.1 302 Found\r\nLocation: {target_url}\r\nContent-Length: 20\r\nConnection: close\r\n\r\nprivate redirect body").unwrap();
+    });
+    let secret = SecretValue::new("private-claude-key");
+    let backend = ClaudeBackend::at_endpoint(
+        &source_url,
+        &secret,
+        Some("wrkspc_private"),
+        Limits::default(),
+    )
+    .unwrap();
+    let error = backend
+        .infer(&request())
+        .await
+        .expect_err("redirect must refuse");
+    server.join().unwrap();
+    assert_eq!(error.code, ErrorCode::BackendFailed);
+    assert_eq!(error.context["http_status"], "302");
+    assert!(error.raw.is_none());
+    assert!(matches!(target.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+    let printed = format!("{error:?}");
+    for private in [
+        "private-claude-key",
+        "wrkspc_private",
+        "private redirect body",
+        &source_url,
+    ] {
+        assert!(!printed.contains(private));
+    }
+
+    let unused = TcpListener::bind("127.0.0.1:0").unwrap();
+    let closed_url = format!("http://{}/v1/messages", unused.local_addr().unwrap());
+    drop(unused);
+    let backend =
+        ClaudeBackend::at_endpoint(&closed_url, &secret, None, Limits::default()).unwrap();
+    let error = backend
+        .infer(&request())
+        .await
+        .expect_err("closed port must refuse");
+    assert_eq!(error.code, ErrorCode::BackendFailed);
+    let printed = format!("{error:?}");
+    assert!(!printed.contains("private-claude-key"));
+    assert!(!printed.contains(&closed_url));
 }
 
 /// Trace: FR-089-AC-2

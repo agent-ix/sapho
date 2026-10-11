@@ -349,7 +349,6 @@ fn prepare_ollama(binding: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBa
 fn prepare_ollama(_: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
     Err(CliError::Feature(Provider::Ollama))
 }
-#[cfg(any(feature = "jev", feature = "clm", feature = "decisions"))]
 #[cfg(any(
     feature = "jev",
     feature = "clm",

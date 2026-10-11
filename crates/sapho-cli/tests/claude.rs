@@ -56,6 +56,9 @@ fn claude_metadata_and_credential_sources_are_private() {
     }))
     .unwrap();
     assert_eq!(binding.provider, Provider::Claude);
+    let mut missing_model = serde_json::to_value(&binding).unwrap();
+    missing_model.as_object_mut().unwrap().remove("model");
+    assert!(serde_json::from_value::<BindingConfig>(missing_model).is_err());
     assert_eq!(
         Provider::Claude.credential_environment(),
         Some("ANTHROPIC_API_KEY")
@@ -208,4 +211,195 @@ fn offline_metadata_and_dataset_contracts_stay_separate() {
     ).unwrap();
     assert!(live_bindings(&[], &binding).is_ok());
     assert!(replay_bindings(&Recording::default(), Some(&binding), 4096).is_ok());
+}
+
+fn path(path: &std::path::Path) -> &str {
+    path.to_str().unwrap()
+}
+fn stock(args: &[&str], key: &str, workspace: Option<&str>) -> std::process::Output {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_sapho"));
+    command.args(args).env_clear().env("ANTHROPIC_API_KEY", key);
+    if let Some(workspace) = workspace {
+        command.env("ANTHROPIC_WORKSPACE_ID", workspace);
+    }
+    command.output().unwrap()
+}
+/// Trace: FR-090-AC-1, FR-090-AC-2, IT-019-SC-04
+#[test]
+fn stock_commands_prepare_only_required_claude_and_refuse_private_bad_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    let offline_graph = root.path().join("offline.yaml");
+    std::fs::write(
+        &offline_graph,
+        include_str!("../../../examples/graphs/review.yaml"),
+    )
+    .unwrap();
+    let offline_input = root.path().join("offline.json");
+    std::fs::write(&offline_input, br#"{"support":0.5}"#).unwrap();
+    let model_graph = root.path().join("model.yaml");
+    std::fs::write(
+        &model_graph,
+        include_str!("../../../examples/graphs/multilayer.yaml"),
+    )
+    .unwrap();
+    let model_input = root.path().join("model.json");
+    std::fs::write(&model_input, br#"{"text":"private passage"}"#).unwrap();
+    let bindings = root.path().join("bindings.yaml");
+    std::fs::write(&bindings, "judge: {provider: claude, model: claude-sonnet-4-6, distribution_policy: {kind: strict}}\n").unwrap();
+    let unneeded = stock(
+        &[
+            "run",
+            path(&offline_graph),
+            "--input",
+            path(&offline_input),
+            "--bindings",
+            path(&bindings),
+        ],
+        "",
+        Some("invalid-workspace"),
+    );
+    assert_eq!(
+        unneeded.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&unneeded.stdout)
+    );
+    let unneeded_result: serde_json::Value = serde_json::from_slice(&unneeded.stdout).unwrap();
+    assert_eq!(unneeded_result["error"], serde_json::Value::Null);
+    let empty_recording = root.path().join("empty.json");
+    let recorded = stock(
+        &[
+            "record",
+            path(&offline_graph),
+            "--input",
+            path(&offline_input),
+            "--bindings",
+            path(&bindings),
+            "--recording",
+            path(&empty_recording),
+        ],
+        "",
+        Some("invalid-workspace"),
+    );
+    assert_eq!(recorded.status.code(), Some(0));
+    assert!(
+        Recording::read(&empty_recording, 1_048_576)
+            .unwrap()
+            .exchanges
+            .is_empty()
+    );
+
+    for command in ["run", "record"] {
+        let recording = root.path().join(format!("refused-{command}.json"));
+        let mut args = vec![
+            command,
+            path(&model_graph),
+            "--input",
+            path(&model_input),
+            "--bindings",
+            path(&bindings),
+        ];
+        if command == "record" {
+            args.extend(["--recording", path(&recording)]);
+        }
+        let missing = stock(&args, "", None);
+        assert_eq!(missing.status.code(), Some(2));
+        let error: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
+        assert_eq!(error["error"]["kind"], "credential_invalid");
+        let invalid_workspace = stock(&args, "synthetic-private-key", Some("invalid-workspace"));
+        assert_eq!(invalid_workspace.status.code(), Some(2));
+        let error: serde_json::Value = serde_json::from_slice(&invalid_workspace.stdout).unwrap();
+        assert_eq!(error["error"]["kind"], "provider_configuration");
+        for output in [missing, invalid_workspace] {
+            let printed = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!printed.contains("synthetic-private-key"));
+            assert!(!printed.contains("private passage"));
+            assert!(!printed.contains("invalid-workspace"));
+        }
+        assert!(!recording.exists());
+    }
+}
+
+/// Trace: FR-090-AC-3, IT-019-SC-01
+#[tokio::test]
+async fn binding_model_swap_executes_same_graph_with_distinct_request_models() {
+    struct Capture(std::sync::Mutex<Vec<String>>);
+    #[async_trait]
+    impl sapho_claude::Transport for Capture {
+        async fn post(&self, body: &[u8], _: usize) -> Result<sapho_claude::HttpResponse> {
+            let request: serde_json::Value = serde_json::from_slice(body).unwrap();
+            self.0
+                .lock()
+                .unwrap()
+                .push(request["model"].as_str().unwrap().to_owned());
+            sapho_claude::Transport::post(&Fake, body, 1_048_576).await
+        }
+    }
+    let graph = sapho_graph::GraphSpec::parse(
+        r#"
+inputs: {text: {kind: text}}
+nodes:
+  - id: context
+    operation: {kind: record}
+    inputs: {text: {kind: input, name: text}}
+  - id: questions
+    operation:
+      kind: questions
+      questions:
+        - id: q
+          question: {kind: boolean, instructions: Is it?, yes: Yes, no: No}
+  - id: ask
+    operation: {kind: ask, backend: reader}
+    inputs:
+      state: {kind: node, node: context, port: result}
+      questions: {kind: node, node: questions, port: result}
+  - id: result
+    operation: {kind: probability, question: q, labels: ["true"]}
+    inputs: {answers: {kind: node, node: ask, port: answers}}
+outputs: {result: {kind: node, node: result, port: result}}
+"#,
+    )
+    .unwrap();
+    let capture = Arc::new(Capture(std::sync::Mutex::new(Vec::new())));
+    let inputs = BTreeMap::from([(
+        "text".into(),
+        Datum::new("text", Value::Text("synthetic".into())).unwrap(),
+    )]);
+    let mut reports = Vec::new();
+    for model in ["claude-model-a", "claude-model-b"] {
+        let backend = Arc::new(
+            sapho_claude::ClaudeBackend::with_transport(
+                capture.clone(),
+                sapho_claude::Limits::default(),
+            )
+            .unwrap(),
+        );
+        let mut registry = BackendRegistry::default();
+        registry
+            .register(
+                BackendId::new("reader").unwrap(),
+                BackendBinding {
+                    backend,
+                    model: model.into(),
+                    expected_model: None,
+                    distribution_policy: DistributionPolicy::Strict {},
+                },
+            )
+            .unwrap();
+        let report = sapho_cli::Runner::new(&graph, &PrimitiveRegistry::default(), registry)
+            .unwrap()
+            .run(&inputs, sapho_runtime::RunLimits::default(), None)
+            .await;
+        assert!(report.error.is_none(), "{:?}", report.error);
+        reports.push(report.outputs);
+    }
+    assert_eq!(reports[0], reports[1]);
+    assert_eq!(
+        *capture.0.lock().unwrap(),
+        ["claude-model-a", "claude-model-b"]
+    );
 }
