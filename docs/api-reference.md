@@ -303,6 +303,9 @@ CLM confidence is retained independently of outcome mass; its usage can contain
 billing units separately from tokens. Sapho does not install/start the service.
 Both providers use core validation and the shared request translator.
 
+**Claude:** add facade feature `claude` or depend on `sapho-claude`.
+`ClaudeBackend::new(&SecretValue, optional_workspace_id, Limits)` prepares the fixed production Messages endpoint. `at_endpoint` accepts remote HTTPS or loopback HTTP with exact `/v1/messages` path for embedding hosts; `with_transport` injects a native test seam. The adapter sends one nonstreaming structured-output request per core question block, using a fixed schema with Boolean, Choice and Score variants and locally checks exact IDs, kinds, labels, numeric ranges and provider usage. It preserves the reported actual model and raw JSON bodies. Defaults are 30 seconds, 1 MiB request, 8 MiB response, four in-flight calls and 1024 output tokens. The host-only bearer and optional workspace headers never enter core requests or recording. See [CLI setup](cli-guide.md#bind-claude-explicitly).
+
 **Codec:** `sapho_systemone::build_request(&ModelRequest)` validates and returns
 an SDK SystemOneRequest, translating Boolean, Choice and Score criteria and
 plain record state without source sidecars. It performs no transport. Jev

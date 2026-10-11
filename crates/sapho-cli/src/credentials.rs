@@ -14,6 +14,7 @@ impl Provider {
             Self::Clm => Some("CLM_API_KEY"),
             Self::Systemone => None,
             Self::Decisions => Some("OPENAI_API_KEY"),
+            Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Ollama => None,
         }
     }
@@ -23,6 +24,7 @@ impl Provider {
             Self::Clm => Some("clm-api-key"),
             Self::Systemone => None,
             Self::Decisions => Some("openai-api-key"),
+            Self::Claude => Some("anthropic-api-key"),
             Self::Ollama => None,
         }
     }
@@ -55,7 +57,11 @@ pub fn resolve_credential<B: CredentialBackend>(
     {
         return Err(CliError::CredentialInvalid);
     }
-    if matches!(provider, Provider::Jev | Provider::Decisions) && secret.is_none() {
+    if matches!(
+        provider,
+        Provider::Jev | Provider::Decisions | Provider::Claude
+    ) && secret.is_none()
+    {
         return Err(CliError::CredentialMissing(provider));
     }
     Ok(secret)

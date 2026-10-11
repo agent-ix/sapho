@@ -20,6 +20,7 @@ doc = false
 default = []
 clm = ["dep:sapho-clm"]
 decisions = ["dep:sapho-decisions"]
+claude = ["dep:sapho-claude"]
 ollama = ["dep:sapho-ollama"]
 jev = ["dep:sapho-jev", "dep:typesafe-sdk-client", "dep:typesafe-sdk-config", "dep:typesafe-sdk-env", "dep:typesafe-sdk-http", "dep:typesafe-sdk-log"]
 
@@ -28,6 +29,7 @@ ix-cli-kit.workspace = true
 sapho-systemone.workspace = true
 sapho-clm = { workspace = true, optional = true }
 sapho-decisions = { workspace = true, optional = true }
+sapho-claude = { workspace = true, optional = true }
 sapho-core.workspace = true
 sapho-ollama = { workspace = true, optional = true }
 sapho-graph.workspace = true

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-decisions", "crates/sapho-http", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-ollama", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli"]
+members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-decisions", "crates/sapho-claude", "crates/sapho-http", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-ollama", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli"]
 resolver = "3"
 
 [workspace.package]
@@ -39,6 +39,7 @@ sapho-systemone = { path = "crates/sapho-systemone", version = "0.1.0" }
 sapho-clm = { path = "crates/sapho-clm", version = "0.1.0" }
 sapho-decisions = { path = "crates/sapho-decisions", version = "0.1.0" }
 sapho-http = { path = "crates/sapho-http", version = "0.1.0" }
+sapho-claude = { path = "crates/sapho-claude", version = "0.1.0" }
 sapho-jev = { path = "crates/sapho-jev", version = "0.1.0" }
 
 [workspace.lints.rust]
@@ -62,6 +63,7 @@ default = []
 jev = ["dep:sapho-jev"]
 clm = ["dep:sapho-clm"]
 decisions = ["dep:sapho-decisions"]
+claude = ["dep:sapho-claude"]
 
 [dependencies]
 sapho-core.workspace = true
@@ -71,6 +73,7 @@ sapho-recording.workspace = true
 sapho-jev = { workspace = true, optional = true }
 sapho-clm = { workspace = true, optional = true }
 sapho-decisions = { workspace = true, optional = true }
+sapho-claude = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "net", "io-util"] }

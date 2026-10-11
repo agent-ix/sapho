@@ -2160,6 +2160,7 @@ name = "sapho"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "sapho-claude",
  "sapho-clm",
  "sapho-core",
  "sapho-decisions",
@@ -2175,6 +2176,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sapho-claude"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ix-cli-kit",
+ "reqwest",
+ "sapho-core",
+ "sapho-http",
+ "sapho-recording",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "sapho-cli"
 version = "0.1.0"
 dependencies = [
@@ -2183,6 +2200,7 @@ dependencies = [
  "flate2",
  "ix-cli-kit",
  "rustix",
+ "sapho-claude",
  "sapho-clm",
  "sapho-core",
  "sapho-decisions",
