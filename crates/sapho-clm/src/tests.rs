@@ -354,7 +354,7 @@ fn endpoints_and_limits_refuse_unsafe_or_unbounded_configuration() {
         Err(ConfigurationError::InvalidCredential)
     ));
 }
-/// Trace: FR-044-AC-3
+/// Trace: FR-044-AC-3, FR-072-AC-5, IT-013-SC-05
 #[tokio::test]
 async fn byte_limits_accept_exact_boundary_and_reject_overflow_before_send_or_decode() {
     let body = response();
@@ -438,7 +438,7 @@ impl Transport for Waiting {
         })
     }
 }
-/// Trace: FR-044-AC-3
+/// Trace: FR-044-AC-3, FR-072-AC-5, IT-013-SC-05
 #[tokio::test(start_paused = true)]
 async fn queued_timeout_and_cancellation_release_concurrency_capacity() {
     let seam = Arc::new(Waiting {
