@@ -14,6 +14,7 @@ fn request() -> ModelRequest {
         backend: BackendId::new("reader").unwrap(),
         model: "claude-sonnet-4-6".into(),
         expected_model: None,
+        sample_index: None,
         distribution_policy: DistributionPolicy::Strict {},
         state: Value::Record(BTreeMap::from([(
             "passage".into(),

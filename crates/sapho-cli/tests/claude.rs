@@ -118,6 +118,7 @@ async fn cli_registry_records_and_replays_without_claude_transport() {
         backend: BackendId::new("reader").unwrap(),
         model: "requested-claude".into(),
         expected_model: None,
+        sample_index: None,
         distribution_policy: DistributionPolicy::Strict {},
         state: Value::Record(BTreeMap::new()),
         questions: vec![NamedQuestion {
