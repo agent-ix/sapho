@@ -1498,6 +1498,9 @@ fn converted_guard_checks_stale_map_in_stock_commands_without_public_calibrated_
     ]);
     let graph_path = root.path().join("converted-guard.json");
     std::fs::write(&graph_path, serde_json::to_vec(&graph).unwrap()).unwrap();
+    let bindings_path = root.path().join("bindings.yaml");
+    std::fs::write(&bindings_path,
+        "fast_a:\n  provider: clm\n  model: requested\n  distribution_policy: {kind: strict}\nslow_b:\n  provider: clm\n  model: requested\n  distribution_policy: {kind: strict}\n").unwrap();
     let input_path = root.path().join("input.json");
     std::fs::write(&input_path, b"{\"text\":\"case-text-0\"}").unwrap();
     let mut good = recording.clone();
@@ -1546,6 +1549,8 @@ fn converted_guard_checks_stale_map_in_stock_commands_without_public_calibrated_
         path(&changed_path),
         "--input",
         path(&input_path),
+        "--bindings",
+        path(&bindings_path),
     ]);
     assert!(!replay_bad.status.success());
     let bad_report: serde_json::Value = serde_json::from_slice(&replay_bad.stdout).unwrap();
@@ -1581,6 +1586,8 @@ fn converted_guard_checks_stale_map_in_stock_commands_without_public_calibrated_
         path(&changed_path),
         "--split",
         "development",
+        "--bindings",
+        path(&bindings_path),
     ]);
     assert!(!measured.status.success());
     let measured_report: serde_json::Value = serde_json::from_slice(&measured.stdout).unwrap();
@@ -1660,9 +1667,6 @@ fn converted_guard_checks_stale_map_in_stock_commands_without_public_calibrated_
             .unwrap();
             stream.write_all(body).unwrap();
         });
-        let bindings_path = root.path().join("live-bindings.yaml");
-        std::fs::write(&bindings_path,
-            "fast_a:\n  provider: clm\n  model: requested\n  distribution_policy: {kind: strict}\nslow_b:\n  provider: clm\n  model: requested\n  distribution_policy: {kind: strict}\n").unwrap();
         let live = Command::new(env!("CARGO_BIN_EXE_sapho"))
             .env_clear()
             .env("CLM_BASE_URL", endpoint)
