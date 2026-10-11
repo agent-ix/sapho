@@ -13,6 +13,7 @@ impl Provider {
             Self::Jev => Some("TYPESAFE_API_KEY"),
             Self::Clm => Some("CLM_API_KEY"),
             Self::Systemone => None,
+            Self::Decisions => Some("OPENAI_API_KEY"),
             Self::Ollama => None,
         }
     }
@@ -21,6 +22,7 @@ impl Provider {
             Self::Jev => Some("jev-api-key"),
             Self::Clm => Some("clm-api-key"),
             Self::Systemone => None,
+            Self::Decisions => Some("openai-api-key"),
             Self::Ollama => None,
         }
     }
@@ -53,7 +55,7 @@ pub fn resolve_credential<B: CredentialBackend>(
     {
         return Err(CliError::CredentialInvalid);
     }
-    if provider == Provider::Jev && secret.is_none() {
+    if matches!(provider, Provider::Jev | Provider::Decisions) && secret.is_none() {
         return Err(CliError::CredentialMissing(provider));
     }
     Ok(secret)

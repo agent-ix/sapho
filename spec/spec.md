@@ -57,13 +57,16 @@ flowchart TD
  jev --> systemone[sapho-systemone]
  clm[sapho-clm] --> core
  clm --> systemone
+ clm --> http[sapho-http]
  decisions[sapho-decisions] --> core
+ decisions --> http
+ http --> core
  systemone --> core
  recording[sapho-recording] --> core
  ollama[sapho-ollama] --> core
 ```
 
-The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev`, `clm` and draft `decisions` features are disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording, Jev, Ollama and Decisions need no runtime dependency. `sapho-ollama` and draft `sapho-decisions` depend only on core among workspace crates. Jev and CLM depend on `sapho-systemone` for their identical request translation and shared CLM model alias; systemone depends only on core among workspace crates and uses SDK-owned request/question types.
+The root `sapho` package is an embedding facade over these crates; it owns no independent behavior and its optional `jev`, `clm` and draft `decisions` features are disabled by default. The logic specification module shares the runtime crate; logic operators have no transport or EARS dependency. The CLI host depends on the existing graph/runtime/recording adapters and the new pure `sapho-evidence` and host-I/O `sapho-select` crates. Evidence and selection depend on core; neither performs inference or imports the runtime. The CLI remains a synchronous process boundary around async engine execution. Original plugin assets under `plugins/sapho` invoke the CLI; they own no engine semantics. Core owns the shared ports so recording, Jev, Ollama and Decisions need no runtime dependency. `sapho-ollama` depends only on core among workspace crates. CLM and Decisions use `sapho-http` for bounded native POST transport and complete-call admission; the shared transport depends only on core among workspace crates and owns no provider wire format. Jev and CLM depend on `sapho-systemone` for their identical request translation and shared CLM model alias; systemone depends only on core among workspace crates and uses SDK-owned request/question types.
 
 ## Public Contract
 

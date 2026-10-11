@@ -2,7 +2,10 @@
 // Copyright (C) 2026 Agent-IX
 //! Values, identity, source attribution and bounded serialization (FR-001/002).
 use crate::{Answers, ErrorCode, NamedQuestion, Result, SaphoError, validate_questions};
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Serialize,
+    ser::{SerializeMap, SerializeSeq, Serializer},
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{self, Write},
@@ -338,26 +341,42 @@ impl Value {
     /// Serialize model state as ordinary JSON, omitting source sidecars and item IDs.
     pub fn to_plain_json(&self) -> Result<serde_json::Value> {
         self.validate()?;
-        match self {
-            Self::Boolean(v) => Ok((*v).into()),
-            Self::Number(v) => Ok(serde_json::json!(v)),
-            Self::Text(v) => Ok(v.clone().into()),
-            Self::Probability(v) => Ok(serde_json::json!(v.get())),
-            Self::Degree(v) => Ok(serde_json::json!(v.get())),
-            Self::Optional(None) => Ok(serde_json::Value::Null),
-            Self::Optional(Some(v)) => v.to_plain_json(),
-            Self::List(items) => items
-                .iter()
-                .map(|d| d.value.to_plain_json())
-                .collect::<Result<Vec<_>>>()
-                .map(serde_json::Value::Array),
-            Self::Record(fields) => fields
-                .iter()
-                .map(|(k, v)| Ok((k.clone(), v.to_plain_json()?)))
-                .collect::<Result<serde_json::Map<_, _>>>()
-                .map(serde_json::Value::Object),
-            Self::Questions(v) => serde_json::to_value(v).map_err(serialization_error),
-            Self::Answers(v) => serde_json::to_value(v).map_err(serialization_error),
+        serde_json::to_value(Plain(self)).map_err(serialization_error)
+    }
+    /// Serialize the same plain state without retaining more than `max` JSON bytes.
+    pub fn to_plain_json_bounded(&self, max: usize) -> Result<Vec<u8>> {
+        self.validate()?;
+        bounded_json(&Plain(self), max)
+    }
+}
+/// One owner for the plain model-state projection, borrowed for bounded writing.
+struct Plain<'a>(&'a Value);
+impl Serialize for Plain<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        match self.0 {
+            Value::Boolean(value) => serializer.serialize_bool(*value),
+            Value::Number(value) => value.serialize(serializer),
+            Value::Text(value) => value.serialize(serializer),
+            Value::Probability(value) => value.get().serialize(serializer),
+            Value::Degree(value) => value.get().serialize(serializer),
+            Value::Optional(None) => serializer.serialize_none(),
+            Value::Optional(Some(value)) => Plain(value).serialize(serializer),
+            Value::List(items) => {
+                let mut sequence = serializer.serialize_seq(Some(items.len()))?;
+                for item in items {
+                    sequence.serialize_element(&Plain(&item.value))?;
+                }
+                sequence.end()
+            }
+            Value::Record(fields) => {
+                let mut map = serializer.serialize_map(Some(fields.len()))?;
+                for (key, value) in fields {
+                    map.serialize_entry(key, &Plain(value))?;
+                }
+                map.end()
+            }
+            Value::Questions(value) => value.serialize(serializer),
+            Value::Answers(value) => value.serialize(serializer),
         }
     }
 }

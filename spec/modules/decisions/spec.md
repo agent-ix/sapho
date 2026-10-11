@@ -23,7 +23,7 @@ Responses or Chat Completions substitutions, generated prose or extraction, host
 
 ## System Overview
 
-The crate depends only on `sapho-core` among workspace crates. The host supplies a redacted credential and the fixed official endpoint; CLI binding metadata contains no endpoint or secret. Runtime retains policy-sensitive `Answers` validation. The adapter exposes a native transport seam for offline codec and HTTP tests. Recording remains core-only.
+The crate depends on `sapho-core` and the shared `sapho-http` transport among workspace crates. `sapho-http` owns bounded native POST collection and complete-call admission for CLM and Decisions; each adapter owns its endpoint, authentication policy, wire codec and result evidence. The host supplies a redacted credential and the fixed official endpoint; CLI binding metadata contains no endpoint or secret. Runtime retains policy-sensitive `Answers` validation. The adapter exposes a native transport seam for offline codec and HTTP tests. Recording remains core-only.
 
 ## Requirements Architecture
 

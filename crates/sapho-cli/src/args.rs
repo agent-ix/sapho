@@ -8,11 +8,13 @@ use sapho_select::{Patterns, SelectionLimits};
 use std::{path::PathBuf, time::Duration};
 /// Provider help shown by `--help`; the guide carries the same facts at length.
 const BINDINGS_HELP: &str = "\
-Bindings (--bindings FILE): one entry per graph backend, with provider jev, clm, systemone or ollama.
+Bindings (--bindings FILE): one entry per graph backend, with provider jev, clm, systemone, decisions or ollama.
 Each entry takes model, expected_model and distribution_policy.
 systemone requires an explicit model and a separate JSON host file selected with
 --service-config FILE or SAPHO_SERVICE_CONFIG (file path only). Each required binding
 has its own base_url, optional OS-store credential_key and bounded limits.
+Decisions requires model gpt-6-luna and the decisions build feature. Its fixed endpoint is
+https://api.openai.com/v1/decisions; OPENAI_API_KEY or the OS secret store supplies auth.
 The ollama provider (a build with the ollama feature) also takes think (default false),
 num_ctx (default 32768), num_predict (default 512) and timeout_seconds (default 600).
 It needs no credential. The server URL is read from OLLAMA_BASE_URL only (default

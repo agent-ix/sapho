@@ -20,6 +20,8 @@ pub enum Provider {
     Clm,
     /// Named host-configured System One contract service.
     Systemone,
+    /// OpenAI Decisions public beta, using the fixed official endpoint.
+    Decisions,
     /// A running Ollama server; the URL comes from `OLLAMA_BASE_URL`, never from a document.
     Ollama,
 }
@@ -273,6 +275,7 @@ pub fn live_bindings_with_services<B: CredentialBackend>(
             Provider::Jev => prepare_jev()?,
             Provider::Clm => prepare_clm()?,
             Provider::Systemone => prepare_systemone(id, services, store)?,
+            Provider::Decisions => prepare_decisions(binding)?,
             Provider::Ollama => prepare_ollama(binding)?,
         };
         registry.register(id.clone(), binding.attach(backend))?;
@@ -343,7 +346,7 @@ fn prepare_ollama(binding: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBa
 fn prepare_ollama(_: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
     Err(CliError::Feature(Provider::Ollama))
 }
-#[cfg(any(feature = "jev", feature = "clm"))]
+#[cfg(any(feature = "jev", feature = "clm", feature = "decisions"))]
 fn credential(provider: Provider) -> Result<Option<ix_cli_kit::secrets::SecretValue>, CliError> {
     crate::resolve_credential(
         provider,
@@ -351,6 +354,23 @@ fn credential(provider: Provider) -> Result<Option<ix_cli_kit::secrets::SecretVa
         None,
         provider.credential_environment().and_then(std::env::var_os),
     )
+}
+#[cfg(feature = "decisions")]
+fn prepare_decisions(
+    binding: &BindingConfig,
+) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    if binding.model != sapho_decisions::MODEL {
+        return Err(SaphoError::new(ErrorCode::Config, "Unsupported Decisions model").into());
+    }
+    let secret =
+        credential(Provider::Decisions)?.ok_or(CliError::CredentialMissing(Provider::Decisions))?;
+    sapho_decisions::DecisionsBackend::new(&secret, sapho_decisions::Limits::default())
+        .map(|backend| Arc::new(backend) as Arc<dyn sapho_core::ModelBackend>)
+        .map_err(|_| CliError::ProviderConfiguration)
+}
+#[cfg(not(feature = "decisions"))]
+fn prepare_decisions(_: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
+    Err(CliError::Feature(Provider::Decisions))
 }
 #[cfg(feature = "clm")]
 fn prepare_clm() -> Result<Arc<dyn sapho_core::ModelBackend>, CliError> {
