@@ -15,6 +15,7 @@ use std::{
 
 fn request() -> ModelRequest {
     ModelRequest {
+        sample_index: None,
         backend: BackendId::new("judge").unwrap(),
         model: MODEL.into(),
         expected_model: Some(MODEL.into()),
