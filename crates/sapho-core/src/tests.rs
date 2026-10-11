@@ -140,6 +140,34 @@ fn repeated_text_keeps_occurrences_and_source_unions() {
     assert_eq!(a.sources, vec![first, second]);
     assert_eq!(b.sources.len(), 1);
 }
+/// Trace: FR-002-AC-1, FR-002-AC-2
+#[test]
+fn bounded_plain_projection_omits_item_identity_and_matches_json_value() {
+    let value = Value::Record(BTreeMap::from([
+        (
+            "present".into(),
+            Value::Optional(Some(Box::new(Value::Text("quoted \" text".into())))),
+        ),
+        ("missing".into(), Value::Optional(None)),
+        (
+            "items".into(),
+            Value::List(vec![Datum::new("hidden-id", Value::Boolean(true)).unwrap()]),
+        ),
+    ]));
+    let expected = serde_json::to_vec(&value.to_plain_json().unwrap()).unwrap();
+    assert_eq!(
+        value.to_plain_json_bounded(expected.len()).unwrap(),
+        expected
+    );
+    assert_eq!(
+        value
+            .to_plain_json_bounded(expected.len() - 1)
+            .unwrap_err()
+            .code,
+        ErrorCode::LimitExceeded
+    );
+    assert!(!String::from_utf8(expected).unwrap().contains("hidden-id"));
+}
 struct Identity;
 impl Primitive for Identity {
     fn signature(&self) -> Signature {

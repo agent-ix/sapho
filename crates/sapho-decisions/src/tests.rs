@@ -920,6 +920,46 @@ async fn invalid_envelopes_and_cardinalities_never_reach_transport() {
         .collect();
     wire::encode(&exact_max, 1_048_576).unwrap();
 }
+/// Trace: FR-085-AC-6, FR-086-AC-3, IT-018-SC-02, IT-018-SC-05
+#[tokio::test]
+async fn oversized_valid_envelope_and_question_refuse_before_transport() {
+    let seam = fixed(200, response());
+    let backend = DecisionsBackend::with_transport(seam.clone(), Limits::default()).unwrap();
+    for images in [false, true] {
+        let mut req = request();
+        req.state = Value::Record(BTreeMap::from([(
+            "decisions_input".into(),
+            Value::Record(BTreeMap::from([
+                ("text".into(), Value::Text("x".repeat(1_048_577))),
+                (
+                    "images".into(),
+                    Value::List(if images {
+                        vec![
+                            Datum::new("0", Value::Text("data:image/png;base64,YWJj".into()))
+                                .unwrap(),
+                        ]
+                    } else {
+                        vec![]
+                    }),
+                ),
+            ])),
+        )]));
+        assert_eq!(
+            backend.infer(&req).await.unwrap_err().code,
+            ErrorCode::LimitExceeded
+        );
+    }
+    let mut req = request();
+    let Question::Boolean { instructions, .. } = &mut req.questions[0].question else {
+        panic!("boolean")
+    };
+    *instructions = "x".repeat(1_048_577);
+    assert_eq!(
+        backend.infer(&req).await.unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+    assert_eq!(seam.calls.load(Ordering::SeqCst), 0);
+}
 
 /// Trace: FR-086-AC-1, FR-086-AC-4, IT-018-SC-05
 #[tokio::test]

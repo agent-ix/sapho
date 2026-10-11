@@ -6,11 +6,11 @@ use sapho_core::{
     Answer, ErrorCode, ModelRequest, ModelResponse, Probability, Question, Result, SaphoError,
     Usage, Value, bounded_json, decode_json,
 };
-use serde::{
-    Deserialize, Serialize,
-    ser::{SerializeMap, SerializeSeq, Serializer},
+use serde::{Deserialize, Serialize};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
 };
-use std::collections::{BTreeMap, BTreeSet};
 
 fn invalid(message: &'static str) -> SaphoError {
     SaphoError::new(ErrorCode::InvalidValue, message)
@@ -24,94 +24,63 @@ fn envelope_error() -> SaphoError {
         .with_context("reason", "invalid_decisions_input_envelope")
 }
 #[derive(Serialize)]
-struct Request {
+struct Request<'a> {
     model: &'static str,
-    input: Input,
-    questions: Vec<WireQuestion>,
+    input: Input<'a>,
+    questions: Vec<WireQuestion<'a>>,
 }
 #[derive(Serialize)]
 #[serde(untagged)]
-enum Input {
-    Text(String),
-    Messages(Vec<Message>),
+enum Input<'a> {
+    Text(Cow<'a, str>),
+    Messages(Vec<Message<'a>>),
 }
 #[derive(Serialize)]
-struct Message {
+struct Message<'a> {
     role: &'static str,
-    content: Vec<Part>,
+    content: Vec<Part<'a>>,
 }
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum Part {
-    InputText { text: String },
-    InputImage { image_url: String },
+enum Part<'a> {
+    InputText { text: &'a str },
+    InputImage { image_url: &'a str },
 }
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum WireQuestion {
+enum WireQuestion<'a> {
     Predicate {
-        name: String,
-        instructions: String,
+        name: &'a str,
+        instructions: Cow<'a, str>,
     },
     Choice {
-        name: String,
-        instructions: String,
-        choices: Vec<WireChoice>,
+        name: &'a str,
+        instructions: Cow<'a, str>,
+        choices: Vec<WireChoice<'a>>,
     },
     Score {
-        name: String,
-        instructions: String,
-        levels: Vec<WireLevel>,
+        name: &'a str,
+        instructions: Cow<'a, str>,
+        levels: Vec<WireLevel<'a>>,
     },
 }
 #[derive(Serialize)]
-struct WireChoice {
-    value: String,
-    description: String,
+struct WireChoice<'a> {
+    value: &'a str,
+    description: &'a str,
 }
 #[derive(Serialize)]
-struct WireLevel {
+struct WireLevel<'a> {
     label: String,
-    description: String,
+    description: &'a str,
 }
-/// Borrowed plain projection so the byte ceiling applies before allocating JSON state.
-struct Plain<'a>(&'a Value);
-impl Serialize for Plain<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        match self.0 {
-            Value::Boolean(value) => serializer.serialize_bool(*value),
-            Value::Number(value) => value.serialize(serializer),
-            Value::Text(value) => value.serialize(serializer),
-            Value::Probability(value) => value.get().serialize(serializer),
-            Value::Degree(value) => value.get().serialize(serializer),
-            Value::Optional(None) => serializer.serialize_none(),
-            Value::Optional(Some(value)) => Plain(value).serialize(serializer),
-            Value::List(items) => {
-                let mut sequence = serializer.serialize_seq(Some(items.len()))?;
-                for item in items {
-                    sequence.serialize_element(&Plain(&item.value))?;
-                }
-                sequence.end()
-            }
-            Value::Record(fields) => {
-                let mut map = serializer.serialize_map(Some(fields.len()))?;
-                for (key, value) in fields {
-                    map.serialize_entry(key, &Plain(value))?;
-                }
-                map.end()
-            }
-            Value::Questions(value) => value.serialize(serializer),
-            Value::Answers(value) => value.serialize(serializer),
-        }
-    }
-}
-fn input(request: &ModelRequest, ceiling: usize) -> Result<Input> {
+fn input(request: &ModelRequest, ceiling: usize) -> Result<Input<'_>> {
     let Value::Record(state) = &request.state else {
         return Err(invalid("Decisions state must be a record"));
     };
     let Some(envelope) = state.get("decisions_input") else {
-        return String::from_utf8(bounded_json(&Plain(&request.state), ceiling)?)
-            .map(Input::Text)
+        return String::from_utf8(request.state.to_plain_json_bounded(ceiling)?)
+            .map(|text| Input::Text(Cow::Owned(text)))
             .map_err(|_| invalid("Cannot serialize Decisions state"));
     };
     let Value::Record(fields) = envelope else {
@@ -129,10 +98,16 @@ fn input(request: &ModelRequest, ceiling: usize) -> Result<Input> {
     if images.len() > 8 {
         return Err(envelope_error());
     }
-    if images.is_empty() {
-        return Ok(Input::Text(text.clone()));
+    if text.len() > ceiling {
+        return Err(SaphoError::new(
+            ErrorCode::LimitExceeded,
+            "Decisions request byte ceiling exceeded",
+        ));
     }
-    let mut content = vec![Part::InputText { text: text.clone() }];
+    if images.is_empty() {
+        return Ok(Input::Text(Cow::Borrowed(text)));
+    }
+    let mut content = vec![Part::InputText { text }];
     for image in images {
         let Value::Text(url) = &image.value else {
             return Err(envelope_error());
@@ -156,9 +131,7 @@ fn input(request: &ModelRequest, ceiling: usize) -> Result<Input> {
         {
             return Err(envelope_error());
         }
-        content.push(Part::InputImage {
-            image_url: url.clone(),
-        });
+        content.push(Part::InputImage { image_url: url });
     }
     Ok(Input::Messages(vec![Message {
         role: "user",
@@ -177,7 +150,7 @@ pub(crate) fn encode(request: &ModelRequest, ceiling: usize) -> Result<Vec<u8>> 
     let input = input(request, ceiling)?;
     let mut questions = Vec::with_capacity(request.questions.len());
     for named in &request.questions {
-        let name = named.id.clone();
+        let name = named.id.as_str();
         let wire = match &named.question {
             Question::Boolean {
                 instructions,
@@ -187,11 +160,22 @@ pub(crate) fn encode(request: &ModelRequest, ceiling: usize) -> Result<Vec<u8>> 
                 if yes.trim().is_empty() || no.trim().is_empty() {
                     return Err(invalid("Boolean criteria must be nonempty"));
                 }
+                let formatted_len = instructions
+                    .len()
+                    .saturating_add(yes.len())
+                    .saturating_add(no.len())
+                    .saturating_add("\nTrue criterion: \nFalse criterion: ".len());
+                if formatted_len > ceiling {
+                    return Err(SaphoError::new(
+                        ErrorCode::LimitExceeded,
+                        "Decisions request byte ceiling exceeded",
+                    ));
+                }
                 WireQuestion::Predicate {
                     name,
-                    instructions: format!(
+                    instructions: Cow::Owned(format!(
                         "{instructions}\nTrue criterion: {yes}\nFalse criterion: {no}"
-                    ),
+                    )),
                 }
             }
             Question::Choice {
@@ -207,12 +191,12 @@ pub(crate) fn encode(request: &ModelRequest, ceiling: usize) -> Result<Vec<u8>> 
                 }
                 WireQuestion::Choice {
                     name,
-                    instructions: instructions.clone(),
+                    instructions: Cow::Borrowed(instructions),
                     choices: options
                         .iter()
                         .map(|item| WireChoice {
-                            value: item.label.clone(),
-                            description: item.description.clone(),
+                            value: &item.label,
+                            description: &item.description,
                         })
                         .collect(),
                 }
@@ -226,13 +210,13 @@ pub(crate) fn encode(request: &ModelRequest, ceiling: usize) -> Result<Vec<u8>> 
                 }
                 WireQuestion::Score {
                     name,
-                    instructions: instructions.clone(),
+                    instructions: Cow::Borrowed(instructions),
                     levels: levels
                         .iter()
                         .enumerate()
                         .map(|(index, description)| WireLevel {
                             label: index.to_string(),
-                            description: description.clone(),
+                            description,
                         })
                         .collect(),
                 }
