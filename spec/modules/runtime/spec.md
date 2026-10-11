@@ -34,6 +34,7 @@ Owning crate: `sapho-runtime`. Internal prerequisites: core, graph. See the [wor
 - [FR-031: Assemble ordered identified lists](functional/FR-031.md)
 - [FR-058: Execute shadow asks without changing decisions](functional/FR-058.md)
 - [FR-061: Observe model calls for measured rosters](functional/FR-061.md)
+- [FR-076: Execute and score repeated ask samples](functional/FR-076.md)
 
 ## References
 
