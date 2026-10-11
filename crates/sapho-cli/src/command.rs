@@ -6,7 +6,7 @@ use sapho_cli::{
     ArtifactWriter, Bindings, CliError, ExitStatus, GraphArtifact, MAX_SERVICE_CONFIG_BYTES,
     Provider, RunReport, Runner, ServiceConfig, inspect, live_bindings_with_services, load_graph,
     plain_inputs, read_bytes, read_bytes_with_timeout, recording_bindings, replay_bindings_json,
-    select_format,
+    select_format, sweep,
 };
 use sapho_core::{
     BackendRegistry, ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry,
@@ -1070,6 +1070,15 @@ pub(crate) fn execute(cli: Cli) -> Result<Response, CliError> {
         Command::Roster(args) => roster_command(args),
         Command::RosterLiteral(args) => roster_literal_command(args),
         Command::Tune(args) => tuning(args),
+        Command::Sweep(args) => {
+            let report = sweep(
+                &args.graph,
+                &args.grid,
+                &args.output_dir,
+                args.max_candidates,
+            )?;
+            respond(report, ExitStatus::Completed, 8 * 1_048_576, None)
+        }
         Command::ExportTraining {
             dataset: path,
             output,
