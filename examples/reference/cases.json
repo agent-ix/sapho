@@ -93,7 +93,8 @@
     "input": "guards-input.json",
     "expected": {
       "optional": null,
-      "decision": true
+      "decision": true,
+      "merged": true
     },
     "skipped": [
       [
@@ -105,8 +106,15 @@
       "input": "guards-enabled-input.json",
       "expected": {
         "optional": false,
-        "decision": false
-      }
+        "decision": false,
+        "merged": false
+      },
+      "skipped": [
+        [
+          "root",
+          "fallback_present"
+        ]
+      ]
     }
   },
   {

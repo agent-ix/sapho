@@ -188,6 +188,8 @@ pub enum Operation {
     Complement,
     /// Explicit replacement of Optional absence.
     Coalesce,
+    /// Select the only present value among two to 32 same-type Optional operands.
+    MergePresent {},
 }
 /// One named node with typed connections and an optional execution guard.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
