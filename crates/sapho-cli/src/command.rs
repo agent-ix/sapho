@@ -10,7 +10,7 @@ use sapho_cli::{
 };
 use sapho_core::{
     BackendId, BackendRegistry, CalibrationMap, Datum, ErrorCode, Inputs, ItemId, ModelIdentity,
-    PrimitiveRegistry, Probability, ProviderDescriptor, Question, SaphoError, SourceId, Value,
+    NodeId, PrimitiveRegistry, ProviderDescriptor, Question, SaphoError, SourceId, Value,
     ValueType, bounded_json, check_ports, decode_json, measured_json_bytes,
 };
 use sapho_evidence::{
@@ -280,12 +280,10 @@ struct CaseRun {
     shadow: Option<CaseOutcome>,
     document: Vec<u8>,
     calibration: Vec<CalibrationUse>,
+    ask_models: BTreeMap<String, Vec<ModelIdentity>>,
 }
 struct CalibrationUse {
     map_id: String,
-    raw: Probability,
-    binding: BackendId,
-    model: String,
 }
 /// The per-case documents of a report, each held compressed and expanded only while it is
 /// written. The documents repeat their graph structure, so they shrink to a small fraction,
@@ -353,17 +351,33 @@ async fn run_cases(
                     let Value::CalibrationMap(map) = &node.inputs.get("map")?.value else {
                         return None;
                     };
-                    let Value::Probability(raw) = node.inputs.get("value")?.value else {
-                        return None;
-                    };
                     Some(CalibrationUse {
                         map_id: map.map_id.clone(),
-                        raw,
-                        binding: map.fit_binding.clone(),
-                        model: map.fit_actual_model.clone(),
                     })
                 })
                 .collect(),
+            ask_models: report
+                .trace
+                .nodes
+                .iter()
+                .fold(BTreeMap::new(), |mut by_node, node| {
+                    if let ([root, id], Operation::Ask { .. }, Some(response)) = (
+                        node.path.as_slice(),
+                        &node.operation,
+                        node.model
+                            .as_ref()
+                            .and_then(|model| model.response.as_ref()),
+                    ) && root == "root"
+                    {
+                        by_node
+                            .entry(id.clone())
+                            .or_insert_with(Vec::new)
+                            .push(ModelIdentity {
+                                name: response.model.clone(),
+                            });
+                    }
+                    by_node
+                }),
         });
     }
     Ok(runs)
@@ -486,7 +500,7 @@ struct CalibrationMismatchReport {
     error: SaphoError,
     runs: Documents,
 }
-fn raw_output_ask_binding(graph: &GraphSpec, output: &str) -> Result<BackendId, CliError> {
+fn raw_output_ask_source(graph: &GraphSpec, output: &str) -> Result<(NodeId, BackendId), CliError> {
     let mut pending = Vec::new();
     let Some(Binding::Node { node, .. }) = graph.outputs.get(output) else {
         return Err(
@@ -509,7 +523,7 @@ fn raw_output_ask_binding(graph: &GraphSpec, output: &str) -> Result<BackendId, 
             .get(&id)
             .ok_or_else(|| SaphoError::new(ErrorCode::Config, "Output dependency absent"))?;
         if let Operation::Ask { backend, .. } = &node.operation {
-            asks.push(backend.clone());
+            asks.push((id.clone(), backend.clone()));
         }
         if matches!(node.operation, Operation::Map { .. }) {
             return Err(SaphoError::new(
@@ -525,7 +539,7 @@ fn raw_output_ask_binding(graph: &GraphSpec, output: &str) -> Result<BackendId, 
         }
     }
     match asks.as_slice() {
-        [binding] => Ok(binding.clone()),
+        [source] => Ok(source.clone()),
         _ => Err(SaphoError::new(
             ErrorCode::Config,
             "Calibration fit requires exactly one contributing Ask",
@@ -547,7 +561,7 @@ fn fit_calibration_command(args: FitCalibrationArgs) -> Result<Response, CliErro
     }
     let graph = load_graph(&args.graph.graph, args.graph.format.map(GraphFormat::from))?;
     let declared = BackendId::new(&args.binding)?;
-    let found = raw_output_ask_binding(&graph.definition, &args.output_name)?;
+    let found = raw_output_ask_source(&graph.definition, &args.output_name)?.1;
     if found != declared {
         return Err(SaphoError::new(
             ErrorCode::ModelMismatch,
@@ -671,52 +685,55 @@ fn check_development_calibration_observations(
         }
     }
     for map in maps.values() {
-        if calibration_cases_digest(dataset, &map.raw_output, max_cases)? != map.fit_cases_digest
+        if !graph.outputs.contains_key(&map.raw_output)
             || !runs
                 .iter()
                 .any(|run| run.calibration.iter().any(|used| used.map_id == map.map_id))
         {
             continue;
         }
-        // The fit digest describes one raw prediction per selected case. Guarded
-        // or repeated uses still receive the runtime's per-node model check,
-        // but their observations are not that fitted cohort.
+        if calibration_cases_digest(dataset, &map.raw_output, max_cases)? != map.fit_cases_digest {
+            continue;
+        }
+        let (source_node, source_binding) =
+            raw_output_ask_source(graph, &map.raw_output).map_err(|_| {
+                SaphoError::new(
+                    ErrorCode::ModelMismatch,
+                    "Calibration raw output source differs",
+                )
+            })?;
+        if source_binding != map.fit_binding {
+            return Err(SaphoError::new(
+                ErrorCode::ModelMismatch,
+                "Calibration raw output binding differs",
+            )
+            .with_context("map_id", &map.map_id)
+            .into());
+        }
+        // The fitted cohort needs one raw output and one contributing response
+        // per case. Executed calibration nodes can be guarded or repeated.
         if runs.iter().any(|run| {
-            run.calibration
-                .iter()
-                .filter(|used| used.map_id == map.map_id)
-                .count()
-                != 1
+            !matches!(&run.outcome, CaseOutcome::Completed { outputs, .. }
+                if outputs.get(&map.raw_output).is_some_and(|datum| matches!(&datum.value, Value::Probability(_))))
+                || run.ask_models.get(source_node.as_str()).is_none_or(|models| models.len() != 1)
         }) {
             continue;
         }
         let mut outcomes = BTreeMap::new();
         let mut attribution = FitAttribution::new();
         for run in runs {
-            let used = run
-                .calibration
-                .iter()
-                .find(|used| used.map_id == map.map_id)
+            outcomes.insert(run.id.clone(), run.outcome.clone());
+            let model = run
+                .ask_models
+                .get(source_node.as_str())
+                .and_then(|models| models.first())
                 .ok_or_else(|| {
-                    SaphoError::new(ErrorCode::CodeFailed, "Comparable calibration use absent")
+                    SaphoError::new(
+                        ErrorCode::CodeFailed,
+                        "Comparable calibration response absent",
+                    )
                 })?;
-            let mut outcome = run.outcome.clone();
-            if let CaseOutcome::Completed { outputs, .. } = &mut outcome {
-                outputs.insert(
-                    map.raw_output.clone(),
-                    Datum::new("calibration_raw", Value::Probability(used.raw))?,
-                );
-            }
-            outcomes.insert(run.id.clone(), outcome);
-            attribution.insert(
-                run.id.clone(),
-                (
-                    used.binding.clone(),
-                    ModelIdentity {
-                        name: used.model.clone(),
-                    },
-                ),
-            );
+            attribution.insert(run.id.clone(), (source_binding.clone(), model.clone()));
         }
         let fitted = fit_calibration(
             dataset,

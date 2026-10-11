@@ -1172,6 +1172,31 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
                     })
             })
     );
+    // Trace: FR-084-AC-5, IT-017-SC-07, IT-017-SC-08
+    // Raw cohort identity remains binding even when the map is guarded or reused.
+    for (candidate, labels) in [
+        (&partly_guarded_path, &dataset),
+        (&repeated_path, &dual_path),
+    ] {
+        let changed = command(&[
+            "measure",
+            path(candidate),
+            "--dataset",
+            path(labels),
+            "--replay",
+            path(&prediction_path),
+            "--split",
+            "development",
+        ]);
+        assert!(
+            !changed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&changed.stdout)
+        );
+        let refused: serde_json::Value = serde_json::from_slice(&changed.stdout).unwrap();
+        assert_eq!(refused["error"]["code"], "model_mismatch", "{refused}");
+        assert!(refused.get("measurement").is_none());
+    }
     let held = root.path().join("held.json");
     let run = command(&[
         "fit-calibration",
