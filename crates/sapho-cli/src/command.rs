@@ -31,7 +31,6 @@ use sapho_runtime::{
 };
 use serde::Serialize;
 use serde_json::value::RawValue;
-use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     io::{Read, Write},
@@ -998,17 +997,35 @@ fn gate_evaluate(args: GateEvaluateArgs) -> Result<Response, CliError> {
         .chain(args.repeat_replay.iter())
         .collect::<Vec<_>>();
     let mut replay_data = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
+    let mut seen_paths = std::collections::BTreeSet::new();
+    #[cfg(unix)]
+    let mut seen_files = std::collections::BTreeSet::new();
     for path in replay_paths {
-        let bytes = read_bytes(path, options.limits.max_artifact_bytes)?;
-        let recording = Recording::from_json(&bytes, options.limits.max_artifact_bytes)?;
-        let normalized = bounded_json(&recording, options.limits.max_artifact_bytes)?;
-        if !seen.insert(format!("{:x}", Sha256::digest(normalized))) {
+        let canonical = std::fs::canonicalize(path).map_err(|source| CliError::Io {
+            path: (*path).clone(),
+            source,
+        })?;
+        if !seen_paths.insert(canonical) {
             return Err(EvidenceError::InvalidGate(
-                "Repeated replay evidence has the same typed content".into(),
+                "Repetition reuses the same recording file".into(),
             )
             .into());
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let metadata = std::fs::metadata(path).map_err(|source| CliError::Io {
+                path: (*path).clone(),
+                source,
+            })?;
+            if !seen_files.insert((metadata.dev(), metadata.ino())) {
+                return Err(EvidenceError::InvalidGate(
+                    "Repetition aliases the same recording file".into(),
+                )
+                .into());
+            }
+        }
+        let bytes = read_bytes(path, options.limits.max_artifact_bytes)?;
         replay_data.push(bytes);
     }
     let runtime = runtime()?;
@@ -1079,7 +1096,7 @@ fn gate_evaluate(args: GateEvaluateArgs) -> Result<Response, CliError> {
             repetitions: measurements,
             repetition_runs: documents,
             repetition_source: if options.replay.is_some() {
-                "distinct_recordings"
+                "caller_supplied_recording_files"
             } else {
                 "fresh_live_requests"
             },

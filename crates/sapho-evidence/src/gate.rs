@@ -652,6 +652,40 @@ mod tests {
             .is_err()
         );
     }
+    /// Trace: FR-070-AC-1, FR-070-AC-2, IT-012-SC-02
+    #[test]
+    fn four_case_best_constant_tie_has_zero_margin_and_true_recall() {
+        let data = fixture(&[false, false, false, true]);
+        let receipt = register_gate(
+            &gate(&data, bars()),
+            &data,
+            "graph-v1:sha256:fixture",
+            &schemas(),
+            100,
+        )
+        .unwrap();
+        let primary = measured(&data, &[0.1, 0.1, 0.1, 0.1]);
+        let report = evaluate_gate(
+            &receipt,
+            &data,
+            "graph-v1:sha256:fixture",
+            &schemas(),
+            &primary,
+            &[primary.clone(), primary.clone()],
+            100,
+        )
+        .unwrap();
+        let output = &report.outputs["result"];
+        assert!(report.complete);
+        assert_eq!(output.selected, 4);
+        assert_eq!(output.scored, 4);
+        assert_eq!(output.best_constant_predictor, Some(0.75));
+        assert_eq!(output.margin.observed, Some(0.0));
+        assert_eq!(output.margin.status, BarStatus::Fail);
+        assert_eq!(output.true_recall.observed, Some(0.0));
+        assert_eq!(output.true_recall.status, BarStatus::Fail);
+        assert_eq!(report.verdict, GateVerdict::NoGo);
+    }
     /// Trace: FR-069-AC-1, FR-069-AC-2, FR-069-AC-3, FR-069-AC-4, FR-069-AC-5, FR-069-AC-6, IT-012-SC-01, IT-012-SC-05
     #[test]
     fn receipt_binds_exact_bytes_semantics_dataset_and_complete_output_set() {
