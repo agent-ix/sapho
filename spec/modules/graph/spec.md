@@ -25,6 +25,7 @@ Owning crate: `sapho-graph`. Internal prerequisites: core. See the [workspace bo
 - [FR-008: Compile checked acyclic graph](functional/FR-008-compile-checked-acyclic-graph.md)
 - [FR-009: Type conditional node outputs](functional/FR-009-type-conditional-node-outputs.md)
 - [FR-057: Declare isolated shadow asks and observations](functional/FR-057.md)
+- [FR-063: Consume measured roster profiles as typed graph literals](functional/FR-063.md)
 
 ## References
 
