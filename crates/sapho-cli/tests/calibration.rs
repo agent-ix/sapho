@@ -1172,6 +1172,45 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
                     })
             })
     );
+    // Trace: FR-084-AC-5, IT-017-SC-07
+    // Same fit cases with a private raw producer cannot silently claim the
+    // fitted observation digest, even if the reported model name matches.
+    let mut private_raw = calibrated.clone();
+    private_raw.outputs.remove("raw_support");
+    let private_raw_path = root.path().join("private-raw.json");
+    std::fs::write(&private_raw_path, serde_json::to_vec(&private_raw).unwrap()).unwrap();
+    for source in [&recording, &prediction_path] {
+        let checked = command(&[
+            "measure",
+            path(&private_raw_path),
+            "--dataset",
+            path(&dual_path),
+            "--replay",
+            path(source),
+            "--split",
+            "development",
+        ]);
+        assert!(!checked.status.success());
+        let refused: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
+        assert_eq!(refused["error"]["code"], "model_mismatch", "{refused}");
+        assert_eq!(refused["error"]["context"]["raw_output"], "raw_support");
+        assert!(refused.get("measurement").is_none());
+    }
+    let private_held_out = command(&[
+        "measure",
+        path(&private_raw_path),
+        "--dataset",
+        path(&dual_path),
+        "--replay",
+        path(&recording),
+        "--split",
+        "held_out",
+    ]);
+    assert!(
+        private_held_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&private_held_out.stdout)
+    );
     // Trace: FR-084-AC-5, IT-017-SC-07, IT-017-SC-08
     // Raw cohort identity remains binding even when the map is guarded or reused.
     for (candidate, labels) in [

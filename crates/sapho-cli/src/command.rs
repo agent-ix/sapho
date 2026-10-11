@@ -685,15 +685,23 @@ fn check_development_calibration_observations(
         }
     }
     for map in maps.values() {
-        if !graph.outputs.contains_key(&map.raw_output)
-            || !runs
-                .iter()
-                .any(|run| run.calibration.iter().any(|used| used.map_id == map.map_id))
+        if !runs
+            .iter()
+            .any(|run| run.calibration.iter().any(|used| used.map_id == map.map_id))
         {
             continue;
         }
         if calibration_cases_digest(dataset, &map.raw_output, max_cases)? != map.fit_cases_digest {
             continue;
+        }
+        if !graph.outputs.contains_key(&map.raw_output) {
+            return Err(SaphoError::new(
+                ErrorCode::ModelMismatch,
+                "Calibration raw fit output unavailable for development verification",
+            )
+            .with_context("map_id", &map.map_id)
+            .with_context("raw_output", &map.raw_output)
+            .into());
         }
         let (source_node, source_binding) =
             raw_output_ask_source(graph, &map.raw_output).map_err(|_| {
