@@ -36,3 +36,21 @@ relationships:
 - `sapho-evidence` still has only `sapho-core` as a workspace-crate dependency; Dataset serde/validate remains unchanged in SAPHO-33 commits.
 - Quoin #687 parity merged SHA and focused receipt remain external dependencies; no live EARS 1,000-case promotion is claimed.
 - No tracker or PR comment was posted under the review dispatch's read-only instruction.
+
+## Dispositions
+
+Read-only source disposition at local, unpushed `cd05d0603deb3b65e2fc533b21d01ed5da2049d4`. Focused/full tests were not run in this pass under the machine-memory pause.
+
+| FND | Outcome | sha/reason |
+| --- | --- | --- |
+| FND-001 | fixed | `cd05d06`: `invocation.rs:1669-1826` captures three separate custom backend runs and compares live gate evidence with CLI replay; equal content is now accepted by `command.rs:471-500`. |
+| FND-002 | fixed | `cd05d06`: `invocation.rs:2007-2132` changes label, input, selected split, graph literal and gate whitespace at the CLI boundary. `command.rs:442-461` verifies identities before runners and cases exist. |
+| FND-003 | fixed | `cd05d06`: `invocation.rs:2133-2196` covers malformed, unknown, absent and invalid bars, development gate and write failure; `:2079-2132` covers evaluation identity drift, while earlier fixture covers existing receipt/report destinations. |
+| FND-004 | fixed | `cd05d06`: `invocation.rs:1828-2004` uses two Probability outputs over eight cases, asserts first output's six bars pass, second margin/recall fail, and whole graph exits 1. |
+| FND-005 | fixed | `cd05d06`: `gate.rs:655-686` checks four-case tie and true recall zero; `invocation.rs:1828-1958` checks eight-case ECE 0.25, margin 0.375 and false recall 0.75 together. |
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-006 | low | The early-refusal CLI test infers zero case evaluation from absence of an output artifact; it does not use a backend call counter. The implementation verifies registration before constructing runners or entering `run_cases`, so the ordering is supported by source inspection. | `crates/sapho-cli/tests/invocation.rs:2079-2101`; `crates/sapho-cli/src/command.rs:442-515`; FR-071-AC-3 |

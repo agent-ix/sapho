@@ -35,3 +35,18 @@ The new public evidence types use typed `GateBars`, `PromotionGate`, `GateRegist
 - Quoin matrix reports all 18 FR-069/070/071 criteria tagged, but several tags point to tests that do not exercise the named subcase; separate acceptance receipt is SR-251.
 - No applicable AssuranceProfile was found in this branch's `spec/` tree.
 - No tracker or PR comment was posted under the review dispatch's read-only instruction.
+
+## Dispositions
+
+Read-only source disposition at local, unpushed `cd05d0603deb3b65e2fc533b21d01ed5da2049d4`. The fix round has not passed focused or full build gates; these are provisional source judgments.
+
+| FND | Outcome | sha/reason |
+| --- | --- | --- |
+| FND-001 | fixed | `cd05d06`: `command.rs:471-500` now rejects reuse of the same canonical path or Unix device/inode while allowing equal typed contents in separate files. `invocation.rs:1614-1665` exercises equal-content copies and hard-link refusal. |
+| FND-002 | fixed | `cd05d06`: `invocation.rs:1669-1826` runs three independent custom `ModelBackend` captures, checks 12 backend calls, confirms equal recording bytes, then compares the pure live gate report with CLI exact replay output. |
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-003 | low | The added custom-backend test compares direct live `Runner`/`evaluate_gate` evidence to CLI replay; it does not invoke CLI's live `gate-evaluate` path with the custom backend. The host-injected seam makes that exact process fixture unavailable without a CLI injection mechanism. Source inspection shows both paths use the same `run_cases`/`measure`/`evaluate_gate` chain, so this is an evidence limitation rather than a demonstrated behavior defect. | `crates/sapho-cli/tests/invocation.rs:1669-1826`; `crates/sapho-cli/src/command.rs:488-554`; FR-071-AC-5 |
