@@ -14,12 +14,12 @@ use sapho_core::{
     ValueType, bounded_json, check_ports, decode_json, measured_json_bytes,
 };
 use sapho_evidence::{
-    Candidate, CaseOutcome, Dataset, EvidenceError, FitAttribution, Measurement,
-    Metric as ScoreMetric, RankedCandidate, Roster, RosterCall, RosterCase, RosterContributor,
-    RosterMapping, RosterMode, RosterQuestionKind, RosterSelection, ShadowComparison,
-    ShadowComparisonRequest, ShadowMetric, Split, calibration_cases_digest, compare_shadow,
-    export_training, fit_calibration, measure, project_roster_literal, rank, roster,
-    GateRegistration, GateReport, GateVerdict, evaluate_gate, register_gate, verify_gate,
+    Candidate, CaseOutcome, Dataset, EvidenceError, FitAttribution, GateRegistration, GateReport,
+    GateVerdict, Measurement, Metric as ScoreMetric, RankedCandidate, Roster, RosterCall,
+    RosterCase, RosterContributor, RosterMapping, RosterMode, RosterQuestionKind, RosterSelection,
+    ShadowComparison, ShadowComparisonRequest, ShadowMetric, Split, calibration_cases_digest,
+    compare_shadow, evaluate_gate, export_training, fit_calibration, measure, measure_for_gate,
+    project_roster_literal, rank, register_gate, roster, verify_gate,
 };
 use sapho_graph::{
     Binding, GraphFormat, GraphSpec, Operation, graph_semantic_identity, parse_config,
@@ -1039,6 +1039,7 @@ fn gate_evaluate(args: GateEvaluateArgs) -> Result<Response, CliError> {
                         &graph.definition,
                         &metadata,
                         None::<fn() -> Result<BackendRegistry, CliError>>,
+                        options.service_config.as_deref(),
                     )?
                     .0,
                 );
@@ -1050,7 +1051,15 @@ fn gate_evaluate(args: GateEvaluateArgs) -> Result<Response, CliError> {
                     Some(&metadata),
                     options.limits.max_artifact_bytes,
                 )?;
-                runners.push(prepare(&graph.definition, &metadata, Some(move || Ok(registry)))?.0);
+                runners.push(
+                    prepare(
+                        &graph.definition,
+                        &metadata,
+                        Some(move || Ok(registry)),
+                        None,
+                    )?
+                    .0,
+                );
             }
         }
     }
@@ -1058,11 +1067,17 @@ fn gate_evaluate(args: GateEvaluateArgs) -> Result<Response, CliError> {
     let mut measurements = Vec::new();
     let mut documents = Vec::new();
     for runner in &runners {
-        let (outcomes, runs) =
-            split(runtime.block_on(run_cases(runner, &data, Split::HeldOut, &options.limits))?);
-        measurements.push(measure(
+        let (outcomes, _, runs) = split(runtime.block_on(run_cases(
+            runner,
             &data,
             Split::HeldOut,
+            &options.limits,
+            None,
+        ))?);
+        measurements.push(measure_for_gate(
+            &data,
+            Split::HeldOut,
+            &identity,
             &runner.inspection().signature.outputs,
             &outcomes,
             options.max_cases,
@@ -1091,9 +1106,12 @@ fn gate_evaluate(args: GateEvaluateArgs) -> Result<Response, CliError> {
         GateEvaluationReport {
             graph,
             gate,
-            primary,
+            primary: primary.into_measurement(),
             primary_runs,
-            repetitions: measurements,
+            repetitions: measurements
+                .into_iter()
+                .map(|run| run.into_measurement())
+                .collect(),
             repetition_runs: documents,
             repetition_source: if options.replay.is_some() {
                 "caller_supplied_recording_files"

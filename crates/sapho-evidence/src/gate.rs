@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Pure, versioned held-out promotion registration and bar evaluation.
-use crate::{Dataset, EvidenceError, Measurement, Metrics, OutputMeasurement, Split};
-use sapho_core::{SourceId, Value, ValueType};
+use crate::{CaseOutcome, Dataset, EvidenceError, Measurement, Metrics, OutputMeasurement, Split};
+use sapho_core::{ItemId, SourceId, Value, ValueType};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value as Json};
 use sha2::{Digest, Sha256};
@@ -324,6 +324,37 @@ pub enum GateVerdict {
     /// At least one bar failed or was unavailable.
     NoGo,
 }
+/// Measurement bound to the Dataset content and graph identity supplied at scoring time.
+/// The private provenance prevents accidental relabelling of a previously scored run.
+#[derive(Debug, Clone)]
+pub struct GateMeasurement {
+    measurement: Measurement,
+    dataset_content_digest: String,
+    graph_semantic_identity: String,
+}
+impl GateMeasurement {
+    /// Return the ordinary report without its internal gate provenance.
+    pub fn into_measurement(self) -> Measurement {
+        self.measurement
+    }
+}
+/// Score a gate run and bind the exact Dataset content and graph used by the host.
+pub fn measure_for_gate(
+    dataset: &Dataset,
+    split: Split,
+    graph_identity: &str,
+    schemas: &BTreeMap<String, ValueType>,
+    outcomes: &BTreeMap<ItemId, CaseOutcome>,
+    max_cases: usize,
+) -> Result<GateMeasurement, EvidenceError> {
+    let digest = dataset_content_digest(dataset, max_cases)?;
+    let measurement = crate::measure(dataset, split, schemas, outcomes, max_cases)?;
+    Ok(GateMeasurement {
+        measurement,
+        dataset_content_digest: digest,
+        graph_semantic_identity: graph_identity.into(),
+    })
+}
 fn prediction(value: &Value) -> Option<bool> {
     match value {
         Value::Boolean(value) => Some(*value),
@@ -337,8 +368,8 @@ pub fn evaluate_gate(
     dataset: &Dataset,
     graph_identity: &str,
     graph_outputs: &BTreeMap<String, ValueType>,
-    primary: &Measurement,
-    repetitions: &[Measurement],
+    primary: &GateMeasurement,
+    repetitions: &[GateMeasurement],
     max_cases: usize,
 ) -> Result<GateReport, EvidenceError> {
     let gate = &registration.gate;
@@ -349,14 +380,20 @@ pub fn evaluate_gate(
             "Receipt gate snapshot identity mismatch".into(),
         ));
     }
+    let expected_dataset_digest = dataset_content_digest(dataset, max_cases)?;
     if gate.dataset != dataset.id
-        || gate.dataset_content_digest != dataset_content_digest(dataset, max_cases)?
+        || gate.dataset_content_digest != expected_dataset_digest
         || gate.graph_semantic_identity != graph_identity
-        || primary.dataset != dataset.id
-        || primary.split != Split::HeldOut
-        || repetitions
-            .iter()
-            .any(|r| r.dataset != dataset.id || r.split != Split::HeldOut)
+        || primary.dataset_content_digest != expected_dataset_digest
+        || primary.graph_semantic_identity != graph_identity
+        || primary.measurement.dataset != dataset.id
+        || primary.measurement.split != Split::HeldOut
+        || repetitions.iter().any(|r| {
+            r.dataset_content_digest != expected_dataset_digest
+                || r.graph_semantic_identity != graph_identity
+                || r.measurement.dataset != dataset.id
+                || r.measurement.split != Split::HeldOut
+        })
         || gate.outputs.keys().collect::<BTreeSet<_>>()
             != graph_outputs.keys().collect::<BTreeSet<_>>()
     {
@@ -364,6 +401,11 @@ pub fn evaluate_gate(
             "Measurement identity or output set mismatch".into(),
         ));
     }
+    let primary = &primary.measurement;
+    let repetitions = repetitions
+        .iter()
+        .map(|run| &run.measurement)
+        .collect::<Vec<_>>();
     let selected = dataset.selected(Split::HeldOut).collect::<Vec<_>>();
     let mut complete = !selected.is_empty() && repetitions.len() >= 2;
     let mut outputs = BTreeMap::new();
@@ -527,7 +569,7 @@ pub fn evaluate_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Case, CaseOutcome, LabelKind, LabelProvenance, measure};
+    use crate::{Case, CaseOutcome, LabelKind, LabelProvenance};
     use sapho_core::{Datum, Inputs, ItemId, Probability};
     fn fixture(labels: &[bool]) -> Dataset {
         Dataset {
@@ -573,7 +615,7 @@ mod tests {
         })
         .unwrap()
     }
-    fn measured(data: &Dataset, values: &[f64]) -> Measurement {
+    fn measured(data: &Dataset, values: &[f64]) -> GateMeasurement {
         let outcomes = values
             .iter()
             .enumerate()
@@ -591,7 +633,15 @@ mod tests {
                 )
             })
             .collect();
-        measure(data, Split::HeldOut, &schemas(), &outcomes, 100).unwrap()
+        measure_for_gate(
+            data,
+            Split::HeldOut,
+            "graph-v1:sha256:fixture",
+            &schemas(),
+            &outcomes,
+            100,
+        )
+        .unwrap()
     }
     /// Trace: FR-070-AC-3, FR-070-AC-6, IT-012-SC-04
     #[test]
@@ -651,6 +701,37 @@ mod tests {
             )
             .is_err()
         );
+        let mut changed_labels = data.clone();
+        changed_labels.cases[0].labels.insert("result".into(), true);
+        let stale_measurement = measured(&changed_labels, &[0.9, 0.2]);
+        assert!(
+            evaluate_gate(
+                &receipt,
+                &data,
+                "graph-v1:sha256:fixture",
+                &schemas(),
+                &stale_measurement,
+                &[complete.clone(), complete.clone()],
+                100,
+            )
+            .is_err()
+        );
+        let graph_mismatch = GateMeasurement {
+            graph_semantic_identity: "graph-v1:sha256:other".into(),
+            ..complete.clone()
+        };
+        assert!(
+            evaluate_gate(
+                &receipt,
+                &data,
+                "graph-v1:sha256:fixture",
+                &schemas(),
+                &complete,
+                &[graph_mismatch, complete.clone()],
+                100,
+            )
+            .is_err()
+        );
     }
     /// Trace: FR-070-AC-1, FR-070-AC-2, IT-012-SC-02
     #[test]
@@ -701,6 +782,36 @@ mod tests {
         assert_eq!(
             registered.gate_semantic_identity,
             reformatted.gate_semantic_identity
+        );
+        let mut changed_bar = registered.gate.clone();
+        changed_bar.outputs.get_mut("result").unwrap().maximum_ece = 0.25;
+        let changed_bar_bytes = serde_json::to_vec(&changed_bar).unwrap();
+        let changed_bar_receipt = register_gate(
+            &changed_bar_bytes,
+            &data,
+            "graph-v1:sha256:fixture",
+            &schemas(),
+            100,
+        )
+        .unwrap();
+        assert_ne!(
+            registered.gate_bytes_digest,
+            changed_bar_receipt.gate_bytes_digest
+        );
+        assert_ne!(
+            registered.gate_semantic_identity,
+            changed_bar_receipt.gate_semantic_identity
+        );
+        assert!(
+            verify_gate(
+                &registered,
+                &changed_bar_bytes,
+                &data,
+                "graph-v1:sha256:fixture",
+                &schemas(),
+                100,
+            )
+            .is_err()
         );
         assert!(
             verify_gate(
@@ -882,5 +993,100 @@ mod tests {
         .unwrap();
         assert!(!missing.complete);
         assert_eq!(missing.verdict, GateVerdict::NoGo);
+    }
+
+    /// Trace: FR-070-AC-4, IT-012-SC-04
+    #[test]
+    fn boolean_primary_disagreement_uses_all_three_runs() {
+        let data = fixture(&[true, false, true, false]);
+        let schema = BTreeMap::from([("result".into(), ValueType::Boolean)]);
+        let mut gate = PromotionGate {
+            version: 1,
+            dataset: data.id.clone(),
+            dataset_content_digest: dataset_content_digest(&data, 100).unwrap(),
+            split: Split::HeldOut,
+            graph_semantic_identity: "graph-v1:sha256:fixture".into(),
+            outputs: BTreeMap::from([("result".into(), bars())]),
+        };
+        let score = |predictions: &[bool]| {
+            let outcomes = predictions
+                .iter()
+                .enumerate()
+                .map(|(index, predicted)| {
+                    (
+                        ItemId::new(format!("case-{index}")).unwrap(),
+                        CaseOutcome::Completed {
+                            outputs: Inputs::from([(
+                                "result".into(),
+                                Datum::new("answer", Value::Boolean(*predicted)).unwrap(),
+                            )]),
+                            models: vec![],
+                        },
+                    )
+                })
+                .collect();
+            measure_for_gate(
+                &data,
+                Split::HeldOut,
+                "graph-v1:sha256:fixture",
+                &schema,
+                &outcomes,
+                100,
+            )
+            .unwrap()
+        };
+        let primary = score(&[false, false, true, false]);
+        let repeat = score(&[true, false, true, false]);
+        let receipt = register_gate(
+            &serde_json::to_vec(&gate).unwrap(),
+            &data,
+            "graph-v1:sha256:fixture",
+            &schema,
+            100,
+        )
+        .unwrap();
+        let inclusive = evaluate_gate(
+            &receipt,
+            &data,
+            "graph-v1:sha256:fixture",
+            &schema,
+            &primary,
+            &[repeat.clone(), repeat.clone()],
+            100,
+        )
+        .unwrap();
+        assert_eq!(
+            inclusive.outputs["result"].disagreement.observed,
+            Some(0.25)
+        );
+        assert_eq!(
+            inclusive.outputs["result"].disagreement.status,
+            BarStatus::Pass
+        );
+        gate.outputs.get_mut("result").unwrap().maximum_disagreement = 0.0;
+        let receipt = register_gate(
+            &serde_json::to_vec(&gate).unwrap(),
+            &data,
+            "graph-v1:sha256:fixture",
+            &schema,
+            100,
+        )
+        .unwrap();
+        let strict = evaluate_gate(
+            &receipt,
+            &data,
+            "graph-v1:sha256:fixture",
+            &schema,
+            &primary,
+            &[repeat.clone(), repeat],
+            100,
+        )
+        .unwrap();
+        assert_eq!(strict.outputs["result"].disagreement.observed, Some(0.25));
+        assert_eq!(
+            strict.outputs["result"].disagreement.status,
+            BarStatus::Fail
+        );
+        assert_eq!(strict.verdict, GateVerdict::NoGo);
     }
 }

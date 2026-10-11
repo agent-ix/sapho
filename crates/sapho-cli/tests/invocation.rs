@@ -2778,12 +2778,12 @@ fn gate_refuses_output_subset_and_reused_replay_content() {
     }
 }
 
-/// Trace: FR-071-AC-5, IT-012-SC-07
+/// Trace: FR-071-AC-2, FR-071-AC-5, IT-012-SC-06, IT-012-SC-07
 #[tokio::test]
 async fn captured_custom_backend_repetitions_replay_the_same_gate_evidence() {
     use sapho_evidence::{
-        CaseOutcome, GateBars, PromotionGate, dataset_content_digest, evaluate_gate, measure,
-        register_gate,
+        CaseOutcome, GateBars, PromotionGate, dataset_content_digest, evaluate_gate,
+        measure_for_gate, register_gate,
     };
     let root = tempfile::tempdir().unwrap();
     let graph = multilayer();
@@ -2878,7 +2878,9 @@ async fn captured_custom_backend_repetitions_replay_the_same_gate_evidence() {
             );
         }
         assert_eq!(scripted.calls.load(Ordering::SeqCst), 4);
-        measurements.push(measure(&data, Split::HeldOut, &schema, &outcomes, 100).unwrap());
+        measurements.push(
+            measure_for_gate(&data, Split::HeldOut, &identity, &schema, &outcomes, 100).unwrap(),
+        );
         let recording_path = root.path().join(format!("capture-{i}.json"));
         recorders[0]
             .snapshot()
@@ -2934,6 +2936,51 @@ async fn captured_custom_backend_repetitions_replay_the_same_gate_evidence() {
     assert_eq!(
         result(&replayed)["repetition_source"],
         "caller_supplied_recording_files"
+    );
+    let mut incomplete_recording =
+        Recording::from_json(&std::fs::read(&recording_paths[2]).unwrap(), 1_000_000).unwrap();
+    incomplete_recording.exchanges.pop().unwrap();
+    let incomplete_path = root.path().join("capture-incomplete.json");
+    std::fs::write(
+        &incomplete_path,
+        incomplete_recording.to_json(1_000_000).unwrap(),
+    )
+    .unwrap();
+    let incomplete = cli(
+        &[
+            "gate-evaluate",
+            path(&graph_path),
+            "--dataset",
+            path(&data_path),
+            "--gate",
+            path(&gate_path),
+            "--receipt",
+            path(&receipt_path),
+            "--replay",
+            path(&recording_paths[0]),
+            "--repeat-replay",
+            path(&recording_paths[1]),
+            "--repeat-replay",
+            path(&incomplete_path),
+        ],
+        None,
+    );
+    assert_eq!(
+        incomplete.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&incomplete.stderr)
+    );
+    let partial = result(&incomplete);
+    assert_eq!(partial["gate"]["complete"], false);
+    assert_eq!(partial["gate"]["verdict"], "no_go");
+    assert_eq!(
+        partial["gate"]["outputs"]["result"]["margin"]["status"],
+        "fail"
+    );
+    assert_eq!(
+        partial["gate"]["outputs"]["result"]["disagreement"]["status"],
+        "not_computed"
     );
 }
 
