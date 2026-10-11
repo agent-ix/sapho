@@ -27,6 +27,7 @@ Owning crate: `sapho-graph`. Internal prerequisites: core. See the [workspace bo
 - [FR-057: Declare isolated shadow asks and observations](functional/FR-057.md)
 - [FR-063: Consume measured roster profiles as typed graph literals](functional/FR-063.md)
 - [FR-075: Declare repeated samples on an ask node](functional/FR-075.md)
+- [FR-082: Apply a typed calibration map explicitly in a graph](functional/FR-082.md)
 
 ## References
 
