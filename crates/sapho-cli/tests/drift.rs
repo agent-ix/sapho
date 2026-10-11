@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Bounded public host projection of valid recordings into label-free drift.
-use sapho_cli::{compare_recordings, project_recording_confidences};
+use sapho_cli::{CliError, compare_recordings, project_recording_confidences};
 use sapho_core::{
     Answer, BackendId, ChoiceOption, DistributionPolicy, ModelRequest, ModelResponse,
     NamedQuestion, Probability, Question, Value,
 };
-use sapho_evidence::DriftSelector;
+use sapho_evidence::{DriftSelector, EvidenceError};
 use sapho_recording::{Exchange, Recording};
 use std::collections::BTreeMap;
 
@@ -290,6 +290,34 @@ fn incompatible_recordings_refuse_and_empty_drift_is_absent() {
         )
         .is_err()
     );
+}
+
+/// Trace: FR-068-AC-4, IT-011-SC-07
+#[test]
+fn invalid_comparison_controls_refuse_before_recording_projection() {
+    let invalid_recording = b"invalid recording";
+    let question = boolean_question("Is it true?");
+    for (reference_name, current_name, threshold) in [
+        ("same", "same", 0.8),
+        ("reference", "current", f64::NAN),
+        ("reference", "current", f64::INFINITY),
+        ("reference", "current", -0.1),
+        ("reference", "current", 1.1),
+    ] {
+        assert!(matches!(
+            compare_recordings(
+                invalid_recording,
+                invalid_recording,
+                1_048_576,
+                reference_name,
+                current_name,
+                selector(),
+                &question,
+                threshold,
+            ),
+            Err(CliError::Evidence(EvidenceError::InvalidDriftInput))
+        ));
+    }
 }
 
 /// Trace: FR-068-AC-2, FR-068-AC-7, IT-011-SC-06

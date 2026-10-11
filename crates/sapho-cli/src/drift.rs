@@ -4,7 +4,7 @@
 use crate::CliError;
 use sapho_core::{Answer, ErrorCode, Question, SaphoError};
 use sapho_evidence::{
-    ConfidenceWindow, DriftReport, DriftSelector, compare_confidence_windows,
+    ConfidenceWindow, DriftReport, DriftSelector, EvidenceError, compare_confidence_windows,
     validate_drift_identity,
 };
 use sapho_recording::Recording;
@@ -86,6 +86,10 @@ pub fn compare_recordings(
     selector.validate()?;
     validate_drift_identity(reference_name)?;
     validate_drift_identity(current_name)?;
+    if reference_name == current_name || !threshold.is_finite() || !(0.0..=1.0).contains(&threshold)
+    {
+        return Err(EvidenceError::InvalidDriftInput.into());
+    }
     let reference = project_recording_confidences(
         reference_bytes,
         max_bytes,
