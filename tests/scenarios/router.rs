@@ -3,7 +3,12 @@
 //! Exact-one guarded router and existing escalation through public contracts.
 use crate::common::*;
 use async_trait::async_trait;
-use sapho::{core::*, graph::*, recording::*, runtime::NodeStatus};
+use sapho::{
+    core::*,
+    graph::*,
+    recording::*,
+    runtime::{NodeStatus, Trace},
+};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -116,6 +121,19 @@ fn replay_registry(recording: &Recording, entries: &[(&str, &str)]) -> BackendRe
         register(&mut registry, name, model, replay.clone());
     }
     registry
+}
+fn guarded_shape(trace: &Trace, names: &[&str]) -> Vec<(NodeStatus, Option<ErrorCode>)> {
+    names
+        .iter()
+        .map(|name| {
+            let node = trace
+                .nodes
+                .iter()
+                .find(|node| node.path.last().is_some_and(|part| part == name))
+                .unwrap();
+            (node.status, node.error.as_ref().map(|error| error.code))
+        })
+        .collect()
 }
 
 /// Trace: FR-077-AC-1, FR-078-AC-2, IT-015-SC-02
@@ -441,18 +459,29 @@ async fn false_zero_empty_text_and_empty_list_are_present_and_sources_are_inheri
         (Value::Text(String::new()), ValueType::Text),
         (Value::List(vec![]), ValueType::list(ValueType::Text)),
     ] {
-        let mut selected = datum("selected", Value::Optional(Some(Box::new(value.clone()))));
-        selected.sources.push(SourceRef {
+        let selected_source = SourceRef {
             source: SourceId::new("selected-source").unwrap(),
             start: None,
             end: None,
-        });
-        let mut absent = datum("absent", Value::Optional(None));
-        absent.sources.push(SourceRef {
+        };
+        let absent_source = SourceRef {
             source: SourceId::new("absent-source").unwrap(),
             start: None,
             end: None,
-        });
+        };
+        let shared_source = SourceRef {
+            source: SourceId::new("shared-source").unwrap(),
+            start: Some(1),
+            end: Some(3),
+        };
+        let mut selected = datum("selected", Value::Optional(Some(Box::new(value.clone()))));
+        selected
+            .sources
+            .extend([selected_source.clone(), shared_source.clone()]);
+        let mut absent = datum("absent", Value::Optional(None));
+        absent
+            .sources
+            .extend([absent_source.clone(), shared_source.clone()]);
         let spec = graph(
             vec![node(
                 "merge",
@@ -485,7 +514,10 @@ async fn false_zero_empty_text_and_empty_list_are_present_and_sources_are_inheri
         .await
         .unwrap();
         assert_eq!(result.outputs["result"].value, value);
-        assert_eq!(result.outputs["result"].sources.len(), 2);
+        assert_eq!(
+            result.outputs["result"].sources,
+            vec![absent_source, selected_source, shared_source]
+        );
     }
 }
 
@@ -494,6 +526,45 @@ async fn false_zero_empty_text_and_empty_list_are_present_and_sources_are_inheri
 async fn escalation_keeps_fast_then_optional_expert_and_replays_both_cases() {
     let graph = example("escalation");
     for (fast_probability, expected_expert) in [(0.9, false), (0.5, true)] {
+        let (prior_input_json, prior_confidence) = if expected_expert {
+            (
+                include_str!("../../examples/data/requirements/report.json"),
+                0.6,
+            )
+        } else {
+            (
+                include_str!("../../examples/data/requirements/brake-lamp.json"),
+                0.95,
+            )
+        };
+        let prior_input: BTreeMap<String, String> = serde_json::from_str(prior_input_json).unwrap();
+        let prior_recording = Recording::from_json(
+            include_str!("../../examples/recordings/requirement-check.json").as_bytes(),
+            1_000_000,
+        )
+        .unwrap();
+        let prior = engine(
+            &example("requirement-check"),
+            &PrimitiveRegistry::default(),
+            replay_registry(&prior_recording, &[("judge", "jev-1.13.0")]),
+        )
+        .run(
+            &Inputs::from([(
+                "statement".into(),
+                datum("statement", Value::Text(prior_input["statement"].clone())),
+            )]),
+            limits(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            prior.outputs["asked_expert"].value,
+            Value::Boolean(expected_expert)
+        );
+        assert_eq!(
+            prior.outputs["complete"].value,
+            Value::Probability(probability(prior_confidence))
+        );
         let fast = fixed("fast-model", fast_probability);
         let expert = fixed("expert-model", 0.8);
         let fast_record = Arc::new(RecordingBackend::new(fast.clone(), 1_000_000).unwrap());
@@ -565,9 +636,19 @@ async fn escalation_keeps_fast_then_optional_expert_and_replays_both_cases() {
                 &[("fast", "fast-model"), ("expert", "expert-model")],
             ),
         );
+        let replayed = replay.run(&input, limits()).await.unwrap();
+        assert_eq!(replayed.outputs, result.outputs);
+        assert_eq!(replayed.trace, result.trace);
         assert_eq!(
-            replay.run(&input, limits()).await.unwrap().outputs,
-            result.outputs
+            guarded_shape(
+                &result.trace,
+                &["fast", "expert", "chosen_answers", "confidence"]
+            ),
+            guarded_shape(&prior.trace, &["layer2", "expert", "answers", "complete"]),
+        );
+        assert_eq!(
+            guarded_shape(&result.trace, &["chosen_model"]),
+            guarded_shape(&prior.trace, &["answers"]),
         );
     }
 }
