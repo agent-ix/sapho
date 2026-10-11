@@ -546,7 +546,10 @@ async fn escalation_keeps_fast_then_optional_expert_and_replays_both_cases() {
         let prior = engine(
             &example("requirement-check"),
             &PrimitiveRegistry::default(),
-            replay_registry(&prior_recording, &[("judge", "jev-1.13.0")]),
+            replay_registry(
+                &prior_recording,
+                &[("judge", "jev-1.13.0"), ("expert", "jev-1.13.0")],
+            ),
         )
         .run(
             &Inputs::from([(
