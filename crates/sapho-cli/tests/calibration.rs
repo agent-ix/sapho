@@ -1206,10 +1206,14 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
         "--split",
         "held_out",
     ]);
-    assert!(
-        private_held_out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&private_held_out.stdout)
+    // The extra raw label is unscored because it is no longer a public output,
+    // so measure exits 2 while retaining the scored held-out calibrated row.
+    assert_eq!(private_held_out.status.code(), Some(2));
+    let private_held_out_report: serde_json::Value =
+        serde_json::from_slice(&private_held_out.stdout).unwrap();
+    assert_eq!(
+        private_held_out_report["measurement"]["outputs"]["calibrated_support"]["scored"],
+        2
     );
     // Trace: FR-084-AC-5, IT-017-SC-07, IT-017-SC-08
     // Raw cohort identity remains binding even when the map is guarded or reused.
