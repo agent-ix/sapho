@@ -80,6 +80,7 @@ pub struct ModelCallObservation {
 pub(crate) fn collect(
     trace: &Trace,
     durations: &BTreeMap<usize, u64>,
+    sample_durations: &BTreeMap<(usize, u32), u64>,
     dispatched: &BTreeSet<usize>,
     config: &ObservationConfig,
 ) -> Vec<ModelCallObservation> {
@@ -87,32 +88,47 @@ pub(crate) fn collect(
         .nodes
         .iter()
         .enumerate()
-        .filter_map(|(index, node)| {
-            if !dispatched.contains(&index) {
-                return None;
-            }
-            let model = node.model.as_ref()?;
+        .flat_map(|(index, node)| {
             let binding = match &node.operation {
-                Operation::Ask { backend } | Operation::ShadowAsk { backend, .. } => {
+                Operation::Ask { backend, .. } | Operation::ShadowAsk { backend, .. } => {
                     backend.clone()
                 }
-                _ => return None,
+                _ => return Vec::new(),
             };
-            Some(ModelCallObservation {
-                path: node.path.clone(),
-                binding: binding.clone(),
-                requested_model: model.request.model.clone(),
-                actual_model: model.response.as_ref().map(|r| r.model.clone()),
-                status: node.status,
-                usage: model.response.as_ref().and_then(|r| r.usage.clone()),
-                elapsed_micros: if config.mode == ObservationMode::Live {
-                    durations.get(&index).copied()
-                } else {
-                    None
-                },
-                descriptor: config.descriptors.get(&binding).cloned(),
-                mode: config.mode,
-            })
+            let build =
+                |model: &crate::ModelEvidence, status, elapsed_micros| ModelCallObservation {
+                    path: node.path.clone(),
+                    binding: binding.clone(),
+                    requested_model: model.request.model.clone(),
+                    actual_model: model.response.as_ref().map(|r| r.model.clone()),
+                    status,
+                    usage: model.response.as_ref().and_then(|r| r.usage.clone()),
+                    elapsed_micros: (config.mode == ObservationMode::Live)
+                        .then_some(elapsed_micros)
+                        .flatten(),
+                    descriptor: config.descriptors.get(&binding).cloned(),
+                    mode: config.mode,
+                };
+            if let Some(samples) = &node.samples {
+                samples
+                    .iter()
+                    .map(|sample| {
+                        build(
+                            &sample.model,
+                            sample.status,
+                            sample_durations.get(&(index, sample.index)).copied(),
+                        )
+                    })
+                    .collect()
+            } else if dispatched.contains(&index) {
+                node.model
+                    .as_ref()
+                    .map(|model| build(model, node.status, durations.get(&index).copied()))
+                    .into_iter()
+                    .collect()
+            } else {
+                Vec::new()
+            }
         })
         .collect()
 }

@@ -379,6 +379,153 @@ async fn observed_shadow_attempts_join_champion_calls_without_changing_decision(
     assert!(challenger.calls.load(Ordering::SeqCst) >= 3);
 }
 
+/// Trace: FR-061-AC-1, FR-075-AC-2, FR-076-AC-4, IT-014-SC-08
+#[tokio::test]
+async fn repeated_ask_reports_each_dispatched_sample_to_roster_sidecar() {
+    let mut spec = graph();
+    let ask = spec
+        .nodes
+        .iter_mut()
+        .find(|node| node.id.as_str() == "ask")
+        .unwrap();
+    ask.operation = sapho_graph::Operation::Ask {
+        backend: BackendId::new("judge").unwrap(),
+        samples: 3,
+    };
+    let backend = Arc::new(Scripted {
+        fail: false,
+        calls: AtomicUsize::new(0),
+    });
+    let runner = engine(&spec, backend.clone());
+    let (result, calls) = runner
+        .run_observed(
+            &input(),
+            RunLimits::default(),
+            &config(ObservationMode::Live),
+        )
+        .await
+        .unwrap();
+    let result = result.unwrap();
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(calls.len(), 3);
+    assert!(calls.iter().all(|call| call.path == ["root", "ask"]));
+    assert!(
+        calls
+            .iter()
+            .all(|call| call.actual_model.as_deref() == Some("actual-a"))
+    );
+    assert!(calls.iter().all(|call| call.elapsed_micros.is_some()));
+    let ask_trace = result
+        .trace
+        .nodes
+        .iter()
+        .find(|node| node.path == ["root", "ask"])
+        .unwrap();
+    let samples = ask_trace.samples.as_ref().unwrap();
+    assert_eq!(
+        samples
+            .iter()
+            .map(|sample| sample.index)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+    assert!(ask_trace.model.is_none());
+    let (_, replay) = runner
+        .run_observed(
+            &input(),
+            RunLimits::default(),
+            &config(ObservationMode::Replay),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay.len(), 3);
+    assert!(replay.iter().all(|call| call.elapsed_micros.is_none()));
+}
+
+/// Trace: FR-057-AC-4, FR-061-AC-1, FR-076-AC-4, IT-014-SC-08
+#[tokio::test]
+async fn repeated_and_shadow_asks_share_one_model_request_budget() {
+    let mut spec = shadow_graph();
+    let mut repeated = spec
+        .nodes
+        .iter()
+        .find(|node| node.id.as_str() == "ask")
+        .unwrap()
+        .clone();
+    repeated.id = NodeId::new("samples").unwrap();
+    repeated.operation = sapho_graph::Operation::Ask {
+        backend: BackendId::new("judge").unwrap(),
+        samples: 3,
+    };
+    spec.nodes.push(repeated);
+    let champion = Arc::new(Scripted {
+        fail: false,
+        calls: AtomicUsize::new(0),
+    });
+    let challenger = Arc::new(Scripted {
+        fail: false,
+        calls: AtomicUsize::new(0),
+    });
+    let mut registry = BackendRegistry::default();
+    for (name, backend) in [
+        ("judge", champion.clone()),
+        ("challenger", challenger.clone()),
+    ] {
+        registry
+            .register(
+                BackendId::new(name).unwrap(),
+                BackendBinding {
+                    backend,
+                    model: "requested".into(),
+                    expected_model: None,
+                    distribution_policy: DistributionPolicy::Strict {},
+                },
+            )
+            .unwrap();
+    }
+    let runner = Engine::new(
+        compile(&spec, &PrimitiveRegistry::default()).unwrap(),
+        registry,
+    )
+    .unwrap();
+    let (limited, calls) = runner
+        .run_observed(
+            &input(),
+            RunLimits {
+                model_requests: 4,
+                ..RunLimits::default()
+            },
+            &config(ObservationMode::Live),
+        )
+        .await
+        .unwrap();
+    let limited = limited.unwrap();
+    assert_eq!(champion.calls.load(Ordering::SeqCst), 4);
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(calls.len(), 4);
+    assert_eq!(limited.trace.shadows.len(), 1);
+    assert_eq!(
+        limited.trace.shadows[0].status,
+        sapho_runtime::NodeStatus::Skipped
+    );
+    let (unlimited, calls) = runner
+        .run_observed(
+            &input(),
+            RunLimits {
+                model_requests: 5,
+                ..RunLimits::default()
+            },
+            &config(ObservationMode::Live),
+        )
+        .await
+        .unwrap();
+    let unlimited = unlimited.unwrap();
+    assert_eq!(limited.outputs, unlimited.outputs);
+    assert_eq!(champion.calls.load(Ordering::SeqCst), 8);
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.len(), 5);
+}
+
 struct ParallelFailure {
     slow: bool,
     starts: Arc<AtomicUsize>,
@@ -407,6 +554,7 @@ async fn parallel_failure_observes_started_sibling_with_live_duration() {
         .clone();
     sibling.id = NodeId::new("other").unwrap();
     sibling.operation = sapho_graph::Operation::Ask {
+        samples: 1,
         backend: BackendId::new("slow").unwrap(),
     };
     spec.nodes.push(sibling);

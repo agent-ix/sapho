@@ -603,7 +603,7 @@ fn contributing_responses(
                 .iter()
                 .filter_map(|path| {
                     let node = by_path.get(path)?;
-                    let Operation::Ask { backend } = &node.operation else {
+                    let Operation::Ask { backend, .. } = &node.operation else {
                         return None;
                     };
                     if node.status != NodeStatus::Completed {

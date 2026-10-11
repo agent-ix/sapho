@@ -171,6 +171,7 @@ impl Engine {
             cancelled: Arc::new(AtomicBool::new(false)),
             clock: config.map(|c| c.clock.clone()),
             durations: BTreeMap::new(),
+            sample_durations: BTreeMap::new(),
             started: Arc::new(Mutex::new(BTreeMap::new())),
             model_permits,
         };
@@ -223,7 +224,13 @@ impl Engine {
                     });
                 }
             }
-            observation::collect(&state.trace, &state.durations, &attempted, c)
+            observation::collect(
+                &state.trace,
+                &state.durations,
+                &state.sample_durations,
+                &attempted,
+                c,
+            )
         });
         (result, observations)
     }
@@ -395,7 +402,9 @@ impl Engine {
                             .map_or(cursor + 1, |(i, _)| i + 1);
                         let mut futures = FuturesUnordered::new();
                         let deadline = tokio::time::Instant::from_std(state.deadline);
-                        for (order, (_, _, _, _, backend, request, _)) in
+                        let clock = state.clock.clone();
+                        let started_calls = state.started.clone();
+                        for (order, (_, index, _, _, backend, request, _)) in
                             asks.iter().enumerate().take(end).skip(cursor)
                         {
                             state.data(request)?;
@@ -413,7 +422,17 @@ impl Engine {
                             state.dispatch_request()?;
                             let backend = backend.clone();
                             let request = request.clone();
+                            let index = *index;
+                            let clock = clock.clone();
+                            let started_calls = started_calls.clone();
                             futures.push(async move {
+                                let started = clock.as_ref().map(|clock| clock.now());
+                                if let Some(at) = started {
+                                    started_calls
+                                        .lock()
+                                        .unwrap_or_else(|poison| poison.into_inner())
+                                        .insert(index, at);
+                                }
                                 let response = tokio::time::timeout_at(deadline, async {
                                     let _permit = permit;
                                     backend.infer(&request).await
@@ -426,11 +445,22 @@ impl Engine {
                                     )
                                 })
                                 .and_then(|result| result);
-                                (order, response)
+                                let elapsed = started.and_then(|start| {
+                                    clock
+                                        .as_ref()
+                                        .map(|clock| clock.now().saturating_duration_since(start))
+                                });
+                                (order, response, elapsed)
                             });
                         }
-                        while let Some((order, result)) = futures.next().await {
+                        while let Some((order, result, elapsed)) = futures.next().await {
                             let (node, index, np, ins, _, request, _) = &asks[order];
+                            if let Some(elapsed) = elapsed {
+                                state.durations.insert(
+                                    *index,
+                                    u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+                                );
+                            }
                             let processed = (|| {
                                 let response = result?;
                                 if let Some(evidence) = &mut state.trace_entry(*index)?.model {
@@ -529,6 +559,7 @@ impl Engine {
                     status: NodeStatus::Failed,
                     error: None,
                     model: None,
+                    samples: None,
                 });
                 let result: Result<()> = async {
                     state.check_time()?;
@@ -585,6 +616,7 @@ impl Engine {
                                 ));
                             };
                             let request = ModelRequest {
+                                sample_index: None,
                                 distribution_policy: binding.distribution_policy,
                                 backend: backend.clone(),
                                 model: binding.model,
@@ -594,7 +626,19 @@ impl Engine {
                             };
                             request.validate()?;
                             state.data(&request)?;
-                            state.add_request()?;
+                            state.reserve_requests(1)?;
+                            let permit =
+                                state
+                                    .model_permits
+                                    .clone()
+                                    .try_acquire_owned()
+                                    .map_err(|_| {
+                                        SaphoError::new(
+                                            ErrorCode::CodeFailed,
+                                            "Model permit unavailable",
+                                        )
+                                    })?;
+                            state.dispatch_request()?;
                             state.trace_entry(index)?.model = Some(ModelEvidence {
                                 request: request.clone(),
                                 response: None,
@@ -610,7 +654,10 @@ impl Engine {
                             }
                             let response = tokio::time::timeout_at(
                                 tokio::time::Instant::from_std(state.deadline),
-                                binding.backend.infer(&request),
+                                async {
+                                    let _permit = permit;
+                                    binding.backend.infer(&request).await
+                                },
                             )
                             .await
                             .map_err(|_| {
@@ -680,6 +727,7 @@ impl Engine {
                 }
             }
         }
+    }
     async fn repeated_ask(
         &self,
         path: &[String],
@@ -763,11 +811,14 @@ impl Engine {
                 "data bytes",
             )?;
             let mut futures = FuturesUnordered::new();
+            let clock = state.clock.clone();
             for (sample_index, request, permit) in prepared {
                 state.dispatch_request()?;
                 *dispatched += 1;
                 let backend = backend.clone();
+                let clock = clock.clone();
                 futures.push(async move {
+                    let started = clock.as_ref().map(|clock| clock.now());
                     let outcome = tokio::time::timeout_at(deadline, async {
                         let _permit = permit;
                         backend.infer(&request).await
@@ -777,11 +828,22 @@ impl Engine {
                         SaphoError::new(ErrorCode::DeadlineExceeded, "Model deadline exceeded")
                     })
                     .and_then(|result| result);
-                    (sample_index, request, outcome)
+                    let elapsed = started.and_then(|start| {
+                        clock
+                            .as_ref()
+                            .map(|clock| clock.now().saturating_duration_since(start))
+                    });
+                    (sample_index, request, outcome, elapsed)
                 });
             }
             let mut completed = BTreeMap::new();
-            while let Some((sample_index, request, outcome)) = futures.next().await {
+            while let Some((sample_index, request, outcome, elapsed)) = futures.next().await {
+                if let Some(elapsed) = elapsed {
+                    state.sample_durations.insert(
+                        (trace_index, sample_index),
+                        u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+                    );
+                }
                 completed.insert(sample_index, (request, outcome));
             }
             let mut first_error = None;
@@ -1196,6 +1258,7 @@ struct RunState {
     cancelled: Arc<AtomicBool>,
     clock: Option<Arc<dyn ObservationClock>>,
     durations: BTreeMap<usize, u64>,
+    sample_durations: BTreeMap<(usize, u32), u64>,
     started: Arc<Mutex<BTreeMap<usize, Instant>>>,
     model_permits: Arc<Semaphore>,
 }
