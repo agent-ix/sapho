@@ -19,6 +19,8 @@ require the corresponding Cargo feature.
 | `replay GRAPH` | Graph path, `--recording PATH` | Same run options | Exact offline run report |
 | `measure GRAPH` | Graph path, `--dataset PATH`, `--split development\|held_out` | `--format`, measurement options below; optional `--shadow ID --shadow-output NAME --shadow-metric agreement\|brier\|ece --shadow-min-scored N --shadow-margin M` | Coverage, per-output metrics and case predictions; optional side-by-side shadow comparison |
 | `fit-calibration GRAPH` | Raw graph, `--dataset PATH`, `--output-name NAME`, `--binding NAME`, `--split development`, `--output NEW.json` | `--format`, `--bindings`, `--replay`, `--max-cases`, evaluation limits | Versioned typed calibration-map literal; held-out fitting refuses |
+| `gate-register GRAPH` | `--dataset PATH`, `--gate PATH`, `--receipt PATH` | `--max-cases 1024`, `--max-artifact-bytes 8388608` | Exclusive, synced held-out gate receipt; no case evaluation |
+| `gate-evaluate GRAPH` | `--dataset PATH`, `--gate PATH`, `--receipt PATH` | Measurement options, `--repetitions 2..8`, `--repeat-replay PATH` once per additional replay | Full primary/repetition evidence and six bars per output; GO 0, complete NO-GO 1, incomplete/refused 2 |
 | `tune` | Repeated `--candidate GRAPH`, `--dataset PATH`, `--output-name NAME`, `--metric agreement\|brier` | `--format`, `--max-candidates 16`, measurement options | Development measurements and ranked candidates |
 | `export-training` | `--dataset PATH`, `--output PATH` | `--max-cases 1024`, `--max-artifact-bytes 8388608` | Development supervision JSONL |
 | `select files` | `--root DIR` | Path and acquisition options below | Typed Inputs of file records |

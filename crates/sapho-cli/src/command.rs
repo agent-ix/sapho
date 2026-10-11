@@ -14,11 +14,12 @@ use sapho_core::{
     ValueType, bounded_json, check_ports, decode_json, measured_json_bytes,
 };
 use sapho_evidence::{
-    Candidate, CaseOutcome, Dataset, EvidenceError, FitAttribution, Measurement,
-    Metric as ScoreMetric, RankedCandidate, Roster, RosterCall, RosterCase, RosterContributor,
-    RosterMapping, RosterMode, RosterQuestionKind, RosterSelection, ShadowComparison,
-    ShadowComparisonRequest, ShadowMetric, Split, calibration_cases_digest, compare_shadow,
-    export_training, fit_calibration, measure, project_roster_literal, rank, roster,
+    Candidate, CaseOutcome, Dataset, EvidenceError, FitAttribution, GateRegistration, GateReport,
+    GateVerdict, Measurement, Metric as ScoreMetric, RankedCandidate, Roster, RosterCall,
+    RosterCase, RosterContributor, RosterMapping, RosterMode, RosterQuestionKind, RosterSelection,
+    ShadowComparison, ShadowComparisonRequest, ShadowMetric, Split, calibration_cases_digest,
+    compare_shadow, evaluate_gate, export_training, fit_calibration, measure, measure_for_gate,
+    project_roster_literal, rank, register_gate, roster, verify_gate,
 };
 use sapho_graph::{
     Binding, GraphFormat, GraphSpec, Operation, graph_semantic_identity, parse_config,
@@ -921,6 +922,208 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         destination,
     )
 }
+fn gate_register(args: GateRegisterArgs) -> Result<Response, CliError> {
+    let data = dataset(&args.dataset, args.max_artifact_bytes, args.max_cases)?;
+    let graph = load_graph(&args.graph.graph, args.graph.format.map(GraphFormat::from))?;
+    let inspection = inspect(&graph.definition, &PrimitiveRegistry::default())?;
+    let identity = graph_semantic_identity(&graph.definition)?;
+    let bytes = read_bytes(&args.gate, args.max_artifact_bytes)?;
+    let receipt = register_gate(
+        &bytes,
+        &data,
+        &identity,
+        &inspection.signature.outputs,
+        args.max_cases,
+    )?;
+    ArtifactWriter::create(&args.receipt)?.finish_json(&receipt, args.max_artifact_bytes)?;
+    respond(
+        receipt,
+        ExitStatus::Completed,
+        args.max_artifact_bytes,
+        None,
+    )
+}
+#[derive(Serialize)]
+struct GateEvaluationReport {
+    graph: GraphArtifact,
+    gate: GateReport,
+    primary: Measurement,
+    primary_runs: Documents,
+    repetitions: Vec<Measurement>,
+    repetition_runs: Vec<Documents>,
+    /// Live means fresh requests; replay means distinct supplied recordings.
+    repetition_source: &'static str,
+}
+fn gate_evaluate(args: GateEvaluateArgs) -> Result<Response, CliError> {
+    let options = &args.options;
+    if !(2..=8).contains(&args.repetitions) {
+        return Err(EvidenceError::InvalidGate("Repetition count must be 2..=8".into()).into());
+    }
+    if options.replay.is_some() != !args.repeat_replay.is_empty()
+        || (options.replay.is_some() && args.repeat_replay.len() != args.repetitions)
+    {
+        return Err(EvidenceError::InvalidGate(
+            "Replay requires one distinct primary and one file per additional run".into(),
+        )
+        .into());
+    }
+    let data = dataset(
+        &options.dataset,
+        options.limits.max_artifact_bytes,
+        options.max_cases,
+    )?;
+    let graph = load_graph(&args.graph.graph, args.graph.format.map(GraphFormat::from))?;
+    let identity = graph_semantic_identity(&graph.definition)?;
+    let inspection = inspect(&graph.definition, &PrimitiveRegistry::default())?;
+    let gate_bytes = read_bytes(&args.gate, options.limits.max_artifact_bytes)?;
+    let receipt_bytes = read_bytes(&args.receipt, options.limits.max_artifact_bytes)?;
+    let registration: GateRegistration =
+        decode_json(&receipt_bytes, options.limits.max_artifact_bytes)?;
+    verify_gate(
+        &registration,
+        &gate_bytes,
+        &data,
+        &identity,
+        &inspection.signature.outputs,
+        options.max_cases,
+    )?;
+    if data.selected(Split::HeldOut).next().is_none() {
+        return Err(EvidenceError::EmptySplit(Split::HeldOut).into());
+    }
+    let metadata = bindings(options.bindings.as_deref())?;
+    let replay_paths = options
+        .replay
+        .iter()
+        .chain(args.repeat_replay.iter())
+        .collect::<Vec<_>>();
+    let mut replay_data = Vec::new();
+    let mut seen_paths = std::collections::BTreeSet::new();
+    #[cfg(unix)]
+    let mut seen_files = std::collections::BTreeSet::new();
+    for path in replay_paths {
+        let canonical = std::fs::canonicalize(path).map_err(|source| CliError::Io {
+            path: (*path).clone(),
+            source,
+        })?;
+        if !seen_paths.insert(canonical) {
+            return Err(EvidenceError::InvalidGate(
+                "Repetition reuses the same recording file".into(),
+            )
+            .into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let metadata = std::fs::metadata(path).map_err(|source| CliError::Io {
+                path: (*path).clone(),
+                source,
+            })?;
+            if !seen_files.insert((metadata.dev(), metadata.ino())) {
+                return Err(EvidenceError::InvalidGate(
+                    "Repetition aliases the same recording file".into(),
+                )
+                .into());
+            }
+        }
+        let bytes = read_bytes(path, options.limits.max_artifact_bytes)?;
+        replay_data.push(bytes);
+    }
+    let runtime = runtime()?;
+    let mut runners = Vec::new();
+    {
+        let _entered = runtime.enter();
+        if replay_data.is_empty() {
+            for _ in 0..=args.repetitions {
+                runners.push(
+                    prepare(
+                        &graph.definition,
+                        &metadata,
+                        None::<fn() -> Result<BackendRegistry, CliError>>,
+                        options.service_config.as_deref(),
+                    )?
+                    .0,
+                );
+            }
+        } else {
+            for bytes in replay_data {
+                let registry = replay_bindings_json(
+                    &bytes,
+                    Some(&metadata),
+                    options.limits.max_artifact_bytes,
+                )?;
+                runners.push(
+                    prepare(
+                        &graph.definition,
+                        &metadata,
+                        Some(move || Ok(registry)),
+                        None,
+                    )?
+                    .0,
+                );
+            }
+        }
+    }
+    let destination = claim(options.output.as_deref())?;
+    let mut measurements = Vec::new();
+    let mut documents = Vec::new();
+    for runner in &runners {
+        let (outcomes, _, runs) = split(runtime.block_on(run_cases(
+            runner,
+            &data,
+            Split::HeldOut,
+            &options.limits,
+            None,
+        ))?);
+        measurements.push(measure_for_gate(
+            &data,
+            Split::HeldOut,
+            &identity,
+            &runner.inspection().signature.outputs,
+            &outcomes,
+            options.max_cases,
+        )?);
+        documents.push(runs);
+    }
+    let primary = measurements.remove(0);
+    let primary_runs = documents.remove(0);
+    let gate = evaluate_gate(
+        &registration,
+        &data,
+        &identity,
+        &inspection.signature.outputs,
+        &primary,
+        &measurements,
+        options.max_cases,
+    )?;
+    let exit = if !gate.complete {
+        ExitStatus::Refused
+    } else if gate.verdict == GateVerdict::Go {
+        ExitStatus::Completed
+    } else {
+        ExitStatus::Finding
+    };
+    respond(
+        GateEvaluationReport {
+            graph,
+            gate,
+            primary: primary.into_measurement(),
+            primary_runs,
+            repetitions: measurements
+                .into_iter()
+                .map(|run| run.into_measurement())
+                .collect(),
+            repetition_runs: documents,
+            repetition_source: if options.replay.is_some() {
+                "caller_supplied_recording_files"
+            } else {
+                "fresh_live_requests"
+            },
+        },
+        exit,
+        options.limits.max_artifact_bytes,
+        destination,
+    )
+}
 fn contributing_responses(
     graph: &GraphSpec,
     trace: &Trace,
@@ -1435,6 +1638,8 @@ pub(crate) fn execute(cli: Cli) -> Result<Response, CliError> {
         Command::Replay { run, recording } => invoke(run, Invocation::Replay(recording)),
         Command::Measure(args) => measurement(args),
         Command::FitCalibration(args) => fit_calibration_command(args),
+        Command::GateRegister(args) => gate_register(args),
+        Command::GateEvaluate(args) => gate_evaluate(args),
         Command::Roster(args) => roster_command(args),
         Command::RosterLiteral(args) => roster_literal_command(args),
         Command::Tune(args) => tuning(args),

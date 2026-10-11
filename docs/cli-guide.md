@@ -285,6 +285,16 @@ sapho fit-calibration raw.yaml --dataset dataset.json --output-name raw_support 
 ```
 
 The new file is a complete typed graph literal. Embed it as the `map` input of a `calibrate` node whose `value` input is a raw Probability. `calibrate.result` is a distinct `calibrated_probability`; use `calibrated_as_probability` explicitly before an ordinary probability comparison. The fitted map contains development case and observation digests, the raw graph semantic identity, contributing binding, reported model name and monotone knots. It contains no case inputs or labels. The stock CLI checks the reported binding and model at each executed calibration node before its dependents run. A matching reported name is labelled `reported_name_match`; current responses provide no weights identity. Development measurement on the same selected case content also checks the fitted observation digest. Held-out measurement can score raw and calibrated outputs side by side without fitting.
+## Register and evaluate a held-out gate
+
+Create a version 1 JSON gate with the Dataset ID, `dataset_content_digest`, literal split `held_out`, `graph_semantic_identity`, and a threshold entry for **every** public graph output. Obtain the two content identities from the public `dataset_content_digest` and `graph_semantic_identity` APIs. Each output entry must supply `minimum_margin`, `maximum_ece`, `minimum_true_recall`, `minimum_false_recall`, `maximum_disagreement`, and `minimum_scored_count`. Both recall floors and the count must be positive. The gate has no model name or deployment target.
+
+```sh
+sapho gate-register graph.yaml --dataset dataset.json --gate gate.json --receipt gate-receipt.json
+sapho gate-evaluate graph.yaml --dataset dataset.json --gate gate.json --receipt gate-receipt.json --output gate-report.json
+```
+
+Registration writes a new, synced receipt before any evaluation. The command refuses an existing receipt, an edited gate file, a changed Dataset or graph, a development split, or an incomplete output-name set. Evaluation makes a primary run and two fresh additional live runs by default. With `--replay primary.json`, supply one `--repeat-replay` file for each additional run. The three paths must refer to separate files; identical recorded answers are allowed because deterministic independent captures can agree. The report labels replay evidence as caller supplied recordings, not as attested independent captures. GO exits 0; complete NO-GO exits 1; incomplete case or repetition evidence and configuration refusals exit 2. Every available bar and partial measurement remains in a successful report file. A Boolean-only output has no ECE, so its ECE bar is `not_computed` and it cannot produce GO.
 
 ## Measure a model roster
 
