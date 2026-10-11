@@ -37,6 +37,7 @@ A Rust embedding application or the Sapho CLI host supplies inputs, graph config
 | [systemone](modules/systemone/spec.md) | `sapho-systemone` | Shared source-free request translation into SDK-owned wire types |
 | [clm](modules/clm/spec.md) | `sapho-clm` | Host-configured bounded CLM backend adapter |
 | [decisions](modules/decisions/spec.md) | `sapho-decisions` | Verified OpenAI Decisions API adapter for finite typed questions |
+| [claude](modules/claude/spec.md) | `sapho-claude` | Bounded host-configured Claude Messages adapter for typed Ask readings |
 | [jev](modules/jev/spec.md) | `sapho-jev` | Hosted Jev backend adapter |
 | [recording](modules/recording/spec.md) | `sapho-recording` | Exact recording and offline replay |
 | [ollama](modules/ollama/spec.md) | `sapho-ollama` | Host-configured Ollama extraction, typed-question and embedding adapter |
@@ -56,6 +57,7 @@ flowchart TD
  jev[sapho-jev] --> core
  jev --> systemone[sapho-systemone]
  clm[sapho-clm] --> core
+claude[sapho-claude] --> core
  clm --> systemone
  clm --> http[sapho-http]
  decisions[sapho-decisions] --> core
