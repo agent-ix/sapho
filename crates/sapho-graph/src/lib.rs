@@ -23,8 +23,10 @@
 //! operations. Definitions live in [`GraphSpec::subgraphs`] and maps capture their
 //! additional inputs explicitly. Guarded outputs have Optional schemas.
 mod compile;
+mod identity;
 mod spec;
 pub use compile::{CompiledGraph, CompiledNode, compile};
+pub use identity::graph_semantic_identity;
 pub use spec::*;
 
 #[cfg(test)]

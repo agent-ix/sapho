@@ -419,6 +419,36 @@ pub struct Usage {
     /// Output tokens reported by the provider.
     pub output_tokens: u64,
 }
+/// Bounded nonsecret host description of a model binding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderDescriptor {
+    /// Provider family name, if declared.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Adapter name, if declared.
+    #[serde(default)]
+    pub adapter: Option<String>,
+}
+impl ProviderDescriptor {
+    /// Validate both optional identifiers before inference or artifact writing.
+    pub fn validate(&self) -> Result<()> {
+        for value in [&self.provider, &self.adapter].into_iter().flatten() {
+            if value.is_empty()
+                || value.len() > 64
+                || !value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+            {
+                return Err(SaphoError::new(
+                    ErrorCode::Config,
+                    "Invalid provider descriptor",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
 /// Raw response retained even when answer validation fails.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
