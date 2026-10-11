@@ -654,8 +654,12 @@ pub fn roster(
                 let measurement = measure(&subset, split, &schema, &selected, max_cases)?;
                 if let Some(value) = measurement.outputs.get(&output) {
                     let (ece, ece_absent_reason) = match &value.metrics {
-                        crate::Metrics::Probability { ece: Some(ece), .. } => (Some(*ece), None),
-                        crate::Metrics::Probability { .. } => {
+                        crate::Metrics::Probability { ece: Some(ece), .. }
+                        | crate::Metrics::CalibratedProbability { ece: Some(ece), .. } => {
+                            (Some(*ece), None)
+                        }
+                        crate::Metrics::Probability { .. }
+                        | crate::Metrics::CalibratedProbability { .. } => {
                             (None, Some("zero_scored_probability_cases".into()))
                         }
                         crate::Metrics::Boolean { .. } | crate::Metrics::Unsupported { .. } => {
