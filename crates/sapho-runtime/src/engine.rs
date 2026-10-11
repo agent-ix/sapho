@@ -1416,105 +1416,6 @@ fn disagreement(items: &[Datum]) -> Result<Degree> {
     Degree::new((items.len() - modal) as f64 / items.len() as f64)
 }
 
-#[cfg(test)]
-mod sampling_tests {
-    use super::*;
-    use sapho_core::{ChoiceOption, DistributionPolicy, NamedQuestion, Probability};
-
-    fn block(boolean: f64, choice: &str, score: f64, confidence: f64) -> Datum {
-        let questions = vec![
-            NamedQuestion {
-                id: "boolean".into(),
-                question: Question::Boolean {
-                    instructions: "True?".into(),
-                    yes: "Yes".into(),
-                    no: "No".into(),
-                },
-            },
-            NamedQuestion {
-                id: "choice".into(),
-                question: Question::Choice {
-                    instructions: "Which?".into(),
-                    options: vec![
-                        ChoiceOption {
-                            label: "a".into(),
-                            description: "A".into(),
-                        },
-                        ChoiceOption {
-                            label: "b".into(),
-                            description: "B".into(),
-                        },
-                    ],
-                },
-            },
-            NamedQuestion {
-                id: "score".into(),
-                question: Question::Score {
-                    instructions: "Level?".into(),
-                    levels: vec!["Low".into(), "Mid".into(), "High".into()],
-                },
-            },
-        ];
-        let values = BTreeMap::from([
-            (
-                "boolean".into(),
-                Answer::Boolean {
-                    probability: Probability::new(boolean).unwrap(),
-                },
-            ),
-            (
-                "choice".into(),
-                Answer::Choice {
-                    selected: choice.into(),
-                    confidence: Probability::new(confidence).unwrap(),
-                    probabilities: None,
-                },
-            ),
-            (
-                "score".into(),
-                Answer::Score {
-                    expected: score,
-                    confidence: Probability::new(confidence).unwrap(),
-                    probabilities: None,
-                },
-            ),
-        ]);
-        Datum::new(
-            "sample",
-            Value::Answers(Answers {
-                distribution_policy: DistributionPolicy::Strict {},
-                questions,
-                values,
-            }),
-        )
-        .unwrap()
-    }
-
-    /// Trace: FR-076-AC-1, FR-076-AC-2, IT-014-SC-04
-    #[test]
-    fn complete_answer_signatures_use_threshold_selected_label_and_lower_score_tie() {
-        let a = block(0.5, "a", 1.5, 0.2);
-        let same = block(0.9, "a", 1.1, 0.9);
-        let b = block(0.49, "a", 1.1, 0.2);
-        let c = block(0.5, "b", 1.1, 0.2);
-        let d = block(0.5, "a", 1.51, 0.2);
-        assert_eq!(
-            disagreement(&[a.clone(), same.clone(), same.clone()])
-                .unwrap()
-                .get(),
-            0.0
-        );
-        assert_eq!(
-            disagreement(&[a.clone(), b.clone(), same.clone()])
-                .unwrap()
-                .get(),
-            1.0 / 3.0
-        );
-        assert_eq!(disagreement(&[a.clone(), b, c]).unwrap().get(), 2.0 / 3.0);
-        assert_eq!(disagreement(&[a, same, d]).unwrap().get(), 1.0 / 3.0);
-    }
-}
-
 fn compiled_at_path(graph: &Arc<CompiledGraph>, path: &[String]) -> Option<CompiledNode> {
     if path.first().is_none_or(|part| part != "root") || path.len() < 2 {
         return None;
@@ -1754,4 +1655,103 @@ fn check_calibration_identity(
             .with_context("observed_model", model.as_deref().unwrap_or("<absent>")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod sampling_tests {
+    use super::*;
+    use sapho_core::{ChoiceOption, DistributionPolicy, NamedQuestion, Probability};
+
+    fn block(boolean: f64, choice: &str, score: f64, confidence: f64) -> Datum {
+        let questions = vec![
+            NamedQuestion {
+                id: "boolean".into(),
+                question: Question::Boolean {
+                    instructions: "True?".into(),
+                    yes: "Yes".into(),
+                    no: "No".into(),
+                },
+            },
+            NamedQuestion {
+                id: "choice".into(),
+                question: Question::Choice {
+                    instructions: "Which?".into(),
+                    options: vec![
+                        ChoiceOption {
+                            label: "a".into(),
+                            description: "A".into(),
+                        },
+                        ChoiceOption {
+                            label: "b".into(),
+                            description: "B".into(),
+                        },
+                    ],
+                },
+            },
+            NamedQuestion {
+                id: "score".into(),
+                question: Question::Score {
+                    instructions: "Level?".into(),
+                    levels: vec!["Low".into(), "Mid".into(), "High".into()],
+                },
+            },
+        ];
+        let values = BTreeMap::from([
+            (
+                "boolean".into(),
+                Answer::Boolean {
+                    probability: Probability::new(boolean).unwrap(),
+                },
+            ),
+            (
+                "choice".into(),
+                Answer::Choice {
+                    selected: choice.into(),
+                    confidence: Probability::new(confidence).unwrap(),
+                    probabilities: None,
+                },
+            ),
+            (
+                "score".into(),
+                Answer::Score {
+                    expected: score,
+                    confidence: Probability::new(confidence).unwrap(),
+                    probabilities: None,
+                },
+            ),
+        ]);
+        Datum::new(
+            "sample",
+            Value::Answers(Answers {
+                distribution_policy: DistributionPolicy::Strict {},
+                questions,
+                values,
+            }),
+        )
+        .unwrap()
+    }
+
+    /// Trace: FR-076-AC-1, FR-076-AC-2, IT-014-SC-04
+    #[test]
+    fn complete_answer_signatures_use_threshold_selected_label_and_lower_score_tie() {
+        let a = block(0.5, "a", 1.5, 0.2);
+        let same = block(0.9, "a", 1.1, 0.9);
+        let b = block(0.49, "a", 1.1, 0.2);
+        let c = block(0.5, "b", 1.1, 0.2);
+        let d = block(0.5, "a", 1.51, 0.2);
+        assert_eq!(
+            disagreement(&[a.clone(), same.clone(), same.clone()])
+                .unwrap()
+                .get(),
+            0.0
+        );
+        assert_eq!(
+            disagreement(&[a.clone(), b.clone(), same.clone()])
+                .unwrap()
+                .get(),
+            1.0 / 3.0
+        );
+        assert_eq!(disagreement(&[a.clone(), b, c]).unwrap().get(), 2.0 / 3.0);
+        assert_eq!(disagreement(&[a, same, d]).unwrap().get(), 1.0 / 3.0);
+    }
 }
