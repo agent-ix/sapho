@@ -234,8 +234,8 @@ The normal `measurement` and command exit still describe the decision.
 `comparison` groups champion and challenger metrics by label provenance kind,
 shows each role's scored case IDs and self-source exclusions, and requires both
 roles to score the same IDs before reporting a win. Agreement favors higher
-values; Brier favors lower values. A zero-margin tie is not a win. ECE remains
-unavailable until the shared SAPHO-21 metric is implemented. A development
+values; Brier and ECE favor lower values. A zero-margin tie is not a win. ECE
+uses the shared predicted-label confidence metric on matched scored cases. A development
 comparison is marked `not_promotable`; held-out comparison is evaluation
 evidence, not a deployment action. Replay needs explicit binding metadata for
 a challenger with no successful exchange in the recording.
@@ -256,7 +256,7 @@ sapho roster GRAPH --dataset dataset.json --bindings bindings.yaml --split devel
 sapho roster GRAPH --dataset dataset.json --replay recording.json --split held_out --mapping mapping.yaml --output held-roster.json
 ```
 
-The versioned roster identifies the Dataset, split, Sapho version and `graph_semantic_identity`. Entries are sorted by binding and reported actual model. A response-less call stays in the unknown-actual-model entry and contributes no case score. A case/output is scored under one entry only when its trace lineage contains exactly one completed response from the declared binding. Ambiguous or missing lineage is listed as unattributed. Usage totals and means count only reported values; replay latency is absent with `replay_only`. ECE remains absent with `not_computed` until the shared calibration metric is available. The semantic identity hashes the parsed typed graph, while ordinary `measure` and `GraphArtifact.source` retain their existing path and raw-byte source identity.
+The versioned roster identifies the Dataset, split, Sapho version and `graph_semantic_identity`. Entries are sorted by binding and reported actual model. A response-less call stays in the unknown-actual-model entry and contributes no case score. A case/output is scored under one entry only when its trace lineage contains exactly one completed response from the declared binding. Ambiguous or missing lineage is listed as unattributed. Usage totals and means count only reported values; replay latency is absent with `replay_only`. ECE uses the shared predicted-label confidence metric on each attributed case set and remains absent when no Probability case is scored. The semantic identity hashes the parsed typed graph, while ordinary `measure` and `GraphArtifact.source` retain their existing path and raw-byte source identity.
 
 Ordinary `measure` also includes a `per_kind` view with the same counts and formulas for each declared label kind. Its existing top-level output totals and source fields remain available.
 

@@ -14,7 +14,7 @@ pub enum ShadowMetric {
     Agreement,
     /// Lower probability Brier loss wins.
     Brier,
-    /// Shared SAPHO-21 ECE, unavailable until its metric is implemented.
+    /// Shared predicted-label confidence ECE.
     Ece,
 }
 /// Caller-selected comparison, without any promotion action.
@@ -52,9 +52,9 @@ pub struct ShadowRoleScore {
     pub agreement: Option<f64>,
     /// Probability Brier, if computed.
     pub brier: Option<f64>,
-    /// Shared ECE, absent until SAPHO-21 supplies it.
+    /// Shared ECE on the matched scored case set, when present.
     pub ece: Option<f64>,
-    /// Why ECE is absent.
+    /// Why ECE is absent, when applicable.
     pub ece_reason: Option<String>,
 }
 /// Comparison for one provenance kind.
@@ -157,8 +157,8 @@ pub fn compare_shadow(
         }
         let champion_measure = measure(&subset, split, &selected_schema, champion, max_cases)?;
         let challenger_measure = measure(&subset, split, &selected_schema, challenger, max_cases)?;
-        let champion_score = role(&champion_measure, &request.output);
-        let challenger_score = role(&challenger_measure, &request.output);
+        let mut champion_score = role(&champion_measure, &request.output);
+        let mut challenger_score = role(&challenger_measure, &request.output);
         let challenger_ids = challenger_score
             .scored_cases
             .iter()
@@ -169,6 +169,25 @@ pub fn compare_shadow(
             .filter(|id| challenger_ids.contains(id))
             .cloned()
             .collect::<Vec<_>>();
+        if *schema == ValueType::Probability && !matched_cases.is_empty() {
+            let matched_ids = matched_cases.iter().cloned().collect::<BTreeSet<_>>();
+            let mut matched = subset.clone();
+            matched.cases.retain(|case| matched_ids.contains(&case.id));
+            for (score, outcomes) in [
+                (&mut champion_score, champion),
+                (&mut challenger_score, challenger),
+            ] {
+                let measured = measure(&matched, split, &selected_schema, outcomes, max_cases)?;
+                score.ece = measured.outputs.get(&request.output).and_then(|output| {
+                    if let Metrics::Probability { ece, .. } = &output.metrics {
+                        *ece
+                    } else {
+                        None
+                    }
+                });
+                score.ece_reason = score.ece.is_none().then(|| "metric_not_computed".into());
+            }
+        }
         let (beat_champion, reason) =
             verdict(&champion_score, &challenger_score, &matched_cases, request);
         kinds.push(ShadowKindComparison {
@@ -200,7 +219,7 @@ fn role(measurement: &Measurement, output: &str) -> ShadowRoleScore {
     let coverage = measurement.outputs.get(output);
     let (agreement, brier) = match coverage.map(|c| &c.metrics) {
         Some(Metrics::Boolean { agreement, .. }) => (*agreement, None),
-        Some(Metrics::Probability { brier }) => (None, *brier),
+        Some(Metrics::Probability { brier, .. }) => (None, *brier),
         _ => (None, None),
     };
     ShadowRoleScore {
@@ -223,7 +242,17 @@ fn role(measurement: &Measurement, output: &str) -> ShadowRoleScore {
         agreement,
         brier,
         ece: None,
-        ece_reason: Some("shared_sapho_21_ece_unavailable".into()),
+        ece_reason: Some(
+            if matches!(
+                coverage.map(|c| &c.metrics),
+                Some(Metrics::Probability { .. })
+            ) {
+                "zero_matched_scored_cases"
+            } else {
+                "not_probability"
+            }
+            .into(),
+        ),
     }
 }
 fn verdict(
@@ -244,7 +273,7 @@ fn verdict(
             .zip(challenger.agreement)
             .map(|(a, b)| b - a),
         ShadowMetric::Brier => champion.brier.zip(challenger.brier).map(|(a, b)| a - b),
-        ShadowMetric::Ece => None,
+        ShadowMetric::Ece => champion.ece.zip(challenger.ece).map(|(a, b)| a - b),
     };
     match gain {
         Some(gain) => (Some(gain > 0.0 && gain >= request.margin), None),

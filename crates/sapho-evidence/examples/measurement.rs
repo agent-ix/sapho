@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         100,
     )?;
     assert!(
-        matches!(probability_report.outputs.get("needs_review").map(|o| &o.metrics), Some(Metrics::Probability { brier: Some(v) }) if (*v - 0.25).abs() < 1e-12)
+        matches!(probability_report.outputs.get("needs_review").map(|o| &o.metrics), Some(Metrics::Probability { brier: Some(v), .. }) if (*v - 0.25).abs() < 1e-12)
     );
     assert_eq!(
         rank(
