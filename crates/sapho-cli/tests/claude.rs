@@ -305,7 +305,7 @@ fn stock_commands_prepare_only_required_claude_and_refuse_private_bad_configurat
         let missing = stock(&args, "", None);
         assert_eq!(missing.status.code(), Some(2));
         let error: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
-        assert_eq!(error["error"]["kind"], "credential_invalid");
+        assert_eq!(error["error"]["kind"], "credential");
         let invalid_workspace = stock(&args, "synthetic-private-key", Some("invalid-workspace"));
         assert_eq!(invalid_workspace.status.code(), Some(2));
         let error: serde_json::Value = serde_json::from_slice(&invalid_workspace.stdout).unwrap();
