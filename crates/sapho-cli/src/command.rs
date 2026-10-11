@@ -659,6 +659,7 @@ fn stock_descriptors(metadata: &Bindings) -> BTreeMap<sapho_core::BackendId, Pro
                 sapho_cli::Provider::Jev => "jev",
                 sapho_cli::Provider::Clm => "clm",
                 sapho_cli::Provider::Ollama => "ollama",
+                sapho_cli::Provider::Systemone => "systemone",
             };
             (
                 id.clone(),
@@ -710,6 +711,7 @@ fn roster_command(args: RosterArgs) -> Result<Response, CliError> {
             &graph.definition,
             &metadata,
             replay.map(|registry| move || Ok(registry)),
+            options.service_config.as_deref(),
         )?
     };
     for (output, mapping) in &mappings {
