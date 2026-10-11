@@ -2183,6 +2183,7 @@ dependencies = [
  "ix-cli-kit",
  "reqwest",
  "sapho-core",
+ "sapho-http",
  "sapho-recording",
  "serde",
  "serde_json",

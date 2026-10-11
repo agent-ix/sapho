@@ -15,6 +15,7 @@ systemone requires an explicit model and a separate JSON host file selected with
 has its own base_url, optional OS-store credential_key and bounded limits.
 Decisions requires model gpt-6-luna and the decisions build feature. Its fixed endpoint is
 https://api.openai.com/v1/decisions; OPENAI_API_KEY or the OS secret store supplies auth.
+Claude requires the claude build feature and a host ANTHROPIC_API_KEY or OS secret store key.
 The ollama provider (a build with the ollama feature) also takes think (default false),
 num_ctx (default 32768), num_predict (default 512) and timeout_seconds (default 600).
 It needs no credential. The server URL is read from OLLAMA_BASE_URL only (default

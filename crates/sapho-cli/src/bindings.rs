@@ -350,7 +350,12 @@ fn prepare_ollama(_: &BindingConfig) -> Result<Arc<dyn sapho_core::ModelBackend>
     Err(CliError::Feature(Provider::Ollama))
 }
 #[cfg(any(feature = "jev", feature = "clm", feature = "decisions"))]
-#[cfg(any(feature = "jev", feature = "clm", feature = "claude"))]
+#[cfg(any(
+    feature = "jev",
+    feature = "clm",
+    feature = "decisions",
+    feature = "claude"
+))]
 fn credential(provider: Provider) -> Result<Option<ix_cli_kit::secrets::SecretValue>, CliError> {
     crate::resolve_credential(
         provider,

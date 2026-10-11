@@ -1,6 +1,5 @@
 [workspace]
-members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-decisions", "crates/sapho-http", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-ollama", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli"]
-members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-claude", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-ollama", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli"]
+members = ["crates/sapho-core", "crates/sapho-graph", "crates/sapho-runtime", "crates/sapho-jev", "crates/sapho-clm", "crates/sapho-decisions", "crates/sapho-claude", "crates/sapho-http", "crates/sapho-systemone", "crates/sapho-recording", "crates/sapho-ollama", "crates/sapho-evidence", "crates/sapho-select", "crates/sapho-cli"]
 resolver = "3"
 
 [workspace.package]

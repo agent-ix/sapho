@@ -4,7 +4,10 @@
 mod wire;
 use async_trait::async_trait;
 use ix_cli_kit::secrets::SecretValue;
-use reqwest::{Url, header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue}};
+use reqwest::{
+    Url,
+    header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue},
+};
 use sapho_core::{
     ErrorCode, ModelBackend, ModelRequest, ModelResponse, RawExchange, Result, SaphoError,
 };
@@ -150,13 +153,14 @@ impl ClaudeBackend {
         headers.insert("anthropic-version", HeaderValue::from_static(API_VERSION));
         if let Some(id) = workspace_id {
             validate_workspace_id(id)?;
-            headers.insert(
-                "anthropic-workspace-id",
-                HeaderValue::from_str(id).map_err(|_| ConfigurationError::InvalidWorkspace)?,
-            );
+            let mut workspace =
+                HeaderValue::from_str(id).map_err(|_| ConfigurationError::InvalidWorkspace)?;
+            workspace.set_sensitive(true);
+            headers.insert("anthropic-workspace-id", workspace);
         }
-        let transport = NativeTransport::new(endpoint, headers, limits.timeout, "Claude request refused")
-            .map_err(|_| ConfigurationError::Transport)?;
+        let transport =
+            NativeTransport::new(endpoint, headers, limits.timeout, "Claude request refused")
+                .map_err(|_| ConfigurationError::Transport)?;
         Self::with_transport(Arc::new(transport), limits)
     }
     /// Inject transport while retaining codec, admission and limits.
@@ -180,42 +184,47 @@ impl ModelBackend for ClaudeBackend {
             .ok_or_else(|| failure(ErrorCode::DeadlineExceeded))?;
         let body = wire::encode(request, self.limits.max_tokens, self.limits.request_bytes)
             .map_err(|error| SaphoError::new(error.code, "Claude request refused"))?;
-        self.capacity.run(deadline, "Claude request refused", || async {
-            let response = self
-                .transport
-                .post(&body, self.limits.response_bytes)
-                .await?;
-            if response.status != 200 {
-                let code = match response.status {
-                    401 | 403 => ErrorCode::Unauthorized,
-                    429 => ErrorCode::RateLimited,
-                    400 | 422 => ErrorCode::ServiceValidation,
-                    _ => ErrorCode::BackendFailed,
+        self.capacity
+            .run(deadline, "Claude request refused", || async {
+                let response = self
+                    .transport
+                    .post(&body, self.limits.response_bytes)
+                    .await?;
+                if response.status != 200 {
+                    let code = match response.status {
+                        401 | 403 => ErrorCode::Unauthorized,
+                        429 => ErrorCode::RateLimited,
+                        400 | 422 => ErrorCode::ServiceValidation,
+                        _ => ErrorCode::BackendFailed,
+                    };
+                    return Err(
+                        failure(code).with_context("http_status", response.status.to_string())
+                    );
+                }
+                if response.body.len() > self.limits.response_bytes {
+                    return Err(failure(ErrorCode::LimitExceeded));
+                }
+                let response_text = std::str::from_utf8(&response.body)
+                    .map_err(|_| failure(ErrorCode::InvalidAnswer))?;
+                let raw = RawExchange {
+                    request: String::from_utf8(body)
+                        .map_err(|_| failure(ErrorCode::InvalidValue))?,
+                    response: response_text.to_owned(),
                 };
-                return Err(failure(code).with_context("http_status", response.status.to_string()));
-            }
-            if response.body.len() > self.limits.response_bytes {
-                return Err(failure(ErrorCode::LimitExceeded));
-            }
-            let response_text = std::str::from_utf8(&response.body)
-                .map_err(|_| failure(ErrorCode::InvalidAnswer))?;
-            let raw = RawExchange {
-                request: String::from_utf8(body).map_err(|_| failure(ErrorCode::InvalidValue))?,
-                response: response_text.to_owned(),
-            };
-            let decoded = wire::decode(request, &response.body, self.limits.response_bytes)
-                .map_err(|error| error.with_raw(raw.clone()))?;
-            sapho_core::validate_response(request, &decoded).map_err(|error| {
-                SaphoError::new(error.code, "Claude answer refused").with_raw(raw.clone())
-            })?;
-            if tokio::time::Instant::now() >= deadline {
-                return Err(failure(ErrorCode::DeadlineExceeded).with_raw(raw));
-            }
-            Ok(ModelResponse {
-                raw: Some(raw),
-                ..decoded
+                let decoded = wire::decode(request, &response.body, self.limits.response_bytes)
+                    .map_err(|error| error.with_raw(raw.clone()))?;
+                sapho_core::validate_response(request, &decoded).map_err(|error| {
+                    SaphoError::new(error.code, "Claude answer refused").with_raw(raw.clone())
+                })?;
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(failure(ErrorCode::DeadlineExceeded).with_raw(raw));
+                }
+                Ok(ModelResponse {
+                    raw: Some(raw),
+                    ..decoded
+                })
             })
-        }).await
+            .await
     }
 }
 #[cfg(test)]

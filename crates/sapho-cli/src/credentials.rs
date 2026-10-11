@@ -57,7 +57,11 @@ pub fn resolve_credential<B: CredentialBackend>(
     {
         return Err(CliError::CredentialInvalid);
     }
-    if matches!(provider, Provider::Jev | Provider::Decisions | Provider::Claude) && secret.is_none() {
+    if matches!(
+        provider,
+        Provider::Jev | Provider::Decisions | Provider::Claude
+    ) && secret.is_none()
+    {
         return Err(CliError::CredentialMissing(provider));
     }
     Ok(secret)

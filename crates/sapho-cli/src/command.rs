@@ -661,6 +661,7 @@ fn stock_descriptors(metadata: &Bindings) -> BTreeMap<sapho_core::BackendId, Pro
                 sapho_cli::Provider::Ollama => "ollama",
                 sapho_cli::Provider::Systemone => "systemone",
                 sapho_cli::Provider::Decisions => "decisions",
+                sapho_cli::Provider::Claude => "claude",
             };
             (
                 id.clone(),
