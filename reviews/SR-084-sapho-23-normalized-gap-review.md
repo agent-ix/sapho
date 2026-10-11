@@ -27,6 +27,10 @@ All ten FR-079/080 criteria have computed Test Matrix binders. The implementatio
 | --- | --- | --- | --- |
 | FND-001 | medium | IT-016-SC-05 requires over-16 generated candidates to be passed through ordinary `tune` only with its own explicit `--max-candidates`. The test checks `plan(..., 20)` and tunes only six candidates; no test exercises the two-command 20-candidate boundary. Add a 5x4 public sweep/tune fixture proving default refusal and explicit 20 acceptance in both commands. | crates/sapho-cli/src/sweep.rs:574-586, crates/sapho-cli/tests/sweep.rs:211-316, FR-080-AC-3, IT-016-SC-05 |
 
+## Dispositions
+
+- FND-001: fixed in `77f9c533d96634462b0a5634bc771614f0147e8c`. The public `twenty_candidate_sweep_and_tune_each_require_an_explicit_raised_ceiling` fixture at `crates/sapho-cli/tests/sweep.rs:213` verifies default refusal and explicit 20 acceptance in both commands. Focused test 1/1 and full `make ci` passed at that head; [SR-085](SR-085-sapho-23-acceptance-re-review.md) independently confirms the acceptance gap is closed.
+
 ## Coverage
 
 Plan completion: not assessed
