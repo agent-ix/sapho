@@ -427,6 +427,16 @@ fn calibrated_ports_require_explicit_conversion_and_valid_map_literal() {
         ),
     );
     assert_eq!(err(&wrong_map), ErrorCode::TypeMismatch);
+    let mut malformed_map = base.clone();
+    let Binding::Literal { value, .. } = malformed_map.nodes[0].inputs.get_mut("map").unwrap()
+    else {
+        panic!("example map must be a literal")
+    };
+    let Value::CalibrationMap(map) = &mut value.value else {
+        panic!("example map must be typed")
+    };
+    map.map_id = "calibration-v1:sha256:0".into();
+    assert_eq!(err(&malformed_map), ErrorCode::InvalidValue);
     let mut implicit = base.clone();
     implicit.nodes[1].inputs.insert(
         "value".into(),

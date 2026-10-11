@@ -678,23 +678,28 @@ fn check_development_calibration_observations(
         {
             continue;
         }
+        // The fit digest describes one raw prediction per selected case. Guarded
+        // or repeated uses still receive the runtime's per-node model check,
+        // but their observations are not that fitted cohort.
+        if runs.iter().any(|run| {
+            run.calibration
+                .iter()
+                .filter(|used| used.map_id == map.map_id)
+                .count()
+                != 1
+        }) {
+            continue;
+        }
         let mut outcomes = BTreeMap::new();
         let mut attribution = FitAttribution::new();
         for run in runs {
-            let matching = run
+            let used = run
                 .calibration
                 .iter()
-                .filter(|used| used.map_id == map.map_id)
-                .collect::<Vec<_>>();
-            let [used] = matching.as_slice() else {
-                return Err(SaphoError::new(
-                    ErrorCode::ModelMismatch,
-                    "Calibration observation absent or ambiguous",
-                )
-                .with_context("map_id", &map.map_id)
-                .with_context("case", run.id.as_str())
-                .into());
-            };
+                .find(|used| used.map_id == map.map_id)
+                .ok_or_else(|| {
+                    SaphoError::new(ErrorCode::CodeFailed, "Comparable calibration use absent")
+                })?;
             let mut outcome = run.outcome.clone();
             if let CaseOutcome::Completed { outputs, .. } = &mut outcome {
                 outputs.insert(

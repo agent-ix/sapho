@@ -715,6 +715,125 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
         report["runs"][0]["report"]["calibration_identity"][0]["status"],
         "reported_name_match"
     );
+    // Trace: FR-084-AC-5, IT-017-SC-08
+    // A guarded map does not run for every fit case. The per-node identity
+    // check still applies when it executes; the fit cohort digest is absent.
+    let mut partly_guarded = calibrated.clone();
+    partly_guarded.nodes.push(NodeSpec {
+        id: NodeId::new("high_raw").unwrap(),
+        operation: Operation::Compare {
+            comparator: Comparator::Greater,
+        },
+        inputs: BTreeMap::from([
+            (
+                "a".into(),
+                Binding::Node {
+                    node: NodeId::new("probability").unwrap(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            ),
+            (
+                "b".into(),
+                Binding::Literal {
+                    value: Datum::new(
+                        "threshold",
+                        Value::Probability(Probability::new(0.5).unwrap()),
+                    )
+                    .unwrap(),
+                    value_type: ValueType::Probability,
+                },
+            ),
+        ]),
+        guard: None,
+    });
+    partly_guarded
+        .nodes
+        .iter_mut()
+        .find(|node| node.id.as_str() == "calibrate")
+        .unwrap()
+        .guard = Some(Binding::Node {
+        node: NodeId::new("high_raw").unwrap(),
+        port: "result".into(),
+        path: Vec::new(),
+    });
+    partly_guarded.outputs.remove("calibrated_support");
+    let partly_guarded_path = root.path().join("partly-guarded.json");
+    std::fs::write(
+        &partly_guarded_path,
+        serde_json::to_vec(&partly_guarded).unwrap(),
+    )
+    .unwrap();
+    let partly_guarded_measure = command(&[
+        "measure",
+        path(&partly_guarded_path),
+        "--dataset",
+        path(&dataset),
+        "--replay",
+        path(&recording),
+        "--split",
+        "development",
+    ]);
+    assert!(
+        partly_guarded_measure.status.success(),
+        "{}",
+        String::from_utf8_lossy(&partly_guarded_measure.stdout)
+    );
+    let partly_guarded_report: serde_json::Value =
+        serde_json::from_slice(&partly_guarded_measure.stdout).unwrap();
+    assert_eq!(
+        partly_guarded_report["measurement"]["outputs"]["raw_support"]["scored"],
+        20
+    );
+    assert_eq!(
+        partly_guarded_report["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|run| run["report"]["calibration_identity"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty()))
+            .count(),
+        10
+    );
+
+    // Trace: FR-084-AC-5
+    // Two uses of one map are valid, but are not one row per fitted case.
+    let mut repeated_map = calibrated.clone();
+    let mut second_calibrate = repeated_map
+        .nodes
+        .iter()
+        .find(|node| node.id.as_str() == "calibrate")
+        .unwrap()
+        .clone();
+    second_calibrate.id = NodeId::new("calibrate_again").unwrap();
+    repeated_map.nodes.push(second_calibrate);
+    let repeated_path = root.path().join("repeated-map.json");
+    std::fs::write(&repeated_path, serde_json::to_vec(&repeated_map).unwrap()).unwrap();
+    let repeated_measure = command(&[
+        "measure",
+        path(&repeated_path),
+        "--dataset",
+        path(&dual_path),
+        "--replay",
+        path(&recording),
+        "--split",
+        "development",
+    ]);
+    assert!(
+        repeated_measure.status.success(),
+        "{}",
+        String::from_utf8_lossy(&repeated_measure.stdout)
+    );
+    let repeated_report: serde_json::Value =
+        serde_json::from_slice(&repeated_measure.stdout).unwrap();
+    assert_eq!(
+        repeated_report["runs"][0]["report"]["calibration_identity"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
     let mut other_knots = map.knots.clone();
     other_knots[0].calibrated = CalibratedProbability::new(0.3).unwrap();
     let other_map = CalibrationMap::new(
@@ -1235,4 +1354,347 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
     assert!(!wrong_binding.status.success());
     assert!(String::from_utf8_lossy(&wrong_binding.stdout).contains("model_mismatch"));
     assert!(!wrong_binding_output.exists());
+}
+
+/// Trace: FR-084-AC-5, FR-084-AC-6, IT-017-SC-08
+#[test]
+fn converted_guard_checks_stale_map_in_stock_commands_without_public_calibrated_output() {
+    let root = tempfile::tempdir().unwrap();
+    let raw_path = root.path().join("raw.yaml");
+    let dataset_path = root.path().join("dataset.json");
+    let recording_path = root.path().join("recording.json");
+    let map_path = root.path().join("map.json");
+    std::fs::write(&raw_path, raw_graph()).unwrap();
+    let (mut data, recording) = fixtures();
+    std::fs::write(&dataset_path, serde_json::to_vec(&data).unwrap()).unwrap();
+    std::fs::write(&recording_path, recording.to_json(8 * 1_048_576).unwrap()).unwrap();
+    let fit = command(&[
+        "fit-calibration",
+        path(&raw_path),
+        "--dataset",
+        path(&dataset_path),
+        "--replay",
+        path(&recording_path),
+        "--output-name",
+        "raw_support",
+        "--binding",
+        "fast_a",
+        "--split",
+        "development",
+        "--output",
+        path(&map_path),
+    ]);
+    assert!(
+        fit.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fit.stdout)
+    );
+    let map_binding: Binding = serde_json::from_slice(&std::fs::read(&map_path).unwrap()).unwrap();
+    let mut graph = GraphSpec::parse(raw_graph()).unwrap();
+    graph.nodes.push(NodeSpec {
+        id: NodeId::new("calibrate").unwrap(),
+        operation: Operation::Calibrate,
+        inputs: BTreeMap::from([
+            (
+                "value".into(),
+                Binding::Node {
+                    node: NodeId::new("probability").unwrap(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            ),
+            ("map".into(), map_binding),
+        ]),
+        guard: None,
+    });
+    graph.nodes.push(NodeSpec {
+        id: NodeId::new("convert").unwrap(),
+        operation: Operation::CalibratedAsProbability,
+        inputs: BTreeMap::from([(
+            "value".into(),
+            Binding::Node {
+                node: NodeId::new("calibrate").unwrap(),
+                port: "result".into(),
+                path: Vec::new(),
+            },
+        )]),
+        guard: None,
+    });
+    graph.nodes.push(NodeSpec {
+        id: NodeId::new("guard").unwrap(),
+        operation: Operation::Compare {
+            comparator: Comparator::Greater,
+        },
+        inputs: BTreeMap::from([
+            (
+                "a".into(),
+                Binding::Node {
+                    node: NodeId::new("convert").unwrap(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            ),
+            (
+                "b".into(),
+                Binding::Literal {
+                    value: Datum::new(
+                        "threshold",
+                        Value::Probability(Probability::new(0.1).unwrap()),
+                    )
+                    .unwrap(),
+                    value_type: ValueType::Probability,
+                },
+            ),
+        ]),
+        guard: None,
+    });
+    graph.nodes.push(NodeSpec {
+        id: NodeId::new("slow").unwrap(),
+        operation: Operation::Ask {
+            backend: BackendId::new("slow_b").unwrap(),
+            samples: 1,
+        },
+        inputs: BTreeMap::from([
+            (
+                "state".into(),
+                Binding::Node {
+                    node: NodeId::new("state").unwrap(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            ),
+            (
+                "questions".into(),
+                Binding::Node {
+                    node: NodeId::new("questions").unwrap(),
+                    port: "result".into(),
+                    path: Vec::new(),
+                },
+            ),
+        ]),
+        guard: Some(Binding::Node {
+            node: NodeId::new("guard").unwrap(),
+            port: "result".into(),
+            path: Vec::new(),
+        }),
+    });
+    graph.outputs = BTreeMap::from([
+        (
+            "decision".into(),
+            Binding::Node {
+                node: NodeId::new("guard").unwrap(),
+                port: "result".into(),
+                path: Vec::new(),
+            },
+        ),
+        (
+            "slow_model".into(),
+            Binding::Node {
+                node: NodeId::new("slow").unwrap(),
+                port: "model".into(),
+                path: Vec::new(),
+            },
+        ),
+    ]);
+    let graph_path = root.path().join("converted-guard.json");
+    std::fs::write(&graph_path, serde_json::to_vec(&graph).unwrap()).unwrap();
+    let input_path = root.path().join("input.json");
+    std::fs::write(&input_path, b"{\"text\":\"case-text-0\"}").unwrap();
+    let mut good = recording.clone();
+    for exchange in recording.exchanges.iter().cloned() {
+        let mut slow = exchange;
+        slow.request.backend = BackendId::new("slow_b").unwrap();
+        slow.response.model = "slow-model".into();
+        good.exchanges.push(slow);
+    }
+    let good_path = root.path().join("good-recording.json");
+    std::fs::write(&good_path, good.to_json(8 * 1_048_576).unwrap()).unwrap();
+    let replay_good = command(&[
+        "replay",
+        path(&graph_path),
+        "--recording",
+        path(&good_path),
+        "--input",
+        path(&input_path),
+    ]);
+    assert!(
+        replay_good.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replay_good.stdout)
+    );
+    let good_report: serde_json::Value = serde_json::from_slice(&replay_good.stdout).unwrap();
+    assert_eq!(good_report["outputs"]["decision"]["value"]["value"], true);
+    assert_eq!(
+        good_report["outputs"]["slow_model"]["value"]["value"],
+        "slow-model"
+    );
+    assert_eq!(
+        good_report["calibration_identity"][0]["status"],
+        "reported_name_match"
+    );
+
+    let mut changed = recording;
+    for exchange in &mut changed.exchanges {
+        exchange.response.model = "model-b".into();
+    }
+    let changed_path = root.path().join("changed-recording.json");
+    std::fs::write(&changed_path, changed.to_json(8 * 1_048_576).unwrap()).unwrap();
+    let replay_bad = command(&[
+        "replay",
+        path(&graph_path),
+        "--recording",
+        path(&changed_path),
+        "--input",
+        path(&input_path),
+    ]);
+    assert!(!replay_bad.status.success());
+    let bad_report: serde_json::Value = serde_json::from_slice(&replay_bad.stdout).unwrap();
+    assert_eq!(bad_report["error"]["code"], "model_mismatch");
+    assert_eq!(bad_report["error"]["context"]["observed_model"], "model-b");
+    assert!(
+        bad_report["trace"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|node| node["operation"]["kind"] == "ask"
+                && node["model"]["response"]["model"] == "model-b")
+    );
+    assert!(
+        !bad_report["trace"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|node| node["operation"]["backend"] == "slow_b" && node["status"] == "completed")
+    );
+    assert!(bad_report["outputs"].is_null());
+
+    for case in &mut data.cases {
+        case.labels = BTreeMap::from([("decision".into(), true)]);
+    }
+    std::fs::write(&dataset_path, serde_json::to_vec(&data).unwrap()).unwrap();
+    let measured = command(&[
+        "measure",
+        path(&graph_path),
+        "--dataset",
+        path(&dataset_path),
+        "--replay",
+        path(&changed_path),
+        "--split",
+        "development",
+    ]);
+    assert!(!measured.status.success());
+    let measured_report: serde_json::Value = serde_json::from_slice(&measured.stdout).unwrap();
+    assert!(
+        measured_report["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|case| {
+                case["report"]["error"]["code"] == "model_mismatch"
+                    && case["report"]["trace"]["nodes"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|node| node["model"]["response"]["model"] == "model-b")
+                    && !case["report"]["trace"]["nodes"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|node| {
+                            node["operation"]["backend"] == "slow_b"
+                                && node["status"] == "completed"
+                        })
+            })
+    );
+    #[cfg(feature = "clm")]
+    {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(connection) => break connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(std::time::Instant::now() < deadline, "no provider request");
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("accept failed: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            loop {
+                let mut buffer = [0; 1024];
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&buffer[..n]);
+                if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&bytes[..index]);
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|value| value.trim().parse().unwrap())
+                        })
+                        .unwrap();
+                    if bytes.len() >= index + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let body = br#"{"model":"model-b","answers":{"q":{"type":"noul","noul":0.05}},"usage":{"input_tokens":1,"output_tokens":0,"billing_units":1}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+        });
+        let bindings_path = root.path().join("live-bindings.yaml");
+        std::fs::write(&bindings_path,
+            "fast_a:\n  provider: clm\n  model: requested\n  distribution_policy: {kind: strict}\nslow_b:\n  provider: clm\n  model: requested\n  distribution_policy: {kind: strict}\n").unwrap();
+        let live = Command::new(env!("CARGO_BIN_EXE_sapho"))
+            .env_clear()
+            .env("CLM_BASE_URL", endpoint)
+            .env("CLM_API_KEY", "synthetic-credential")
+            .args([
+                "run",
+                path(&graph_path),
+                "--input",
+                path(&input_path),
+                "--bindings",
+                path(&bindings_path),
+            ])
+            .output()
+            .unwrap();
+        server.join().unwrap();
+        assert!(!live.status.success());
+        let live_report: serde_json::Value = serde_json::from_slice(&live.stdout).unwrap();
+        assert_eq!(live_report["error"]["code"], "model_mismatch");
+        assert!(
+            live_report["trace"]["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|node| node["model"]["response"]["model"] == "model-b")
+        );
+        assert!(
+            !live_report["trace"]["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|node| node["operation"]["backend"] == "slow_b"
+                    && node["status"] == "completed")
+        );
+    }
 }

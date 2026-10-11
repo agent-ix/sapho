@@ -250,6 +250,51 @@ fn engine(name: &'static str) -> (Engine, Arc<Scripted>, Arc<Scripted>) {
         slow,
     )
 }
+/// Trace: FR-082-AC-4, IT-017-SC-04
+#[tokio::test]
+async fn invalid_raw_probability_refuses_before_node_execution_with_empty_trace() {
+    let graph = GraphSpec {
+        inputs: BTreeMap::from([("raw".into(), ValueType::Probability)]),
+        nodes: vec![node(
+            "calibrate",
+            Operation::Calibrate,
+            BTreeMap::from([
+                (
+                    "value".into(),
+                    Binding::Input {
+                        name: "raw".into(),
+                        path: Vec::new(),
+                    },
+                ),
+                (
+                    "map".into(),
+                    literal(
+                        Value::CalibrationMap(Box::new(map())),
+                        ValueType::CalibrationMap,
+                    ),
+                ),
+            ]),
+            None,
+        )],
+        outputs: BTreeMap::from([("result".into(), from("calibrate", "result"))]),
+        subgraphs: BTreeMap::new(),
+    };
+    let engine = Engine::new(
+        compile(&graph, &PrimitiveRegistry::default()).unwrap(),
+        BackendRegistry::default(),
+    )
+    .unwrap();
+    let invalid: Inputs = serde_json::from_value(serde_json::json!({
+        "raw": {"id": "raw", "value": {"kind": "probability", "value": 1.2}, "sources": []}
+    }))
+    .unwrap();
+    let failure = engine
+        .run(&invalid, RunLimits::default())
+        .await
+        .unwrap_err();
+    assert_eq!(failure.error.code, ErrorCode::InvalidValue);
+    assert!(failure.trace.nodes.is_empty());
+}
 /// Trace: FR-082-AC-2, FR-082-AC-4, FR-084-AC-5, FR-084-AC-6, IT-017-SC-08
 #[tokio::test]
 async fn stale_model_refuses_before_guarded_ask_even_without_public_calibrated_output() {
