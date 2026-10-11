@@ -882,6 +882,7 @@ fn two_configured_services_enforce_independent_concurrency_ceilings() {
             let backend_id = BackendId::new(name).unwrap();
             let binding = registry.get(&backend_id).unwrap();
             let request = ModelRequest {
+                sample_index: None,
                 backend: backend_id,
                 model: binding.model,
                 expected_model: None,

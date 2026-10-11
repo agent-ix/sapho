@@ -34,4 +34,4 @@ pub use observation::{
     ModelCallObservation, ObservationClock, ObservationConfig, ObservationMode,
     SystemObservationClock,
 };
-pub use trace::{ModelEvidence, NodeStatus, NodeTrace, ShadowTrace, Trace};
+pub use trace::{ModelEvidence, NodeStatus, NodeTrace, SampleEvidence, ShadowTrace, Trace};

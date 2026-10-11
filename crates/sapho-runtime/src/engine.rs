@@ -2,14 +2,15 @@
 // Copyright (C) 2026 Agent-IX
 //! Cooperative bounded orchestration, including dependent map subgraphs.
 use crate::observation::{self, ModelCallObservation, ObservationClock, ObservationConfig};
-use crate::{ModelEvidence, NodeStatus, NodeTrace, ShadowTrace, Trace, operators};
+use crate::{ModelEvidence, NodeStatus, NodeTrace, SampleEvidence, ShadowTrace, Trace, operators};
 use futures::{
     future::BoxFuture,
     stream::{FuturesUnordered, StreamExt},
 };
 use sapho_core::{
-    BackendRegistry, Datum, ErrorCode, Inputs, ModelRequest, NodeId, PrimitiveContext, Result,
-    SaphoError, Value, check_ports, measured_json_bytes, validate_response,
+    Answer, Answers, BackendRegistry, Datum, Degree, ErrorCode, Inputs, ModelRequest, NodeId,
+    PrimitiveContext, Question, Result, SaphoError, Value, check_ports, measured_json_bytes,
+    validate_response,
 };
 use sapho_graph::{
     Binding, CompiledGraph, CompiledNode, Operation, ShadowObservation, ShadowProjection,
@@ -22,6 +23,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use tokio::sync::Semaphore;
 
 /// Explicit caller ceilings, shared by all nested subgraph work.
 #[derive(Debug, Clone)]
@@ -156,18 +158,22 @@ impl Engine {
                 Vec::new(),
             );
         };
+        let model_permits = Arc::new(Semaphore::new(limits.concurrency));
         let mut state = RunState {
             limits,
             deadline,
             nodes: 0,
             items: 0,
             requests: 0,
+            reserved_requests: 0,
             bytes: 0,
             trace: Trace::default(),
             cancelled: Arc::new(AtomicBool::new(false)),
             clock: config.map(|c| c.clock.clone()),
             durations: BTreeMap::new(),
+            sample_durations: BTreeMap::new(),
             started: Arc::new(Mutex::new(BTreeMap::new())),
+            model_permits,
         };
         if let Err(error) = state.data(inputs) {
             return (
@@ -218,7 +224,13 @@ impl Engine {
                     });
                 }
             }
-            observation::collect(&state.trace, &state.durations, &attempted, c)
+            observation::collect(
+                &state.trace,
+                &state.durations,
+                &state.sample_durations,
+                &attempted,
+                c,
+            )
         });
         (result, observations)
     }
@@ -265,6 +277,7 @@ impl Engine {
                         status: NodeStatus::Failed,
                         error: None,
                         model: None,
+                        samples: None,
                     });
                     let prepared = (|| {
                         if let Some(g) = &node.spec().guard {
@@ -314,7 +327,7 @@ impl Engine {
                         self.finish(node, index, outputs, true, state, &mut values)?;
                         continue;
                     }
-                    if let Operation::Ask { backend } = &node.spec().operation {
+                    if let Operation::Ask { backend, samples } = &node.spec().operation {
                         let prepared = (|| {
                             let binding = self.backends.get(backend)?;
                             let state_value = operators::operand(&ins, "state")?.clone();
@@ -327,6 +340,7 @@ impl Engine {
                                 ));
                             };
                             let request = ModelRequest {
+                                sample_index: None,
                                 distribution_policy: binding.distribution_policy,
                                 backend: backend.clone(),
                                 model: binding.model,
@@ -335,18 +349,27 @@ impl Engine {
                                 questions: questions.clone(),
                             };
                             request.validate()?;
-                            state.data(&request)?;
-                            state.add_request()?;
-                            state.trace_entry(index)?.model = Some(ModelEvidence {
-                                request: request.clone(),
-                                response: None,
-                                raw: None,
-                            });
-                            Ok((binding.backend, request))
+                            let count = usize::try_from(*samples).map_err(|_| {
+                                SaphoError::new(
+                                    ErrorCode::LimitExceeded,
+                                    "Ask sample count exceeds platform range",
+                                )
+                            })?;
+                            state.reserve_requests(count)?;
+                            if count == 1 {
+                                state.trace_entry(index)?.model = Some(ModelEvidence {
+                                    request: request.clone(),
+                                    response: None,
+                                    raw: None,
+                                });
+                            } else {
+                                state.trace_entry(index)?.samples = Some(Vec::new());
+                            }
+                            Ok((binding.backend, request, count))
                         })();
                         match prepared {
-                            Ok((backend, request)) => {
-                                asks.push((node, index, np, ins, backend, request))
+                            Ok((backend, request, count)) => {
+                                asks.push((node, index, np, ins, backend, request, count))
                             }
                             Err(e) => {
                                 state.failed(index, &e);
@@ -366,80 +389,130 @@ impl Engine {
                         }
                     }
                 }
-                // Fixed-sized chunks bound ready model work while preserving result order.
-                for chunk in asks.chunks(state.limits.concurrency) {
-                    let mut futures = FuturesUnordered::new();
-                    let deadline = tokio::time::Instant::from_std(state.deadline);
-                    let clock = state.clock.clone();
-                    let started_calls = state.started.clone();
-                    for (order, (_, index, _, _, backend, request)) in chunk.iter().enumerate() {
-                        let clock = clock.clone();
-                        let started_calls = started_calls.clone();
-                        let index = *index;
-                        futures.push(async move {
-                            let started = clock.as_ref().map(|clock| clock.now());
-                            if let Some(at) = started {
-                                started_calls
-                                    .lock()
-                                    .unwrap_or_else(|poison| poison.into_inner())
-                                    .insert(index, at);
-                            }
-                            let response =
-                                tokio::time::timeout_at(deadline, backend.infer(request))
-                                    .await
+                let mut cursor = 0usize;
+                while cursor < asks.len() {
+                    if asks[cursor].6 == 1 {
+                        let end = asks
+                            .iter()
+                            .enumerate()
+                            .skip(cursor)
+                            .take(state.limits.concurrency)
+                            .take_while(|(_, ask)| ask.6 == 1)
+                            .last()
+                            .map_or(cursor + 1, |(i, _)| i + 1);
+                        let mut futures = FuturesUnordered::new();
+                        let deadline = tokio::time::Instant::from_std(state.deadline);
+                        let clock = state.clock.clone();
+                        let started_calls = state.started.clone();
+                        for (order, (_, index, _, _, backend, request, _)) in
+                            asks.iter().enumerate().take(end).skip(cursor)
+                        {
+                            state.data(request)?;
+                            let permit =
+                                state
+                                    .model_permits
+                                    .clone()
+                                    .try_acquire_owned()
                                     .map_err(|_| {
                                         SaphoError::new(
-                                            ErrorCode::DeadlineExceeded,
-                                            "Model deadline exceeded",
+                                            ErrorCode::CodeFailed,
+                                            "Model permit unavailable",
                                         )
-                                    })
-                                    .and_then(|r| r);
-                            let elapsed = started.and_then(|start| {
-                                clock
-                                    .as_ref()
-                                    .map(|clock| clock.now().saturating_duration_since(start))
+                                    })?;
+                            state.dispatch_request()?;
+                            let backend = backend.clone();
+                            let request = request.clone();
+                            let index = *index;
+                            let clock = clock.clone();
+                            let started_calls = started_calls.clone();
+                            futures.push(async move {
+                                let started = clock.as_ref().map(|clock| clock.now());
+                                if let Some(at) = started {
+                                    started_calls
+                                        .lock()
+                                        .unwrap_or_else(|poison| poison.into_inner())
+                                        .insert(index, at);
+                                }
+                                let response = tokio::time::timeout_at(deadline, async {
+                                    let _permit = permit;
+                                    backend.infer(&request).await
+                                })
+                                .await
+                                .map_err(|_| {
+                                    SaphoError::new(
+                                        ErrorCode::DeadlineExceeded,
+                                        "Model deadline exceeded",
+                                    )
+                                })
+                                .and_then(|result| result);
+                                let elapsed = started.and_then(|start| {
+                                    clock
+                                        .as_ref()
+                                        .map(|clock| clock.now().saturating_duration_since(start))
+                                });
+                                (order, response, elapsed)
                             });
-                            (order, response, elapsed)
-                        });
-                    }
-                    while let Some((order, result, elapsed)) = futures.next().await {
-                        let (node, index, np, ins, _, request) =
-                            chunk.get(order).ok_or_else(|| {
-                                SaphoError::new(ErrorCode::BackendFailed, "Model task order absent")
-                            })?;
-                        if let Some(elapsed) = elapsed {
-                            state.durations.insert(
-                                *index,
-                                u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
-                            );
                         }
-                        let processed = (|| {
-                            let response = result?;
-                            if let Some(evidence) = &mut state.trace_entry(*index)?.model {
-                                evidence.response = Some(response.clone());
+                        while let Some((order, result, elapsed)) = futures.next().await {
+                            let (node, index, np, ins, _, request, _) = &asks[order];
+                            if let Some(elapsed) = elapsed {
+                                state.durations.insert(
+                                    *index,
+                                    u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+                                );
                             }
-                            state.data(&response)?;
-                            let validated = validate_response(request, &response)?;
-                            Ok(Inputs::from([
-                                (
-                                    "answers".into(),
-                                    make_datum(np, "answers", Value::Answers(validated), ins)?,
-                                ),
-                                (
-                                    "model".into(),
-                                    make_datum(np, "model", Value::Text(response.model), ins)?,
-                                ),
-                            ]))
-                        })();
-                        match processed {
+                            let processed = (|| {
+                                let response = result?;
+                                if let Some(evidence) = &mut state.trace_entry(*index)?.model {
+                                    evidence.response = Some(response.clone());
+                                }
+                                state.data(&response)?;
+                                let validated = validate_response(request, &response)?;
+                                Ok(Inputs::from([
+                                    (
+                                        "answers".into(),
+                                        make_datum(np, "answers", Value::Answers(validated), ins)?,
+                                    ),
+                                    (
+                                        "model".into(),
+                                        make_datum(np, "model", Value::Text(response.model), ins)?,
+                                    ),
+                                ]))
+                            })();
+                            match processed {
+                                Ok(outputs) => {
+                                    self.finish(node, *index, outputs, false, state, &mut values)?
+                                }
+                                Err(error) => {
+                                    state.failed(*index, &error);
+                                    return Err(error);
+                                }
+                            }
+                        }
+                        cursor = end;
+                    } else {
+                        let (node, index, np, ins, backend, request, count) = &asks[cursor];
+                        let result = self
+                            .repeated_ask(
+                                np,
+                                ins,
+                                backend.clone(),
+                                request.clone(),
+                                *count,
+                                *index,
+                                state,
+                            )
+                            .await;
+                        match result {
                             Ok(outputs) => {
                                 self.finish(node, *index, outputs, false, state, &mut values)?
                             }
-                            Err(e) => {
-                                state.failed(*index, &e);
-                                return Err(e);
+                            Err(error) => {
+                                state.failed(*index, &error);
+                                return Err(error);
                             }
                         }
+                        cursor += 1;
                     }
                 }
             }
@@ -486,6 +559,7 @@ impl Engine {
                     status: NodeStatus::Failed,
                     error: None,
                     model: None,
+                    samples: None,
                 });
                 let result: Result<()> = async {
                     state.check_time()?;
@@ -542,6 +616,7 @@ impl Engine {
                                 ));
                             };
                             let request = ModelRequest {
+                                sample_index: None,
                                 distribution_policy: binding.distribution_policy,
                                 backend: backend.clone(),
                                 model: binding.model,
@@ -551,7 +626,19 @@ impl Engine {
                             };
                             request.validate()?;
                             state.data(&request)?;
-                            state.add_request()?;
+                            state.reserve_requests(1)?;
+                            let permit =
+                                state
+                                    .model_permits
+                                    .clone()
+                                    .try_acquire_owned()
+                                    .map_err(|_| {
+                                        SaphoError::new(
+                                            ErrorCode::CodeFailed,
+                                            "Model permit unavailable",
+                                        )
+                                    })?;
+                            state.dispatch_request()?;
                             state.trace_entry(index)?.model = Some(ModelEvidence {
                                 request: request.clone(),
                                 response: None,
@@ -567,7 +654,10 @@ impl Engine {
                             }
                             let response = tokio::time::timeout_at(
                                 tokio::time::Instant::from_std(state.deadline),
-                                binding.backend.infer(&request),
+                                async {
+                                    let _permit = permit;
+                                    binding.backend.infer(&request).await
+                                },
                             )
                             .await
                             .map_err(|_| {
@@ -637,6 +727,215 @@ impl Engine {
                 }
             }
         }
+    }
+    async fn repeated_ask(
+        &self,
+        path: &[String],
+        ins: &Inputs,
+        backend: Arc<dyn sapho_core::ModelBackend>,
+        request: ModelRequest,
+        count: usize,
+        trace_index: usize,
+        state: &mut RunState,
+    ) -> Result<Inputs> {
+        let mut dispatched = 0usize;
+        let result = self
+            .repeated_ask_inner(
+                path,
+                ins,
+                backend,
+                request,
+                count,
+                trace_index,
+                state,
+                &mut dispatched,
+            )
+            .await;
+        state.release_requests(count.saturating_sub(dispatched));
+        result
+    }
+    #[allow(clippy::too_many_arguments)]
+    async fn repeated_ask_inner(
+        &self,
+        path: &[String],
+        ins: &Inputs,
+        backend: Arc<dyn sapho_core::ModelBackend>,
+        base: ModelRequest,
+        count: usize,
+        trace_index: usize,
+        state: &mut RunState,
+        dispatched: &mut usize,
+    ) -> Result<Inputs> {
+        let deadline = tokio::time::Instant::from_std(state.deadline);
+        let mut answer_items = Vec::with_capacity(count.min(state.limits.model_requests));
+        let mut model_items = Vec::with_capacity(count.min(state.limits.model_requests));
+        for start in (0..count).step_by(state.limits.concurrency) {
+            let end = start.saturating_add(state.limits.concurrency).min(count);
+            let mut prepared = Vec::with_capacity(end - start);
+            let mut request_bytes = 0usize;
+            for sample in start..end {
+                let sample_index = u32::try_from(sample).map_err(|_| {
+                    SaphoError::new(ErrorCode::LimitExceeded, "Sample index exceeds u32")
+                })?;
+                let mut request = base.clone();
+                request.sample_index = Some(sample_index);
+                let permit =
+                    tokio::time::timeout_at(deadline, state.model_permits.clone().acquire_owned())
+                        .await
+                        .map_err(|_| {
+                            SaphoError::new(
+                                ErrorCode::DeadlineExceeded,
+                                "Model permit deadline exceeded",
+                            )
+                        })?
+                        .map_err(|_| {
+                            SaphoError::new(ErrorCode::CodeFailed, "Model permit pool closed")
+                        })?;
+                let bytes = measured_json_bytes(
+                    &request,
+                    state
+                        .limits
+                        .data_bytes
+                        .saturating_sub(state.bytes)
+                        .saturating_sub(request_bytes),
+                )?;
+                request_bytes = request_bytes.checked_add(bytes).ok_or_else(|| {
+                    SaphoError::new(ErrorCode::LimitExceeded, "Request bytes overflow")
+                })?;
+                prepared.push((sample_index, request, permit));
+            }
+            state.bytes = increment(
+                state.bytes,
+                request_bytes,
+                state.limits.data_bytes,
+                "data bytes",
+            )?;
+            let mut futures = FuturesUnordered::new();
+            let clock = state.clock.clone();
+            for (sample_index, request, permit) in prepared {
+                state.dispatch_request()?;
+                *dispatched += 1;
+                let backend = backend.clone();
+                let clock = clock.clone();
+                futures.push(async move {
+                    let started = clock.as_ref().map(|clock| clock.now());
+                    let outcome = tokio::time::timeout_at(deadline, async {
+                        let _permit = permit;
+                        backend.infer(&request).await
+                    })
+                    .await
+                    .map_err(|_| {
+                        SaphoError::new(ErrorCode::DeadlineExceeded, "Model deadline exceeded")
+                    })
+                    .and_then(|result| result);
+                    let elapsed = started.and_then(|start| {
+                        clock
+                            .as_ref()
+                            .map(|clock| clock.now().saturating_duration_since(start))
+                    });
+                    (sample_index, request, outcome, elapsed)
+                });
+            }
+            let mut completed = BTreeMap::new();
+            while let Some((sample_index, request, outcome, elapsed)) = futures.next().await {
+                if let Some(elapsed) = elapsed {
+                    state.sample_durations.insert(
+                        (trace_index, sample_index),
+                        u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+                    );
+                }
+                completed.insert(sample_index, (request, outcome));
+            }
+            let mut first_error = None;
+            for (sample_index, (request, outcome)) in completed {
+                let mut evidence = ModelEvidence {
+                    request: request.clone(),
+                    response: None,
+                    raw: None,
+                };
+                let processed: Result<(Datum, Datum)> = (|| {
+                    let response = outcome?;
+                    evidence.response = Some(response.clone());
+                    state.data(&response)?;
+                    let answers = validate_response(&request, &response)?;
+                    let item_id = sample_index.to_string();
+                    let mut answer = Datum::new(item_id.clone(), Value::Answers(answers))?;
+                    let mut model = Datum::new(item_id, Value::Text(response.model))?;
+                    let sources = ins
+                        .values()
+                        .flat_map(|datum| datum.sources.clone())
+                        .collect::<Vec<_>>();
+                    answer.inherit_sources(sources.clone());
+                    model.inherit_sources(sources);
+                    Ok((answer, model))
+                })();
+                match processed {
+                    Ok((answer, model)) => {
+                        answer_items.push(answer);
+                        model_items.push(model);
+                        state
+                            .trace_entry(trace_index)?
+                            .samples
+                            .as_mut()
+                            .ok_or_else(|| {
+                                SaphoError::new(
+                                    ErrorCode::CodeFailed,
+                                    "Sample evidence slot absent",
+                                )
+                            })?
+                            .push(SampleEvidence {
+                                index: sample_index,
+                                status: NodeStatus::Completed,
+                                model: evidence,
+                                error: None,
+                            });
+                    }
+                    Err(error) => {
+                        evidence.raw = error.raw.as_deref().cloned();
+                        if first_error.is_none() {
+                            first_error = Some(error.clone());
+                        }
+                        state
+                            .trace_entry(trace_index)?
+                            .samples
+                            .as_mut()
+                            .ok_or_else(|| {
+                                SaphoError::new(
+                                    ErrorCode::CodeFailed,
+                                    "Sample evidence slot absent",
+                                )
+                            })?
+                            .push(SampleEvidence {
+                                index: sample_index,
+                                status: NodeStatus::Failed,
+                                model: evidence,
+                                error: Some(error),
+                            });
+                    }
+                }
+            }
+            if let Some(error) = first_error {
+                return Err(error);
+            }
+        }
+        state.add_items(count.checked_mul(2).ok_or_else(|| {
+            SaphoError::new(ErrorCode::LimitExceeded, "Sample item count overflow")
+        })?)?;
+        let disagreement = disagreement(&answer_items)?;
+        Ok(Inputs::from([
+            (
+                "answers".into(),
+                make_datum(path, "answers", Value::List(answer_items), ins)?,
+            ),
+            (
+                "models".into(),
+                make_datum(path, "models", Value::List(model_items), ins)?,
+            ),
+            (
+                "disagreement".into(),
+                make_datum(path, "disagreement", Value::Degree(disagreement), ins)?,
+            ),
+        ]))
     }
     async fn non_model(
         &self,
@@ -812,7 +1111,7 @@ impl Engine {
 }
 fn validate_backends(graph: &CompiledGraph, backends: &BackendRegistry) -> Result<()> {
     for node in graph.stages().iter().chain(graph.shadow_stages()).flatten() {
-        if let Operation::Ask { backend } | Operation::ShadowAsk { backend, .. } =
+        if let Operation::Ask { backend, .. } | Operation::ShadowAsk { backend, .. } =
             &node.spec().operation
         {
             backends.get(backend)?;
@@ -953,12 +1252,15 @@ struct RunState {
     nodes: usize,
     items: usize,
     requests: usize,
+    reserved_requests: usize,
     bytes: usize,
     trace: Trace,
     cancelled: Arc<AtomicBool>,
     clock: Option<Arc<dyn ObservationClock>>,
     durations: BTreeMap<usize, u64>,
+    sample_durations: BTreeMap<(usize, u32), u64>,
     started: Arc<Mutex<BTreeMap<usize, Instant>>>,
+    model_permits: Arc<Semaphore>,
 }
 impl Drop for RunState {
     fn drop(&mut self) {
@@ -989,14 +1291,26 @@ impl RunState {
         )?;
         Ok(())
     }
-    fn add_request(&mut self) -> Result<()> {
-        self.requests = increment(
-            self.requests,
-            1,
-            self.limits.model_requests,
-            "model requests",
-        )?;
+    fn reserve_requests(&mut self, n: usize) -> Result<()> {
+        let occupied = self
+            .requests
+            .checked_add(self.reserved_requests)
+            .ok_or_else(|| {
+                SaphoError::new(ErrorCode::LimitExceeded, "Model request ledger overflow")
+            })?;
+        increment(occupied, n, self.limits.model_requests, "model requests")?;
+        self.reserved_requests += n;
         Ok(())
+    }
+    fn dispatch_request(&mut self) -> Result<()> {
+        self.reserved_requests = self.reserved_requests.checked_sub(1).ok_or_else(|| {
+            SaphoError::new(ErrorCode::CodeFailed, "Model request reservation absent")
+        })?;
+        self.requests += 1;
+        Ok(())
+    }
+    fn release_requests(&mut self, n: usize) {
+        self.reserved_requests = self.reserved_requests.saturating_sub(n);
     }
     fn remaining_items(&self) -> usize {
         self.limits.collection_items.saturating_sub(self.items)
@@ -1027,4 +1341,153 @@ fn increment(value: usize, n: usize, max: usize, name: &str) -> Result<usize> {
         SaphoError::new(ErrorCode::LimitExceeded, "Run work ceiling exceeded")
             .with_context("limit", name)
     })
+}
+
+/// Modal categorical disagreement across complete ordered answer blocks.
+fn disagreement(items: &[Datum]) -> Result<Degree> {
+    let mut counts: BTreeMap<Vec<(String, u8, String)>, usize> = BTreeMap::new();
+    for datum in items {
+        let Value::Answers(Answers {
+            questions, values, ..
+        }) = &datum.value
+        else {
+            return Err(SaphoError::new(
+                ErrorCode::TypeMismatch,
+                "Sample needs Answers",
+            ));
+        };
+        let mut signature = Vec::with_capacity(questions.len());
+        for named in questions {
+            let answer = values
+                .get(&named.id)
+                .ok_or_else(|| SaphoError::new(ErrorCode::MissingAnswer, "Sample answer absent"))?;
+            let (kind, category) = match (&named.question, answer) {
+                (Question::Boolean { .. }, Answer::Boolean { probability }) => {
+                    (0, (probability.get() >= 0.5).to_string())
+                }
+                (Question::Choice { .. }, Answer::Choice { selected, .. }) => (1, selected.clone()),
+                (Question::Score { .. }, Answer::Score { expected, .. }) => {
+                    let lower = expected.floor();
+                    let nearest = if expected - lower > 0.5 {
+                        lower + 1.0
+                    } else {
+                        lower
+                    };
+                    (2, format!("{nearest:.0}"))
+                }
+                _ => {
+                    return Err(SaphoError::new(
+                        ErrorCode::TypeMismatch,
+                        "Sample answer kind differs",
+                    ));
+                }
+            };
+            signature.push((named.id.clone(), kind, category));
+        }
+        *counts.entry(signature).or_default() += 1;
+    }
+    let modal =
+        counts.values().copied().max().ok_or_else(|| {
+            SaphoError::new(ErrorCode::InvalidValue, "No samples for disagreement")
+        })?;
+    Degree::new((items.len() - modal) as f64 / items.len() as f64)
+}
+
+#[cfg(test)]
+mod sampling_tests {
+    use super::*;
+    use sapho_core::{ChoiceOption, DistributionPolicy, NamedQuestion, Probability};
+
+    fn block(boolean: f64, choice: &str, score: f64, confidence: f64) -> Datum {
+        let questions = vec![
+            NamedQuestion {
+                id: "boolean".into(),
+                question: Question::Boolean {
+                    instructions: "True?".into(),
+                    yes: "Yes".into(),
+                    no: "No".into(),
+                },
+            },
+            NamedQuestion {
+                id: "choice".into(),
+                question: Question::Choice {
+                    instructions: "Which?".into(),
+                    options: vec![
+                        ChoiceOption {
+                            label: "a".into(),
+                            description: "A".into(),
+                        },
+                        ChoiceOption {
+                            label: "b".into(),
+                            description: "B".into(),
+                        },
+                    ],
+                },
+            },
+            NamedQuestion {
+                id: "score".into(),
+                question: Question::Score {
+                    instructions: "Level?".into(),
+                    levels: vec!["Low".into(), "Mid".into(), "High".into()],
+                },
+            },
+        ];
+        let values = BTreeMap::from([
+            (
+                "boolean".into(),
+                Answer::Boolean {
+                    probability: Probability::new(boolean).unwrap(),
+                },
+            ),
+            (
+                "choice".into(),
+                Answer::Choice {
+                    selected: choice.into(),
+                    confidence: Probability::new(confidence).unwrap(),
+                    probabilities: None,
+                },
+            ),
+            (
+                "score".into(),
+                Answer::Score {
+                    expected: score,
+                    confidence: Probability::new(confidence).unwrap(),
+                    probabilities: None,
+                },
+            ),
+        ]);
+        Datum::new(
+            "sample",
+            Value::Answers(Answers {
+                distribution_policy: DistributionPolicy::Strict {},
+                questions,
+                values,
+            }),
+        )
+        .unwrap()
+    }
+
+    /// Trace: FR-076-AC-1, FR-076-AC-2, IT-014-SC-04
+    #[test]
+    fn complete_answer_signatures_use_threshold_selected_label_and_lower_score_tie() {
+        let a = block(0.5, "a", 1.5, 0.2);
+        let same = block(0.9, "a", 1.1, 0.9);
+        let b = block(0.49, "a", 1.1, 0.2);
+        let c = block(0.5, "b", 1.1, 0.2);
+        let d = block(0.5, "a", 1.51, 0.2);
+        assert_eq!(
+            disagreement(&[a.clone(), same.clone(), same.clone()])
+                .unwrap()
+                .get(),
+            0.0
+        );
+        assert_eq!(
+            disagreement(&[a.clone(), b.clone(), same.clone()])
+                .unwrap()
+                .get(),
+            1.0 / 3.0
+        );
+        assert_eq!(disagreement(&[a.clone(), b, c]).unwrap().get(), 2.0 / 3.0);
+        assert_eq!(disagreement(&[a, same, d]).unwrap().get(), 1.0 / 3.0);
+    }
 }

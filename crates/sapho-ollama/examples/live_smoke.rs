@@ -117,6 +117,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ];
     for item in ["banana", "carrot"] {
         let request = ModelRequest {
+            sample_index: None,
             distribution_policy: DistributionPolicy::approximate(0.05)?,
             backend: BackendId::new("ollama")?,
             model: model.clone(),

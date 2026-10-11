@@ -26,6 +26,7 @@ fn exchange(
 ) -> Exchange {
     Exchange {
         request: ModelRequest {
+            sample_index: None,
             distribution_policy: DistributionPolicy::Strict {},
             backend: BackendId::new(binding).unwrap(),
             model: "requested".into(),

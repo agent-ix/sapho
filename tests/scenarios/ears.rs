@@ -269,6 +269,7 @@ fn definitions() -> (GraphSpec, PrimitiveRegistry) {
             node(
                 "ask",
                 Operation::Ask {
+                    samples: 1,
                     backend: BackendId::new("judge").unwrap(),
                 },
                 [
@@ -318,6 +319,7 @@ fn definitions() -> (GraphSpec, PrimitiveRegistry) {
             node(
                 "ask",
                 Operation::Ask {
+                    samples: 1,
                     backend: BackendId::new("judge").unwrap(),
                 },
                 [

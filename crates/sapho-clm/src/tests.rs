@@ -18,6 +18,7 @@ use tokio::{
 };
 fn request() -> ModelRequest {
     ModelRequest {
+        sample_index: None,
         backend: BackendId::new("decision").unwrap(),
         model: DEFAULT_MODEL.into(),
         expected_model: Some(DEFAULT_MODEL.into()),
@@ -144,6 +145,32 @@ async fn capture_server(
         bytes
     });
     (format!("http://{address}"), task)
+}
+/// Trace: FR-074-AC-1, IT-014-SC-02, IT-014-SC-06
+#[tokio::test]
+async fn sample_index_changes_recording_identity_but_not_clm_wire_projection() {
+    let mut captures = Vec::new();
+    for index in [None, Some(0), Some(1), Some(2)] {
+        let (url, server) = capture_server(200, response(), false).await;
+        let secret = SecretValue::new("synthetic-test-credential");
+        let backend = ClmBackend::new(&url, Some(&secret), Limits::default()).unwrap();
+        let mut indexed = request();
+        indexed.sample_index = index;
+        backend.infer(&indexed).await.unwrap();
+        let capture = String::from_utf8(server.await.unwrap()).unwrap();
+        let (headers, body) = capture.split_once("\r\n\r\n").unwrap();
+        assert!(!capture.contains("sample_index"));
+        let application_headers = headers
+            .lines()
+            .filter(|line| {
+                let lower = line.to_ascii_lowercase();
+                lower.starts_with("authorization:") || lower.starts_with("content-type:")
+            })
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>();
+        captures.push((body.to_owned(), application_headers));
+    }
+    assert!(captures.windows(2).all(|pair| pair[0] == pair[1]));
 }
 /// Trace: NFR-004-M-1, FR-043-AC-1, FR-043-AC-2, FR-044-AC-1
 #[tokio::test]

@@ -1319,7 +1319,7 @@ async fn shadow_compile_refusals_and_binding_swap_are_generic() {
     let mut swapped = spec;
     for node in &mut swapped.nodes {
         match &mut node.operation {
-            Operation::Ask { backend } => *backend = BackendId::new("challenger").unwrap(),
+            Operation::Ask { backend, .. } => *backend = BackendId::new("challenger").unwrap(),
             Operation::ShadowAsk { backend, .. } => *backend = BackendId::new("judge").unwrap(),
             _ => {}
         }
@@ -1507,6 +1507,7 @@ fn conflicting_recorded_or_explicit_binding_metadata_is_refused_without_live_loo
         usage: None,
     };
     let request = ModelRequest {
+        sample_index: None,
         backend: BackendId::new("judge").unwrap(),
         model: "synthetic".into(),
         expected_model: None,

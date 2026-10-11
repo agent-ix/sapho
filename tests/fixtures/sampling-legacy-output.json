@@ -1,0 +1,1 @@
+{"result":{"id":"[\"root\",\"ask\",\"answers\"]","value":{"kind":"answers","value":{"distribution_policy":{"kind":"strict"},"questions":[{"id":"q","question":{"kind":"boolean","instructions":"Does the declared property hold?","yes":"The property holds","no":"The property does not hold"}}],"values":{"q":{"kind":"boolean","probability":0.8}}}},"sources":[]}}
