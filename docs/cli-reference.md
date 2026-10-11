@@ -17,7 +17,7 @@ require the corresponding Cargo feature.
 | `run GRAPH` | Graph path | Run options below | JSON outputs and trace, or failure with partial trace |
 | `record GRAPH` | Graph path, `--recording PATH` | Same run options | Run report and successful model exchanges |
 | `replay GRAPH` | Graph path, `--recording PATH` | Same run options | Exact offline run report |
-| `measure GRAPH` | Graph path, `--dataset PATH`, `--split development\|held_out` | `--format`, measurement options below | Coverage, per-output metrics and case predictions |
+| `measure GRAPH` | Graph path, `--dataset PATH`, `--split development\|held_out` | `--format`, measurement options below; optional `--shadow ID --shadow-output NAME --shadow-metric agreement\|brier\|ece --shadow-min-scored N --shadow-margin M` | Coverage, per-output metrics and case predictions; optional side-by-side shadow comparison |
 | `tune` | Repeated `--candidate GRAPH`, `--dataset PATH`, `--output-name NAME`, `--metric agreement\|brier` | `--format`, `--max-candidates 16`, measurement options | Development measurements and ranked candidates |
 | `export-training` | `--dataset PATH`, `--output PATH` | `--max-cases 1024`, `--max-artifact-bytes 8388608` | Development supervision JSONL |
 | `select files` | `--root DIR` | Path and acquisition options below | Typed Inputs of file records |

@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 //! Cooperative bounded orchestration, including dependent map subgraphs.
-use crate::{ModelEvidence, NodeStatus, NodeTrace, Trace, operators};
+use crate::{ModelEvidence, NodeStatus, NodeTrace, ShadowTrace, Trace, operators};
 use futures::{
     future::BoxFuture,
     stream::{FuturesUnordered, StreamExt},
 };
 use sapho_core::{
-    BackendRegistry, Datum, ErrorCode, Inputs, ModelRequest, PrimitiveContext, Result, SaphoError,
-    Value, check_ports, measured_json_bytes, validate_response,
+    BackendRegistry, Datum, ErrorCode, Inputs, ModelRequest, NodeId, PrimitiveContext, Result,
+    SaphoError, Value, check_ports, measured_json_bytes, validate_response,
 };
-use sapho_graph::{Binding, CompiledGraph, CompiledNode, Operation};
+use sapho_graph::{
+    Binding, CompiledGraph, CompiledNode, Operation, ShadowObservation, ShadowProjection,
+};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -140,10 +142,13 @@ impl Engine {
             .graph_run(&self.graph, inputs.clone(), vec!["root".into()], &mut state)
             .await
         {
-            Ok(outputs) => Ok(RunResult {
-                outputs,
-                trace: state.trace.clone(),
-            }),
+            Ok((outputs, mut values)) => {
+                self.run_shadows(inputs, &mut values, &mut state).await;
+                Ok(RunResult {
+                    outputs,
+                    trace: state.trace.clone(),
+                })
+            }
             Err(error) => {
                 for entry in &mut state.trace.nodes {
                     if entry.status == NodeStatus::Failed && entry.error.is_none() {
@@ -166,7 +171,7 @@ impl Engine {
         inputs: Inputs,
         path: Vec<String>,
         state: &'a mut RunState,
-    ) -> BoxFuture<'a, Result<Inputs>> {
+    ) -> BoxFuture<'a, Result<(Inputs, BTreeMap<NodeId, Inputs>)>> {
         Box::pin(async move {
             check_ports(&graph.signature().inputs, &inputs)?;
             let mut values = BTreeMap::new();
@@ -365,8 +370,176 @@ impl Engine {
                 .collect::<Result<Inputs>>()?;
             check_ports(&graph.signature().outputs, &outputs)?;
             state.check_time()?;
-            Ok(outputs)
+            Ok((outputs, values))
         })
+    }
+    async fn run_shadows(
+        &self,
+        inputs: &Inputs,
+        values: &mut BTreeMap<NodeId, Inputs>,
+        state: &mut RunState,
+    ) {
+        let path = vec!["root".to_owned()];
+        let mut blocked = BTreeMap::<NodeId, SaphoError>::new();
+        for stage in self.graph.shadow_stages() {
+            for node in stage {
+                let mut np = path.clone();
+                np.push(node.spec().id.to_string());
+                let index = state.trace.nodes.len();
+                let dependencies = node
+                    .spec()
+                    .inputs
+                    .values()
+                    .chain(node.spec().guard.iter())
+                    .filter_map(|binding| match binding {
+                        Binding::Node { node, .. } => Some(vec!["root".into(), node.to_string()]),
+                        Binding::Input { .. } | Binding::Literal { .. } => None,
+                    })
+                    .collect();
+                state.trace.nodes.push(NodeTrace {
+                    path: np.clone(),
+                    dependencies,
+                    guard: None,
+                    operation: node.spec().operation.clone(),
+                    inputs: Inputs::new(),
+                    outputs: Inputs::new(),
+                    status: NodeStatus::Failed,
+                    error: None,
+                    model: None,
+                });
+                let result: Result<()> = async {
+                    state.check_time()?;
+                    state.add_node()?;
+                    for binding in node.spec().inputs.values().chain(node.spec().guard.iter()) {
+                        if let Binding::Node { node: producer, .. } = binding
+                            && let Some(error) = blocked.get(producer)
+                        {
+                            return Err(error.clone());
+                        }
+                    }
+                    if let Some(guard_binding) = &node.spec().guard {
+                        let guard = resolve(guard_binding, inputs, values)?;
+                        state.trace_entry(index)?.guard = Some(guard.clone());
+                        if matches!(guard.value, Value::Boolean(false)) {
+                            let outputs = node
+                                .output_types()
+                                .keys()
+                                .map(|port| {
+                                    Ok((
+                                        port.clone(),
+                                        make_datum(
+                                            &np,
+                                            port,
+                                            Value::Optional(None),
+                                            &Inputs::from([("guard".into(), guard.clone())]),
+                                        )?,
+                                    ))
+                                })
+                                .collect::<Result<Inputs>>()?;
+                            return self.finish(node, index, outputs, true, state, values);
+                        }
+                    }
+                    let resolved = node
+                        .spec()
+                        .inputs
+                        .iter()
+                        .map(|(name, binding)| {
+                            Ok((name.clone(), resolve(binding, inputs, values)?))
+                        })
+                        .collect::<Result<Inputs>>()?;
+                    check_ports(&node.signature().inputs, &resolved)?;
+                    state.trace_entry(index)?.inputs = resolved.clone();
+                    match &node.spec().operation {
+                        Operation::ShadowAsk { backend, .. } => {
+                            let binding = self.backends.get(backend)?;
+                            let state_value = operators::operand(&resolved, "state")?.clone();
+                            let Value::Questions(questions) =
+                                operators::operand(&resolved, "questions")?
+                            else {
+                                return Err(SaphoError::new(
+                                    ErrorCode::TypeMismatch,
+                                    "Shadow ask needs Questions",
+                                ));
+                            };
+                            let request = ModelRequest {
+                                distribution_policy: binding.distribution_policy,
+                                backend: backend.clone(),
+                                model: binding.model,
+                                expected_model: binding.expected_model,
+                                state: state_value,
+                                questions: questions.clone(),
+                            };
+                            request.validate()?;
+                            state.data(&request)?;
+                            state.add_request()?;
+                            state.trace_entry(index)?.model = Some(ModelEvidence {
+                                request: request.clone(),
+                                response: None,
+                                raw: None,
+                            });
+                            let response = tokio::time::timeout_at(
+                                tokio::time::Instant::from_std(state.deadline),
+                                binding.backend.infer(&request),
+                            )
+                            .await
+                            .map_err(|_| {
+                                SaphoError::new(
+                                    ErrorCode::DeadlineExceeded,
+                                    "Shadow model deadline exceeded",
+                                )
+                            })??;
+                            if let Some(evidence) = &mut state.trace_entry(index)?.model {
+                                evidence.response = Some(response.clone());
+                            }
+                            state.data(&response)?;
+                            let answers = validate_response(&request, &response)?;
+                            let outputs = Inputs::from([
+                                (
+                                    "answers".into(),
+                                    make_datum(&np, "answers", Value::Answers(answers), &resolved)?,
+                                ),
+                                (
+                                    "model".into(),
+                                    make_datum(
+                                        &np,
+                                        "model",
+                                        Value::Text(response.model),
+                                        &resolved,
+                                    )?,
+                                ),
+                            ]);
+                            self.finish(node, index, outputs, false, state, values)
+                        }
+                        _ => {
+                            let outputs = self.non_model(node, &np, &resolved, state).await?;
+                            self.finish(node, index, outputs, false, state, values)
+                        }
+                    }
+                }
+                .await;
+                if let Err(error) = result {
+                    let skipped = error.code == ErrorCode::LimitExceeded
+                        || (error.code == ErrorCode::DeadlineExceeded
+                            && error.message.as_ref() == "Run deadline exceeded")
+                        || blocked.values().any(|upstream| upstream == &error);
+                    state.failed(index, &error);
+                    if skipped {
+                        state.trace.nodes[index].status = NodeStatus::Skipped;
+                    }
+                    blocked.insert(node.spec().id.clone(), error);
+                }
+                if let Operation::ShadowAsk { observations, .. } = &node.spec().operation {
+                    for observation in observations {
+                        state.trace.shadows.push(shadow_observation(
+                            node,
+                            observation,
+                            state.trace.nodes.get(index).expect("just appended"),
+                            values,
+                        ));
+                    }
+                }
+            }
+        }
     }
     async fn non_model(
         &self,
@@ -439,7 +612,7 @@ impl Engine {
                     captured.insert("item".into(), item.clone());
                     let mut child = path.to_vec();
                     child.push(item.id.to_string());
-                    let mut outputs = self.graph_run(&graph, captured, child, state).await?;
+                    let (mut outputs, _) = self.graph_run(&graph, captured, child, state).await?;
                     let mut d = outputs.remove("result").ok_or_else(|| {
                         SaphoError::new(ErrorCode::MissingInput, "Map result absent")
                     })?;
@@ -486,7 +659,7 @@ impl Engine {
             | Operation::Coalesce => {
                 one_output(path, operators::logic(&node.spec().operation, ins)?, ins)
             }
-            Operation::Ask { .. } => Err(SaphoError::new(
+            Operation::Ask { .. } | Operation::ShadowAsk { .. } => Err(SaphoError::new(
                 ErrorCode::BackendFailed,
                 "Ask must run through inference scheduler",
             )),
@@ -541,8 +714,10 @@ impl Engine {
     }
 }
 fn validate_backends(graph: &CompiledGraph, backends: &BackendRegistry) -> Result<()> {
-    for node in graph.stages().iter().flatten() {
-        if let Operation::Ask { backend } = &node.spec().operation {
+    for node in graph.stages().iter().chain(graph.shadow_stages()).flatten() {
+        if let Operation::Ask { backend } | Operation::ShadowAsk { backend, .. } =
+            &node.spec().operation
+        {
             backends.get(backend)?;
         }
         if let Some(g) = node.mapped_graph() {
@@ -550,6 +725,77 @@ fn validate_backends(graph: &CompiledGraph, backends: &BackendRegistry) -> Resul
         }
     }
     Ok(())
+}
+fn shadow_observation(
+    node: &CompiledNode,
+    observation: &ShadowObservation,
+    trace: &NodeTrace,
+    values: &BTreeMap<NodeId, Inputs>,
+) -> ShadowTrace {
+    let projected = if trace.status == NodeStatus::Completed {
+        (|| {
+            let answers = values
+                .get(&node.spec().id)
+                .and_then(|ports| ports.get("answers"))
+                .ok_or_else(|| {
+                    SaphoError::new(ErrorCode::MissingAnswer, "Shadow answers absent")
+                })?;
+            let answers = match &answers.value {
+                Value::Answers(answers) => answers,
+                Value::Optional(Some(inner)) => match inner.as_ref() {
+                    Value::Answers(answers) => answers,
+                    _ => {
+                        return Err(SaphoError::new(
+                            ErrorCode::TypeMismatch,
+                            "Shadow answers type mismatch",
+                        ));
+                    }
+                },
+                _ => {
+                    return Err(SaphoError::new(
+                        ErrorCode::TypeMismatch,
+                        "Shadow answers type mismatch",
+                    ));
+                }
+            };
+            let probability = answers.probability(&observation.question, &observation.labels)?;
+            let value = match observation.projection {
+                ShadowProjection::Boolean { threshold } => {
+                    Value::Boolean(probability.get() >= threshold.get())
+                }
+                ShadowProjection::Probability => Value::Probability(probability),
+            };
+            let mut path = trace.path.clone();
+            path.push(observation.name.clone());
+            make_datum(&path, "value", value, &trace.inputs)
+        })()
+    } else {
+        Err(trace
+            .error
+            .clone()
+            .unwrap_or_else(|| SaphoError::new(ErrorCode::MissingInput, "Shadow ask skipped")))
+    };
+    let (status, value, error) = match projected {
+        Ok(value) => (NodeStatus::Completed, Some(value), None),
+        Err(error) => (
+            if trace.status == NodeStatus::Skipped {
+                NodeStatus::Skipped
+            } else {
+                NodeStatus::Failed
+            },
+            None,
+            Some(error),
+        ),
+    };
+    ShadowTrace {
+        node: node.spec().id.clone(),
+        name: observation.name.clone(),
+        output: observation.output.clone(),
+        status,
+        value,
+        error,
+        model: trace.model.clone(),
+    }
 }
 fn resolve(
     binding: &Binding,

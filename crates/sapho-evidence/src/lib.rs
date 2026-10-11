@@ -26,6 +26,8 @@ use sapho_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+mod shadow;
+pub use shadow::*;
 
 /// Refusals distinguish dataset, coverage and candidate failures at this crate boundary.
 #[derive(Debug, thiserror::Error, Serialize)]

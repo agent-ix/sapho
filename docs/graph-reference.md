@@ -62,6 +62,7 @@ never coerce automatically. `T`, `L` and `R` below stand for declared types.
 | `code` | Primitive signature | Primitive outputs | `primitive`, `params` (default `{}`) | [native](../examples/reference/native.yaml), [Rust host](../examples/reference.rs) |
 | `questions` | None | Questions | `questions` | [questions](../examples/reference/questions.yaml) |
 | `ask` | `state: Record`, `questions: Questions` | `answers: Answers`, `model: Text` | `backend` | [questions](../examples/reference/questions.yaml) |
+| `shadow_ask` | `state: Record`, `questions: Questions` | Observations only; no decision port | `backend`, `observations` | [shadow](../examples/graphs/shadow.yaml) |
 | `map` | `items: List(T)` and subgraph captures | List(U) | `graph` | [collections](../examples/reference/collections.yaml) |
 | `filter` | `items: List(T)`, `mask: List(Boolean)` | List(T) | None | [collections](../examples/reference/collections.yaml) |
 | `pairs` | `left: List(L)`, `right: List(R)` | List(Record(left: L, right: R)) | None | [collections](../examples/reference/collections.yaml) |
@@ -93,6 +94,25 @@ Returned ports and values are checked against its captured Signature. The
 value: bytes}`, checks cancellation and returns a finite Number.
 
 ## Questions and inference
+
+### Observe a challenger
+
+[`shadow.yaml`](../examples/graphs/shadow.yaml) adds a challenger to a two-stage decision.
+Each `shadow_ask` observation names a unique `name`, an existing public `output`, a
+`question` ID, nonempty outcome `labels`, and a `projection`. A Boolean
+projection also supplies a unit-range `threshold` and predicts true at or
+above it; a Probability projection retains the selected outcome mass. The
+projection type must equal the mapped output type.
+
+Shadow state, questions and guards can use graph inputs, literals and ask-free
+producers. A dependency on an ordinary ask is refused at compile time. Work
+needed only by a shadow runs after the complete decision; common ask-free
+producers are reused. Shadow values cannot supply decision operands or graph
+outputs. A successful shadow exchange is recorded normally. A failed or
+skipped shadow retains typed trace evidence while the completed decision and
+its exit status stay intact. Both phases share the same RunLimits.
+Declare `shadow_ask` in the root graph; mapped subgraphs containing one are
+refused because their per-item observations have no public output mapping.
 
 `questions` creates an ordered block of `NamedQuestion {id, question}`. IDs
 must be nonempty and unique; instructions must be nonblank. Choice labels are

@@ -29,4 +29,4 @@ mod engine;
 mod operators;
 mod trace;
 pub use engine::{Engine, RunFailure, RunLimits, RunResult};
-pub use trace::{ModelEvidence, NodeStatus, NodeTrace, Trace};
+pub use trace::{ModelEvidence, NodeStatus, NodeTrace, ShadowTrace, Trace};

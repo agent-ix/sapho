@@ -30,7 +30,9 @@ pub use bindings::{
     replay_bindings, replay_bindings_json,
 };
 pub use error::CliError;
-pub use host::{ExitStatus, Inspection, RunReport, Runner, inspect, plain_inputs};
+pub use host::{
+    ExitStatus, Inspection, RunReport, Runner, ShadowInspection, inspect, plain_inputs,
+};
 pub use io::{
     ArtifactWriter, GraphArtifact, load_graph, read_bytes, read_bytes_with_timeout, select_format,
     write_new,

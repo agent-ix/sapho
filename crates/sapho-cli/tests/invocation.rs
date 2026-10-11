@@ -143,6 +143,37 @@ fn cli_inspection_file_stdin_types_exits_and_refusals_are_real() {
         "unknown_primitive"
     );
 }
+/// Trace: FR-060-AC-4
+#[test]
+fn no_shadow_cli_shape_and_exclusive_artifacts_remain_stable() {
+    let root = tempfile::tempdir().unwrap();
+    let graph = graph_file(root.path(), "plain.json", &offline());
+    let input = root.path().join("input.json");
+    std::fs::write(&input, br#"{"flag":true}"#).unwrap();
+    let run = cli(&["run", path(&graph), "--input", path(&input)], None);
+    assert_eq!(run.status.code(), Some(0));
+    let json = result(&run);
+    assert_eq!(
+        json["outputs"]["result"]["value"],
+        serde_json::json!({"kind":"boolean","value":false})
+    );
+    assert!(json["trace"].get("shadows").is_none());
+    let target = root.path().join("existing.json");
+    std::fs::write(&target, b"sentinel").unwrap();
+    let refused = cli(
+        &[
+            "run",
+            path(&graph),
+            "--input",
+            path(&input),
+            "--output",
+            path(&target),
+        ],
+        None,
+    );
+    assert_eq!(refused.status.code(), Some(2));
+    assert_eq!(std::fs::read(&target).unwrap(), b"sentinel");
+}
 fn multilayer() -> GraphSpec {
     GraphSpec::parse(
         r#"
@@ -186,6 +217,32 @@ outputs: {result: {kind: node, node: result, port: result}}
 struct Scripted {
     calls: AtomicUsize,
     fail_at: Option<usize>,
+}
+struct SlowShadow;
+#[async_trait::async_trait]
+impl ModelBackend for SlowShadow {
+    async fn infer(&self, _: &ModelRequest) -> Result<ModelResponse> {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        Err(SaphoError::new(
+            ErrorCode::BackendFailed,
+            "finished too late",
+        ))
+    }
+}
+struct MalformedShadow;
+#[async_trait::async_trait]
+impl ModelBackend for MalformedShadow {
+    async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse> {
+        Ok(ModelResponse {
+            model: request.model.clone(),
+            answers: BTreeMap::new(),
+            usage: None,
+            raw: Some(RawExchange {
+                request: "synthetic".into(),
+                response: "malformed".into(),
+            }),
+        })
+    }
 }
 #[async_trait::async_trait]
 impl ModelBackend for Scripted {
@@ -233,6 +290,1059 @@ fn backend(delegate: Arc<dyn ModelBackend>) -> BackendRegistry {
         )
         .unwrap();
     bindings
+}
+fn shadow_graph() -> GraphSpec {
+    let mut spec = multilayer();
+    spec.nodes.push(NodeSpec {
+        id: NodeId::new("shadow").unwrap(),
+        operation: Operation::ShadowAsk {
+            backend: BackendId::new("challenger").unwrap(),
+            observations: vec![ShadowObservation {
+                name: "candidate".into(),
+                output: "result".into(),
+                question: "q".into(),
+                labels: vec!["true".into()],
+                projection: ShadowProjection::Probability,
+            }],
+        },
+        inputs: BTreeMap::from([
+            (
+                "state".into(),
+                Binding::Node {
+                    node: NodeId::new("context").unwrap(),
+                    port: "result".into(),
+                    path: vec![],
+                },
+            ),
+            (
+                "questions".into(),
+                Binding::Node {
+                    node: NodeId::new("questions").unwrap(),
+                    port: "result".into(),
+                    path: vec![],
+                },
+            ),
+        ]),
+        guard: None,
+    });
+    spec
+}
+/// Trace: FR-057-AC-7, IT-008-SC-09
+#[test]
+fn shadow_ask_is_root_only_and_mapped_placement_refuses_at_compile_time() {
+    let shadow = shadow_graph();
+    assert!(inspect(&shadow, &PrimitiveRegistry::default()).is_ok());
+    let mut outer = offline();
+    let mut inputs = shadow.inputs.clone();
+    inputs.insert("item".into(), ValueType::Text);
+    outer.subgraphs.insert(
+        "mapped".into(),
+        GraphBody {
+            inputs,
+            nodes: shadow.nodes,
+            outputs: shadow.outputs,
+        },
+    );
+    let failure = compile(&outer, &PrimitiveRegistry::default())
+        .err()
+        .unwrap();
+    assert_eq!(failure.code, ErrorCode::Config);
+    assert!(failure.message.contains("mapped subgraphs"));
+}
+fn shadow_backends(
+    champion: Arc<dyn ModelBackend>,
+    challenger: Arc<dyn ModelBackend>,
+) -> BackendRegistry {
+    let mut registry = backend(champion);
+    registry
+        .register(
+            BackendId::new("challenger").unwrap(),
+            BackendBinding {
+                backend: challenger,
+                model: "challenger_model".into(),
+                expected_model: Some("challenger_model".into()),
+                distribution_policy: DistributionPolicy::Strict {},
+            },
+        )
+        .unwrap();
+    registry
+}
+/// Trace: FR-057-AC-5, FR-058-AC-2, IT-008-SC-02
+#[tokio::test]
+async fn guarded_shadow_projects_present_answer_and_skips_false_guard() {
+    for guard in [true, false] {
+        let mut spec = shadow_graph();
+        spec.nodes
+            .iter_mut()
+            .find(|node| node.id.as_str() == "shadow")
+            .unwrap()
+            .guard = Some(Binding::Literal {
+            value: Datum::new("shadow-guard", Value::Boolean(guard)).unwrap(),
+            value_type: ValueType::Boolean,
+        });
+        let champion = Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        });
+        let challenger = Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        });
+        let outcome = Runner::new(
+            &spec,
+            &PrimitiveRegistry::default(),
+            shadow_backends(champion.clone(), challenger.clone()),
+        )
+        .unwrap()
+        .run(&text_input("guarded case"), RunLimits::default(), None)
+        .await;
+        assert_eq!(outcome.exit, ExitStatus::Completed);
+        assert_eq!(champion.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(challenger.calls.load(Ordering::SeqCst), usize::from(guard));
+        assert_eq!(outcome.trace.shadows.len(), 1);
+        let observation = &outcome.trace.shadows[0];
+        if guard {
+            assert_eq!(observation.status, sapho_runtime::NodeStatus::Completed);
+            assert_eq!(
+                observation.value.as_ref().unwrap().value,
+                Value::Probability(Probability::new(0.8).unwrap())
+            );
+            assert!(observation.error.is_none());
+        } else {
+            assert_eq!(observation.status, sapho_runtime::NodeStatus::Skipped);
+            assert!(observation.value.is_none());
+        }
+    }
+}
+/// Trace: FR-057-AC-1, FR-057-AC-2, FR-057-AC-3, FR-057-AC-5,
+/// FR-058-AC-1, FR-058-AC-2, FR-058-AC-3, FR-058-AC-5,
+/// FR-060-AC-1, FR-060-AC-2, FR-060-AC-3, FR-060-AC-5, FR-027-AC-7,
+/// IT-008-SC-01, IT-008-SC-02, IT-008-SC-03, IT-008-SC-04, IT-008-SC-05, IT-008-SC-08
+#[tokio::test]
+async fn shadow_is_observational_recordable_and_bounded_after_decision() {
+    let spec = shadow_graph();
+    let inspection = inspect(&spec, &PrimitiveRegistry::default()).unwrap();
+    assert_eq!(
+        inspection.signature.outputs["result"],
+        ValueType::Probability
+    );
+    assert_eq!(inspection.shadows[0].backend.as_str(), "challenger");
+    assert_eq!(inspection.shadows[0].observations[0].output, "result");
+    assert!(
+        inspection.groups[0]
+            .shadow_stages
+            .iter()
+            .flatten()
+            .any(|id| id.as_str() == "shadow")
+    );
+    assert_eq!(inspection.backends.len(), 2);
+    let champion = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        fail_at: None,
+    });
+    let challenger = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        fail_at: None,
+    });
+    let (registry, recorders) = recording_bindings(
+        &inspection.backends,
+        &shadow_backends(champion.clone(), challenger.clone()),
+        1_000_000,
+    )
+    .unwrap();
+    let runner = Runner::new(&spec, &PrimitiveRegistry::default(), registry).unwrap();
+    let inputs = text_input("one case");
+    let full = runner.run(&inputs, RunLimits::default(), None).await;
+    let base_run = Runner::new(
+        &multilayer(),
+        &PrimitiveRegistry::default(),
+        backend(Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        })),
+    )
+    .unwrap()
+    .run(&inputs, RunLimits::default(), None)
+    .await;
+    assert_eq!(
+        serde_json::to_vec(&full.outputs).unwrap(),
+        serde_json::to_vec(&base_run.outputs).unwrap()
+    );
+    assert_eq!(full.exit, base_run.exit);
+    assert_eq!(full.exit, ExitStatus::Completed);
+    assert_eq!(full.trace.shadows.len(), 1);
+    assert_eq!(
+        full.trace.shadows[0].status,
+        sapho_runtime::NodeStatus::Completed
+    );
+    assert_eq!(
+        full.trace.shadows[0].value.as_ref().unwrap().value,
+        Value::Probability(Probability::new(0.8).unwrap())
+    );
+    assert_eq!(champion.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 1);
+    let recording = Recording {
+        exchanges: recorders
+            .iter()
+            .flat_map(|r| r.snapshot().unwrap().exchanges)
+            .collect(),
+    };
+    assert_eq!(recording.exchanges.len(), 3);
+    let root = tempfile::tempdir().unwrap();
+    let full_graph = graph_file(root.path(), "shadow.json", &spec);
+    let base_graph = graph_file(root.path(), "base.json", &multilayer());
+    let recording_path = root.path().join("recording.json");
+    recording.write_new(&recording_path, 1_000_000).unwrap();
+    let data = Dataset {
+        id: SourceId::new("synthetic").unwrap(),
+        cases: vec![Case {
+            id: ItemId::new("case-1").unwrap(),
+            split: Split::HeldOut,
+            inputs: inputs.clone(),
+            labels: BTreeMap::from([("result".into(), true)]),
+            label_provenance: LabelProvenance {
+                kind: LabelKind::Model,
+                source: "challenger_model".into(),
+                reference: "fixture".into(),
+            },
+        }],
+    };
+    let data_path = root.path().join("dataset.json");
+    std::fs::write(&data_path, serde_json::to_vec(&data).unwrap()).unwrap();
+    let ordinary = cli(
+        &[
+            "measure",
+            path(&base_graph),
+            "--dataset",
+            path(&data_path),
+            "--replay",
+            path(&recording_path),
+            "--split",
+            "held_out",
+        ],
+        None,
+    );
+    let compared = cli(
+        &[
+            "measure",
+            path(&full_graph),
+            "--dataset",
+            path(&data_path),
+            "--replay",
+            path(&recording_path),
+            "--split",
+            "held_out",
+            "--shadow",
+            "shadow",
+            "--shadow-output",
+            "result",
+            "--shadow-metric",
+            "brier",
+        ],
+        None,
+    );
+    assert_eq!(
+        ordinary.status.code(),
+        Some(0),
+        "{} {}",
+        String::from_utf8_lossy(&ordinary.stdout),
+        String::from_utf8_lossy(&ordinary.stderr)
+    );
+    assert_eq!(
+        compared.status.code(),
+        Some(0),
+        "{} {}",
+        String::from_utf8_lossy(&compared.stdout),
+        String::from_utf8_lossy(&compared.stderr)
+    );
+    let ordinary_json = result(&ordinary);
+    let compared_json = result(&compared);
+    assert_eq!(ordinary_json["measurement"], compared_json["measurement"]);
+    assert_eq!(
+        compared_json["measurement"]["outputs"]["result"]["scored"],
+        1
+    );
+    assert_eq!(
+        compared_json["comparison"]["kinds"][0]["challenger"]["self_source"][0],
+        "case-1"
+    );
+    assert_eq!(
+        compared_json["comparison"]["kinds"][0]["beat_champion"],
+        serde_json::Value::Null
+    );
+    let mut human_data = data.clone();
+    human_data.cases[0].label_provenance.kind = LabelKind::Human;
+    human_data.cases[0].label_provenance.source = "reviewer".into();
+    let human_path = root.path().join("human.json");
+    std::fs::write(&human_path, serde_json::to_vec(&human_data).unwrap()).unwrap();
+    let scored = cli(
+        &[
+            "measure",
+            path(&full_graph),
+            "--dataset",
+            path(&human_path),
+            "--replay",
+            path(&recording_path),
+            "--split",
+            "held_out",
+            "--shadow",
+            "shadow",
+            "--shadow-output",
+            "result",
+            "--shadow-metric",
+            "brier",
+            "--shadow-margin",
+            "0.1",
+        ],
+        None,
+    );
+    assert_eq!(scored.status.code(), Some(0));
+    let scored_json = result(&scored);
+    assert!(
+        (scored_json["comparison"]["kinds"][0]["champion"]["brier"]
+            .as_f64()
+            .unwrap()
+            - 0.04)
+            .abs()
+            < 1e-12
+    );
+    assert!(
+        (scored_json["comparison"]["kinds"][0]["challenger"]["brier"]
+            .as_f64()
+            .unwrap()
+            - 0.04)
+            .abs()
+            < 1e-12
+    );
+    assert_eq!(scored_json["comparison"]["margin"], 0.1);
+    assert_eq!(
+        compared_json["comparison"]["promotion_status"],
+        "held_out_evaluation"
+    );
+    let mut development_data = data.clone();
+    development_data.cases[0].split = Split::Development;
+    let development_path = root.path().join("development.json");
+    std::fs::write(
+        &development_path,
+        serde_json::to_vec(&development_data).unwrap(),
+    )
+    .unwrap();
+    let development = cli(
+        &[
+            "measure",
+            path(&full_graph),
+            "--dataset",
+            path(&development_path),
+            "--replay",
+            path(&recording_path),
+            "--split",
+            "development",
+            "--shadow",
+            "shadow",
+            "--shadow-output",
+            "result",
+            "--shadow-metric",
+            "brier",
+            "--shadow-margin",
+            "0.1",
+        ],
+        None,
+    );
+    assert_eq!(development.status.code(), Some(0));
+    let development_json = result(&development);
+    assert_eq!(
+        development_json["comparison"]["promotion_status"],
+        "not_promotable"
+    );
+    assert_eq!(development_json["comparison"]["margin"], 0.1);
+    let replay = Runner::new(
+        &spec,
+        &PrimitiveRegistry::default(),
+        replay_bindings(&recording, None, 1_000_000).unwrap(),
+    )
+    .unwrap();
+    let offline = replay.run(&inputs, RunLimits::default(), None).await;
+    assert_eq!(offline, full);
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 1);
+    let mut missing = recording.clone();
+    missing
+        .exchanges
+        .retain(|exchange| exchange.request.backend.as_str() != "challenger");
+    let missing_metadata = Bindings::from([(
+        BackendId::new("challenger").unwrap(),
+        BindingConfig {
+            provider: Provider::Jev,
+            model: "challenger_model".into(),
+            expected_model: Some("challenger_model".into()),
+            distribution_policy: DistributionPolicy::Strict {},
+            ollama: None,
+        },
+    )]);
+    let replay_miss = Runner::new(
+        &spec,
+        &PrimitiveRegistry::default(),
+        replay_bindings(&missing, Some(&missing_metadata), 1_000_000).unwrap(),
+    )
+    .unwrap()
+    .run(&inputs, RunLimits::default(), None)
+    .await;
+    assert_eq!(replay_miss.outputs, full.outputs);
+    assert_eq!(replay_miss.exit, full.exit);
+    assert_eq!(
+        replay_miss.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::ReplayMiss
+    );
+    let mut limits = RunLimits {
+        model_requests: 2,
+        ..RunLimits::default()
+    };
+    let limited = runner.run(&inputs, limits.clone(), None).await;
+    assert_eq!(limited.outputs, full.outputs);
+    assert_eq!(limited.exit, full.exit);
+    assert_eq!(
+        limited.trace.shadows[0].status,
+        sapho_runtime::NodeStatus::Skipped
+    );
+    assert_eq!(
+        limited.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::LimitExceeded
+    );
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 1);
+    limits.model_requests = 3;
+    let allowed = runner.run(&inputs, limits, None).await;
+    assert_eq!(
+        allowed.trace.shadows[0].status,
+        sapho_runtime::NodeStatus::Completed
+    );
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 2);
+    let refusing = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        fail_at: Some(0),
+    });
+    let (failed_bindings, failure_recorders) = recording_bindings(
+        &inspection.backends,
+        &shadow_backends(champion, refusing),
+        1_000_000,
+    )
+    .unwrap();
+    let failure = Runner::new(&spec, &PrimitiveRegistry::default(), failed_bindings)
+        .unwrap()
+        .run(&inputs, RunLimits::default(), None)
+        .await;
+    assert_eq!(failure.outputs, full.outputs);
+    assert_eq!(failure.exit, full.exit);
+    assert_eq!(
+        failure.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::BackendFailed
+    );
+    assert_eq!(
+        failure_recorders
+            .iter()
+            .flat_map(|r| r.snapshot().unwrap().exchanges)
+            .count(),
+        2
+    );
+    let mut contaminated = spec.clone();
+    let shadow = contaminated
+        .nodes
+        .iter_mut()
+        .find(|n| n.id.as_str() == "shadow")
+        .unwrap();
+    shadow.inputs.insert(
+        "state".into(),
+        Binding::Node {
+            node: NodeId::new("context2").unwrap(),
+            port: "result".into(),
+            path: vec![],
+        },
+    );
+    let error = inspect(&contaminated, &PrimitiveRegistry::default()).unwrap_err();
+    assert!(error.to_string().contains("Shadow input depends on an ask"));
+    let CliError::Engine(error) = error else {
+        panic!("typed compiler refusal")
+    };
+    assert_eq!(
+        error.context.get("shadow").map(String::as_str),
+        Some("shadow")
+    );
+    assert_eq!(
+        error.context.get("producer").map(String::as_str),
+        Some("ask")
+    );
+    let mut direct = spec;
+    direct
+        .nodes
+        .iter_mut()
+        .find(|n| n.id.as_str() == "shadow")
+        .unwrap()
+        .inputs
+        .insert(
+            "state".into(),
+            Binding::Node {
+                node: NodeId::new("ask2").unwrap(),
+                port: "answers".into(),
+                path: vec![],
+            },
+        );
+    let error = inspect(&direct, &PrimitiveRegistry::default()).unwrap_err();
+    let CliError::Engine(error) = error else {
+        panic!("typed compiler refusal")
+    };
+    assert_eq!(error.code, ErrorCode::TypeMismatch);
+    assert_eq!(
+        error.context.get("shadow").map(String::as_str),
+        Some("shadow")
+    );
+    assert_eq!(
+        error.context.get("producer").map(String::as_str),
+        Some("ask2")
+    );
+}
+struct FailingQuestions(Arc<AtomicUsize>);
+impl Primitive for FailingQuestions {
+    fn signature(&self) -> Signature {
+        Signature {
+            inputs: BTreeMap::new(),
+            outputs: BTreeMap::from([("result".into(), ValueType::Questions)]),
+        }
+    }
+    fn execute(
+        &self,
+        _: &PrimitiveContext,
+        _: &Inputs,
+        _: &BTreeMap<String, Value>,
+    ) -> Result<Inputs> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Err(SaphoError::new(
+            ErrorCode::CodeFailed,
+            "synthetic shadow-only producer failure",
+        ))
+    }
+}
+struct LargeQuestions;
+impl Primitive for LargeQuestions {
+    fn signature(&self) -> Signature {
+        Signature {
+            inputs: BTreeMap::new(),
+            outputs: BTreeMap::from([("result".into(), ValueType::Questions)]),
+        }
+    }
+    fn execute(
+        &self,
+        _: &PrimitiveContext,
+        _: &Inputs,
+        _: &BTreeMap<String, Value>,
+    ) -> Result<Inputs> {
+        Ok(Inputs::from([(
+            "result".into(),
+            Datum::new(
+                "large",
+                Value::Questions(vec![NamedQuestion {
+                    id: "q".into(),
+                    question: Question::Boolean {
+                        instructions: "q".repeat(4096),
+                        yes: "yes".into(),
+                        no: "no".into(),
+                    },
+                }]),
+            )
+            .unwrap(),
+        )]))
+    }
+}
+struct SlowQuestions;
+impl Primitive for SlowQuestions {
+    fn signature(&self) -> Signature {
+        Signature {
+            inputs: BTreeMap::new(),
+            outputs: BTreeMap::from([("result".into(), ValueType::Questions)]),
+        }
+    }
+    fn execute(
+        &self,
+        _: &PrimitiveContext,
+        _: &Inputs,
+        _: &BTreeMap<String, Value>,
+    ) -> Result<Inputs> {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        Err(SaphoError::new(ErrorCode::CodeFailed, "finished too late"))
+    }
+}
+/// Trace: FR-057-AC-6, FR-058-AC-6, IT-008-SC-07
+#[tokio::test]
+async fn shadow_only_producer_runs_after_decision_and_cannot_abort_it() {
+    let mut spec = shadow_graph();
+    let shadow = spec
+        .nodes
+        .iter_mut()
+        .find(|n| n.id.as_str() == "shadow")
+        .unwrap();
+    shadow.inputs.insert(
+        "questions".into(),
+        Binding::Node {
+            node: NodeId::new("shadow_questions").unwrap(),
+            port: "result".into(),
+            path: vec![],
+        },
+    );
+    spec.nodes.push(NodeSpec {
+        id: NodeId::new("shadow_questions").unwrap(),
+        operation: Operation::Code {
+            primitive: PrimitiveId::new("fixture.questions").unwrap(),
+            params: BTreeMap::new(),
+        },
+        inputs: BTreeMap::new(),
+        guard: None,
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut primitives = PrimitiveRegistry::default();
+    primitives
+        .register(
+            PrimitiveId::new("fixture.questions").unwrap(),
+            Arc::new(FailingQuestions(calls.clone())),
+        )
+        .unwrap();
+    let inspection = inspect(&spec, &primitives).unwrap();
+    assert!(
+        inspection.groups[0]
+            .shadow_stages
+            .iter()
+            .flatten()
+            .any(|id| id.as_str() == "shadow_questions")
+    );
+    assert!(
+        inspection.groups[0]
+            .stages
+            .iter()
+            .flatten()
+            .any(|id| id.as_str() == "context")
+    );
+    assert!(
+        !inspection.groups[0]
+            .shadow_stages
+            .iter()
+            .flatten()
+            .any(|id| id.as_str() == "context")
+    );
+    let champion = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        fail_at: None,
+    });
+    let challenger = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        fail_at: None,
+    });
+    let runner = Runner::new(
+        &spec,
+        &primitives,
+        shadow_backends(champion.clone(), challenger.clone()),
+    )
+    .unwrap();
+    let input = text_input("native case");
+    let failed = runner.run(&input, RunLimits::default(), None).await;
+    assert_eq!(failed.exit, ExitStatus::Completed);
+    assert_eq!(
+        failed.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::CodeFailed
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        failed
+            .trace
+            .nodes
+            .iter()
+            .filter(|node| node.path.last().unwrap() == "context")
+            .count(),
+        1
+    );
+    let decision_nodes = inspection.groups[0].stages.iter().map(Vec::len).sum();
+    let limits = RunLimits {
+        node_instances: decision_nodes,
+        ..RunLimits::default()
+    };
+    let limited = runner.run(&input, limits, None).await;
+    assert_eq!(limited.outputs, failed.outputs);
+    assert_eq!(limited.exit, failed.exit);
+    assert_eq!(
+        limited.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::LimitExceeded
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(champion.calls.load(Ordering::SeqCst), 4);
+}
+/// Trace: FR-058-AC-4, FR-058-AC-6, IT-008-SC-07
+#[tokio::test]
+async fn shadow_only_data_limit_preserves_completed_decision() {
+    let mut spec = shadow_graph();
+    spec.nodes
+        .iter_mut()
+        .find(|n| n.id.as_str() == "shadow")
+        .unwrap()
+        .inputs
+        .insert(
+            "questions".into(),
+            Binding::Node {
+                node: NodeId::new("shadow_questions").unwrap(),
+                port: "result".into(),
+                path: vec![],
+            },
+        );
+    spec.nodes.push(NodeSpec {
+        id: NodeId::new("shadow_questions").unwrap(),
+        operation: Operation::Code {
+            primitive: PrimitiveId::new("fixture.questions").unwrap(),
+            params: BTreeMap::new(),
+        },
+        inputs: BTreeMap::new(),
+        guard: None,
+    });
+    let champion = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        fail_at: None,
+    });
+    let challenger = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        fail_at: None,
+    });
+    let bindings = shadow_backends(champion, challenger.clone());
+    let mut primitives = PrimitiveRegistry::default();
+    primitives
+        .register(
+            PrimitiveId::new("fixture.questions").unwrap(),
+            Arc::new(LargeQuestions),
+        )
+        .unwrap();
+    let runner = Runner::new(&spec, &primitives, bindings.clone()).unwrap();
+    let input = text_input("budget");
+    let baseline = Runner::new(
+        &multilayer(),
+        &PrimitiveRegistry::default(),
+        bindings.clone(),
+    )
+    .unwrap();
+    let mut low = 1usize;
+    let mut high = 100_000usize;
+    while low < high {
+        let mid = (low + high) / 2;
+        let limits = RunLimits {
+            data_bytes: mid,
+            ..RunLimits::default()
+        };
+        if baseline.run(&input, limits, None).await.exit == ExitStatus::Completed {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+    let limits = RunLimits {
+        data_bytes: low,
+        ..RunLimits::default()
+    };
+    assert_eq!(
+        baseline.run(&input, limits.clone(), None).await.exit,
+        ExitStatus::Completed
+    );
+    let limited = runner.run(&input, limits, None).await;
+    assert_eq!(limited.exit, ExitStatus::Completed);
+    assert_eq!(
+        limited.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::LimitExceeded
+    );
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 0);
+}
+/// Real elapsed-time behavior runs in the dedicated timing lane to keep the
+/// default suite independent of host scheduling before the decision phase.
+/// Trace: FR-058-AC-4, FR-058-AC-6, IT-008-SC-07
+#[tokio::test]
+#[ignore = "dedicated wall-clock timing lane"]
+async fn shadow_only_deadline_preserves_completed_decision() {
+    let mut spec = shadow_graph();
+    spec.nodes
+        .iter_mut()
+        .find(|n| n.id.as_str() == "shadow")
+        .unwrap()
+        .inputs
+        .insert(
+            "questions".into(),
+            Binding::Node {
+                node: NodeId::new("shadow_questions").unwrap(),
+                port: "result".into(),
+                path: vec![],
+            },
+        );
+    spec.nodes.push(NodeSpec {
+        id: NodeId::new("shadow_questions").unwrap(),
+        operation: Operation::Code {
+            primitive: PrimitiveId::new("fixture.questions").unwrap(),
+            params: BTreeMap::new(),
+        },
+        inputs: BTreeMap::new(),
+        guard: None,
+    });
+    let challenger = Arc::new(Scripted {
+        calls: AtomicUsize::new(0),
+        fail_at: None,
+    });
+    let bindings = shadow_backends(
+        Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        }),
+        challenger.clone(),
+    );
+    let input = text_input("budget");
+    let mut slow_primitives = PrimitiveRegistry::default();
+    slow_primitives
+        .register(
+            PrimitiveId::new("fixture.questions").unwrap(),
+            Arc::new(SlowQuestions),
+        )
+        .unwrap();
+    let slow = Runner::new(&spec, &slow_primitives, bindings).unwrap();
+    let limits = RunLimits {
+        duration: std::time::Duration::from_millis(500),
+        ..RunLimits::default()
+    };
+    let timeout = slow.run(&input, limits, None).await;
+    assert_eq!(timeout.exit, ExitStatus::Completed);
+    assert_eq!(
+        timeout.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::DeadlineExceeded
+    );
+    assert_eq!(challenger.calls.load(Ordering::SeqCst), 0);
+}
+/// Trace: FR-058-AC-2, FR-058-AC-4, FR-060-AC-2, IT-008-SC-04
+#[tokio::test]
+async fn malformed_shadow_answer_keeps_decision_and_raw_evidence() {
+    let spec = shadow_graph();
+    let input = text_input("timeout case");
+    let champion = || {
+        Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        })
+    };
+    let baseline = Runner::new(
+        &multilayer(),
+        &PrimitiveRegistry::default(),
+        backend(champion()),
+    )
+    .unwrap()
+    .run(&input, RunLimits::default(), None)
+    .await;
+    let malformed = Runner::new(
+        &spec,
+        &PrimitiveRegistry::default(),
+        shadow_backends(champion(), Arc::new(MalformedShadow)),
+    )
+    .unwrap()
+    .run(&input, RunLimits::default(), None)
+    .await;
+    assert_eq!(malformed.exit, baseline.exit);
+    assert_eq!(malformed.outputs, baseline.outputs);
+    assert_eq!(
+        malformed.trace.shadows[0].status,
+        sapho_runtime::NodeStatus::Failed
+    );
+    assert!(
+        malformed.trace.shadows[0]
+            .model
+            .as_ref()
+            .unwrap()
+            .response
+            .as_ref()
+            .unwrap()
+            .raw
+            .is_some()
+    );
+}
+/// Real backend timeout runs separately from the deterministic default suite.
+/// Trace: FR-058-AC-2, FR-058-AC-4, IT-008-SC-04
+#[tokio::test]
+#[ignore = "dedicated wall-clock timing lane"]
+async fn shadow_backend_deadline_keeps_decision() {
+    let spec = shadow_graph();
+    let input = text_input("timeout case");
+    let champion = || {
+        Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        })
+    };
+    let baseline = Runner::new(
+        &multilayer(),
+        &PrimitiveRegistry::default(),
+        backend(champion()),
+    )
+    .unwrap()
+    .run(&input, RunLimits::default(), None)
+    .await;
+    let slow = Runner::new(
+        &spec,
+        &PrimitiveRegistry::default(),
+        shadow_backends(champion(), Arc::new(SlowShadow)),
+    )
+    .unwrap();
+    let timeout = slow
+        .run(
+            &input,
+            RunLimits {
+                duration: std::time::Duration::from_millis(100),
+                ..RunLimits::default()
+            },
+            None,
+        )
+        .await;
+    assert_eq!(timeout.exit, baseline.exit);
+    assert_eq!(timeout.outputs, baseline.outputs);
+    assert_eq!(
+        timeout.trace.shadows[0].status,
+        sapho_runtime::NodeStatus::Failed
+    );
+    assert_eq!(
+        timeout.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::DeadlineExceeded
+    );
+}
+/// Trace: FR-057-AC-2, FR-057-AC-3, FR-057-AC-4, FR-057-AC-5, IT-008-SC-01, IT-008-SC-06
+#[tokio::test]
+async fn shadow_compile_refusals_and_binding_swap_are_generic() {
+    let spec = shadow_graph();
+    let primitives = PrimitiveRegistry::default();
+    let mut invalid = spec.clone();
+    invalid.outputs.insert(
+        "leak".into(),
+        Binding::Node {
+            node: NodeId::new("shadow").unwrap(),
+            port: "answers".into(),
+            path: vec![],
+        },
+    );
+    assert!(
+        inspect(&invalid, &primitives)
+            .unwrap_err()
+            .to_string()
+            .contains("Decision output depends on shadow ask")
+    );
+    let mut invalid = spec.clone();
+    invalid
+        .nodes
+        .iter_mut()
+        .find(|n| n.id.as_str() == "result")
+        .unwrap()
+        .inputs
+        .insert(
+            "answers".into(),
+            Binding::Node {
+                node: NodeId::new("shadow").unwrap(),
+                port: "answers".into(),
+                path: vec![],
+            },
+        );
+    assert!(
+        inspect(&invalid, &primitives)
+            .unwrap_err()
+            .to_string()
+            .contains("Decision depends on shadow ask")
+    );
+    let mut invalid = spec.clone();
+    if let Operation::ShadowAsk { observations, .. } =
+        &mut invalid.nodes.last_mut().unwrap().operation
+    {
+        observations[0].output = "absent".into();
+    }
+    assert!(inspect(&invalid, &primitives).is_err());
+    let mut invalid = spec.clone();
+    if let Operation::ShadowAsk { observations, .. } =
+        &mut invalid.nodes.last_mut().unwrap().operation
+    {
+        observations.push(observations[0].clone());
+    }
+    assert!(inspect(&invalid, &primitives).is_err());
+    let mut invalid = spec.clone();
+    if let Operation::ShadowAsk { observations, .. } =
+        &mut invalid.nodes.last_mut().unwrap().operation
+    {
+        observations[0].projection = ShadowProjection::Boolean {
+            threshold: Probability::new(0.5).unwrap(),
+        };
+    }
+    assert!(inspect(&invalid, &primitives).is_err());
+    let mut invalid_wire = serde_json::to_value(&invalid).unwrap();
+    invalid_wire["nodes"][7]["operation"]["observations"][0]["projection"]["threshold"] =
+        serde_json::json!(1.1);
+    assert!(serde_json::from_value::<GraphSpec>(invalid_wire).is_err());
+    let mut shared = spec.clone();
+    shared.outputs.insert(
+        "shared_context".into(),
+        Binding::Node {
+            node: NodeId::new("context").unwrap(),
+            port: "result".into(),
+            path: vec![],
+        },
+    );
+    let shared_inspection = inspect(&shared, &primitives).unwrap();
+    assert!(
+        shared_inspection.groups[0]
+            .stages
+            .iter()
+            .flatten()
+            .any(|id| id.as_str() == "context")
+    );
+    let mut missing_question = spec.clone();
+    if let Operation::ShadowAsk { observations, .. } =
+        &mut missing_question.nodes.last_mut().unwrap().operation
+    {
+        observations[0].question = "not_in_request".into();
+    }
+    let models = shadow_backends(
+        Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        }),
+        Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        }),
+    );
+    let missing = Runner::new(&missing_question, &primitives, models)
+        .unwrap()
+        .run(&text_input("case"), RunLimits::default(), None)
+        .await;
+    assert_eq!(missing.exit, ExitStatus::Completed);
+    assert_eq!(
+        missing.trace.shadows[0].error.as_ref().unwrap().code,
+        ErrorCode::MissingAnswer
+    );
+    let mut swapped = spec;
+    for node in &mut swapped.nodes {
+        match &mut node.operation {
+            Operation::Ask { backend } => *backend = BackendId::new("challenger").unwrap(),
+            Operation::ShadowAsk { backend, .. } => *backend = BackendId::new("judge").unwrap(),
+            _ => {}
+        }
+    }
+    let models = shadow_backends(
+        Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        }),
+        Arc::new(Scripted {
+            calls: AtomicUsize::new(0),
+            fail_at: None,
+        }),
+    );
+    let swapped_report = Runner::new(&swapped, &primitives, models)
+        .unwrap()
+        .run(&text_input("case"), RunLimits::default(), None)
+        .await;
+    assert_eq!(swapped_report.exit, ExitStatus::Completed);
+    assert_eq!(
+        swapped_report.trace.shadows[0].status,
+        sapho_runtime::NodeStatus::Completed
+    );
 }
 fn text_input(text: &str) -> Inputs {
     Inputs::from([(

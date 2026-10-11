@@ -60,6 +60,267 @@ fn outcomes(values: &[Value]) -> BTreeMap<ItemId, CaseOutcome> {
         })
         .collect()
 }
+/// Trace: FR-059-AC-1, FR-059-AC-2, FR-059-AC-3, FR-059-AC-4,
+/// FR-059-AC-5, FR-059-AC-6, IT-008-SC-05, IT-008-SC-08
+#[test]
+fn shadow_comparison_uses_role_specific_case_sets_and_strict_margins() {
+    let mut data = dataset(&[true, false, true, false]);
+    for case in &mut data.cases {
+        case.split = Split::HeldOut;
+    }
+    data.cases[3].label_provenance = provenance(LabelKind::Model, "shadow_model");
+    let schemas = BTreeMap::from([("result".into(), ValueType::Boolean)]);
+    let champion = outcomes(&[
+        Value::Boolean(true),
+        Value::Boolean(false),
+        Value::Boolean(false),
+        Value::Boolean(false),
+    ]);
+    let mut challenger = outcomes(&[
+        Value::Boolean(true),
+        Value::Boolean(false),
+        Value::Boolean(true),
+        Value::Boolean(false),
+    ]);
+    if let CaseOutcome::Completed { models, .. } = challenger.get_mut(&data.cases[3].id).unwrap() {
+        models.push(ModelIdentity {
+            name: "shadow_model".into(),
+        });
+    }
+    let ordinary = measure(&data, Split::HeldOut, &schemas, &champion, 10).unwrap();
+    assert_eq!(ordinary.outputs["result"].scored, 4);
+    let request = ShadowComparisonRequest {
+        output: "result".into(),
+        shadow: "candidate".into(),
+        metric: ShadowMetric::Agreement,
+        min_scored: 1,
+        margin: 0.0,
+    };
+    let compared = compare_shadow(
+        &data,
+        Split::HeldOut,
+        &schemas,
+        &champion,
+        &challenger,
+        &request,
+        10,
+    )
+    .unwrap();
+    assert_eq!(compared.kinds.len(), 2);
+    let human = compared
+        .kinds
+        .iter()
+        .find(|k| k.label_kind == LabelKind::Human)
+        .unwrap();
+    assert_eq!(human.champion.scored, 3);
+    assert_eq!(human.challenger.scored, 3);
+    assert_eq!(human.beat_champion, Some(true));
+    let model = compared
+        .kinds
+        .iter()
+        .find(|k| k.label_kind == LabelKind::Model)
+        .unwrap();
+    assert_eq!(model.champion.scored, 1);
+    assert_eq!(model.challenger.self_source, vec![data.cases[3].id.clone()]);
+    assert_eq!(model.beat_champion, None);
+    assert_eq!(
+        measure(&data, Split::HeldOut, &schemas, &champion, 10).unwrap(),
+        ordinary
+    );
+    let mut tie = challenger.clone();
+    tie.insert(
+        data.cases[2].id.clone(),
+        champion[&data.cases[2].id].clone(),
+    );
+    let tie_report = compare_shadow(
+        &data,
+        Split::HeldOut,
+        &schemas,
+        &champion,
+        &tie,
+        &request,
+        10,
+    )
+    .unwrap();
+    assert_eq!(
+        tie_report
+            .kinds
+            .iter()
+            .find(|k| k.label_kind == LabelKind::Human)
+            .unwrap()
+            .beat_champion,
+        Some(false)
+    );
+    let margin = ShadowComparisonRequest {
+        margin: 1.0 / 3.0,
+        ..request.clone()
+    };
+    assert_eq!(
+        compare_shadow(
+            &data,
+            Split::HeldOut,
+            &schemas,
+            &champion,
+            &challenger,
+            &margin,
+            10
+        )
+        .unwrap()
+        .kinds[0]
+            .beat_champion,
+        Some(true)
+    );
+    let too_high = ShadowComparisonRequest {
+        margin: 0.34,
+        ..request.clone()
+    };
+    assert_eq!(
+        compare_shadow(
+            &data,
+            Split::HeldOut,
+            &schemas,
+            &champion,
+            &challenger,
+            &too_high,
+            10
+        )
+        .unwrap()
+        .kinds[0]
+            .beat_champion,
+        Some(false)
+    );
+    let ece = ShadowComparisonRequest {
+        metric: ShadowMetric::Ece,
+        ..request
+    };
+    assert_eq!(
+        compare_shadow(
+            &data,
+            Split::HeldOut,
+            &schemas,
+            &champion,
+            &challenger,
+            &ece,
+            10
+        )
+        .unwrap()
+        .kinds[0]
+            .beat_champion,
+        None
+    );
+    // The existing Dataset schema and validation contract remain usable unchanged.
+    let old_json = serde_json::to_vec(&data).unwrap();
+    let decoded: Dataset = serde_json::from_slice(&old_json).unwrap();
+    decoded.validate(10).unwrap();
+    let mut development = data.clone();
+    for case in &mut development.cases {
+        case.split = Split::Development;
+    }
+    let development_report = compare_shadow(
+        &development,
+        Split::Development,
+        &schemas,
+        &champion,
+        &challenger,
+        &ShadowComparisonRequest {
+            output: "result".into(),
+            shadow: "candidate".into(),
+            metric: ShadowMetric::Agreement,
+            min_scored: 1,
+            margin: 0.0,
+        },
+        10,
+    )
+    .unwrap();
+    assert_eq!(
+        development_report.promotion_status,
+        ShadowPromotionStatus::NotPromotable
+    );
+}
+/// Trace: FR-059-AC-1, FR-059-AC-2, FR-059-AC-3, IT-008-SC-05
+#[test]
+fn shadow_probability_brier_and_missing_coverage_have_explicit_absence() {
+    let mut data = dataset(&[true, false]);
+    for case in &mut data.cases {
+        case.split = Split::HeldOut;
+    }
+    let schemas = BTreeMap::from([("result".into(), ValueType::Probability)]);
+    let champion = outcomes(&[
+        Value::Probability(Probability::new(0.6).unwrap()),
+        Value::Probability(Probability::new(0.4).unwrap()),
+    ]);
+    let challenger = outcomes(&[
+        Value::Probability(Probability::new(0.9).unwrap()),
+        Value::Probability(Probability::new(0.1).unwrap()),
+    ]);
+    let request = ShadowComparisonRequest {
+        output: "result".into(),
+        shadow: "candidate".into(),
+        metric: ShadowMetric::Brier,
+        min_scored: 2,
+        margin: 0.1,
+    };
+    let report = compare_shadow(
+        &data,
+        Split::HeldOut,
+        &schemas,
+        &champion,
+        &challenger,
+        &request,
+        10,
+    )
+    .unwrap();
+    let kind = &report.kinds[0];
+    assert_eq!(kind.champion.scored_cases, kind.challenger.scored_cases);
+    assert_eq!(kind.matched_cases.len(), 2);
+    assert!((kind.champion.brier.unwrap() - 0.16).abs() < 1e-12);
+    assert!((kind.challenger.brier.unwrap() - 0.01).abs() < 1e-12);
+    assert_eq!(kind.beat_champion, Some(true));
+    assert_eq!(kind.champion.ece, None);
+    assert_eq!(
+        kind.champion.ece_reason.as_deref(),
+        Some("shared_sapho_21_ece_unavailable")
+    );
+    let high_floor = ShadowComparisonRequest {
+        min_scored: 3,
+        ..request.clone()
+    };
+    assert_eq!(
+        compare_shadow(
+            &data,
+            Split::HeldOut,
+            &schemas,
+            &champion,
+            &challenger,
+            &high_floor,
+            10
+        )
+        .unwrap()
+        .kinds[0]
+            .beat_champion,
+        None
+    );
+    let mut incomplete = challenger;
+    incomplete.insert(
+        data.cases[1].id.clone(),
+        CaseOutcome::Failed {
+            error: SaphoError::new(ErrorCode::ReplayMiss, "missing shadow"),
+            models: Vec::new(),
+        },
+    );
+    let report = compare_shadow(
+        &data,
+        Split::HeldOut,
+        &schemas,
+        &champion,
+        &incomplete,
+        &request,
+        10,
+    )
+    .unwrap();
+    assert_eq!(report.kinds[0].challenger.failed, 1);
+    assert_eq!(report.kinds[0].beat_champion, None);
+}
 /// Trace: FR-036-AC-1, FR-036-AC-3, TC-036
 #[test]
 fn boolean_counts_have_exact_denominators_and_case_evidence() {
