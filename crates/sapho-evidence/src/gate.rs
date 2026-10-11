@@ -331,6 +331,7 @@ pub struct GateMeasurement {
     measurement: Measurement,
     dataset_content_digest: String,
     graph_semantic_identity: String,
+    output_schema: BTreeMap<String, ValueType>,
 }
 impl GateMeasurement {
     /// Return the ordinary report without its internal gate provenance.
@@ -353,6 +354,7 @@ pub fn measure_for_gate(
         measurement,
         dataset_content_digest: digest,
         graph_semantic_identity: graph_identity.into(),
+        output_schema: schemas.clone(),
     })
 }
 fn prediction(value: &Value) -> Option<bool> {
@@ -386,11 +388,13 @@ pub fn evaluate_gate(
         || gate.graph_semantic_identity != graph_identity
         || primary.dataset_content_digest != expected_dataset_digest
         || primary.graph_semantic_identity != graph_identity
+        || primary.output_schema != *graph_outputs
         || primary.measurement.dataset != dataset.id
         || primary.measurement.split != Split::HeldOut
         || repetitions.iter().any(|r| {
             r.dataset_content_digest != expected_dataset_digest
                 || r.graph_semantic_identity != graph_identity
+                || r.output_schema != *graph_outputs
                 || r.measurement.dataset != dataset.id
                 || r.measurement.split != Split::HeldOut
         })
@@ -460,7 +464,7 @@ pub fn evaluate_gate(
                 correct += 1;
             }
             let mut all_same = true;
-            for run in repetitions {
+            for run in &repetitions {
                 let repeated = run
                     .predictions
                     .iter()
@@ -728,6 +732,41 @@ mod tests {
                 &schemas(),
                 &complete,
                 &[graph_mismatch, complete.clone()],
+                100,
+            )
+            .is_err()
+        );
+        let boolean_outcomes = (0..2)
+            .map(|index| {
+                (
+                    ItemId::new(format!("case-{index}")).unwrap(),
+                    CaseOutcome::Completed {
+                        outputs: Inputs::from([(
+                            "result".into(),
+                            Datum::new("answer", Value::Boolean(false)).unwrap(),
+                        )]),
+                        models: vec![],
+                    },
+                )
+            })
+            .collect();
+        let boolean_repeat = measure_for_gate(
+            &data,
+            Split::HeldOut,
+            "graph-v1:sha256:fixture",
+            &BTreeMap::from([("result".into(), ValueType::Boolean)]),
+            &boolean_outcomes,
+            100,
+        )
+        .unwrap();
+        assert!(
+            evaluate_gate(
+                &receipt,
+                &data,
+                "graph-v1:sha256:fixture",
+                &schemas(),
+                &complete,
+                &[boolean_repeat, complete.clone()],
                 100,
             )
             .is_err()
