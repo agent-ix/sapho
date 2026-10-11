@@ -31,6 +31,9 @@ Owning component: `sapho-cli`. See the [workspace boundaries](../../spec.md).
 - [FR-056](functional/FR-056.md): explicit ceilings for Datasets of about fifteen thousand cases
 - [FR-060: Invoke and report shadow comparisons](functional/FR-060.md)
 - [FR-064: Write a model roster from a measured split](functional/FR-064.md)
+- [FR-072](functional/FR-072.md): per-binding System One host service configuration
+- [FR-073](functional/FR-073.md): distinct generic service dispatch and replay compatibility
+- [IT-013](integration/IT-013.md): two-port capture, third-service configuration and offline replay
 
 ## References
 
