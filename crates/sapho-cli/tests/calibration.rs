@@ -71,6 +71,7 @@ fn fixtures() -> (Dataset, Recording) {
         exchanges.push(Exchange {
             request: ModelRequest {
                 backend: BackendId::new("fast_a").unwrap(),
+                sample_index: None,
                 model: "requested".into(),
                 expected_model: None,
                 distribution_policy: DistributionPolicy::Strict {},
@@ -353,6 +354,7 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
     second_ask.id = NodeId::new("second_ask").unwrap();
     second_ask.operation = Operation::Ask {
         backend: BackendId::new("fast_b").unwrap(),
+        samples: 1,
     };
     let mut second_probability = two_source
         .nodes
@@ -449,6 +451,7 @@ fn development_fit_replays_and_writes_identical_exclusive_literals() {
     unrelated_ask.id = NodeId::new("unrelated_ask").unwrap();
     unrelated_ask.operation = Operation::Ask {
         backend: BackendId::new("fast_b").unwrap(),
+        samples: 1,
     };
     let mut unrelated_probability = guarded
         .nodes

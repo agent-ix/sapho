@@ -113,6 +113,7 @@ fn graph(map: CalibrationMap) -> GraphSpec {
             "fast",
             Operation::Ask {
                 backend: BackendId::new("fast_a").unwrap(),
+                samples: 1,
             },
             BTreeMap::from([
                 ("state".into(), state.clone()),
@@ -172,6 +173,7 @@ fn graph(map: CalibrationMap) -> GraphSpec {
             "slow",
             Operation::Ask {
                 backend: BackendId::new("slow_b").unwrap(),
+                samples: 1,
             },
             BTreeMap::from([
                 ("state".into(), state),
@@ -368,6 +370,7 @@ async fn two_ask_raw_lineage_refuses_before_dependent_ask() {
     second.id = NodeId::new("second").unwrap();
     second.operation = Operation::Ask {
         backend: BackendId::new("fast_b").unwrap(),
+        samples: 1,
     };
     let mut other_raw = spec
         .nodes
@@ -480,6 +483,7 @@ async fn mapped_item_uses_only_its_own_ask_response() {
             &format!("ask_{suffix}"),
             Operation::Ask {
                 backend: BackendId::new(format!("fast_{suffix}")).unwrap(),
+                samples: 1,
             },
             BTreeMap::from([
                 (
@@ -597,6 +601,7 @@ async fn mapped_item_uses_only_its_own_ask_response() {
                 "slow",
                 Operation::Ask {
                     backend: BackendId::new("slow_b").unwrap(),
+                    samples: 1,
                 },
                 BTreeMap::from([
                     (
