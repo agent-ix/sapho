@@ -407,7 +407,7 @@ fn merge_bounds_and_exact_optional_types_compile_without_backend_name_assumption
 async fn router_accepts_host_chosen_backend_ids() {
     let mut graph = example("router");
     for node in &mut graph.nodes {
-        if let Operation::Ask { backend } = &mut node.operation {
+        if let Operation::Ask { backend, .. } = &mut node.operation {
             *backend = BackendId::new(match backend.as_str() {
                 "tier_a" => "local_alpha",
                 "tier_b" => "local_beta",
