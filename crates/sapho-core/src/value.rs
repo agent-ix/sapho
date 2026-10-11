@@ -377,7 +377,9 @@ impl Serialize for Plain<'_> {
             Value::Text(value) => value.serialize(serializer),
             Value::Probability(value) => value.get().serialize(serializer),
             Value::CalibratedProbability(value) => value.get().serialize(serializer),
-            Value::CalibrationMap(_) => Err(serde::ser::Error::custom("Calibration map is not model state"))?,
+            Value::CalibrationMap(_) => Err(serde::ser::Error::custom(
+                "Calibration map is not model state",
+            ))?,
             Value::Degree(value) => value.get().serialize(serializer),
             Value::Optional(None) => serializer.serialize_none(),
             Value::Optional(Some(value)) => Plain(value).serialize(serializer),

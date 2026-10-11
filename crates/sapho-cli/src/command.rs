@@ -793,7 +793,13 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         }
     }
     let destination = claim(options.output.as_deref())?;
-    let case_runs = match runtime.block_on(run_cases(&runner, &data, selected, &options.limits, selection)) {
+    let case_runs = match runtime.block_on(run_cases(
+        &runner,
+        &data,
+        selected,
+        &options.limits,
+        selection,
+    )) {
         Ok(value) => value,
         Err(error) => {
             if let Some(destination) = destination {
@@ -848,14 +854,23 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
             let request = ShadowComparisonRequest {
                 output: output.into(),
                 shadow: shadow.into(),
-                metric: args.shadow_metric.map(ShadowMetric::from).unwrap_or(ShadowMetric::Agreement),
+                metric: args
+                    .shadow_metric
+                    .map(ShadowMetric::from)
+                    .unwrap_or(ShadowMetric::Agreement),
                 min_scored: args.shadow_min_scored,
                 margin: args.shadow_margin,
             };
             compare_shadow(
-                &data, selected, &runner.inspection().signature.outputs,
-                &outcomes, &shadows, &request, options.max_cases,
-            ).map_err(CliError::from)
+                &data,
+                selected,
+                &runner.inspection().signature.outputs,
+                &outcomes,
+                &shadows,
+                &request,
+                options.max_cases,
+            )
+            .map_err(CliError::from)
         })
         .transpose()?;
     let exit = if measurement.complete() {
