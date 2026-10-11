@@ -12,7 +12,7 @@ Borrow inputs; avoid clones except for owned async work or retained evidence.
 Use BTreeMap for deterministic named maps and Vec for ordered model criteria.
 Validate public deserialized payloads and reject unknown fields. Public APIs and
 modules have Rust documentation. Core has no sibling dependency; graph depends
-on core; runtime depends on graph/core; Recording and Ollama depend only on core. Jev and CLM depend on core and the shared systemone request codec; systemone depends only on core among workspace crates. Evidence and selection depend only on core among workspace crates; evidence is pure and selection owns bounded host acquisition. CLI coordinates these crates, with synchronous acquisition/persistence outside async evaluation.
+on core; runtime depends on graph/core; Recording and Ollama depend only on core. Jev and CLM depend on core and the shared systemone request codec; systemone depends only on core among workspace crates. CLM and Decisions share sapho-http for bounded native transport and call admission, while their codecs remain provider-owned. Evidence and selection depend only on core among workspace crates; evidence is pure and selection owns bounded host acquisition. CLI coordinates these crates, with synchronous acquisition/persistence outside async evaluation.
 No native or filesystem blocking on Tokio workers. Runtime limits cover nested
 work. No lock is held across await. Tests use Trace: acceptance-criterion tags,
 assert observable values, and inject doubles only at native/backend seams.

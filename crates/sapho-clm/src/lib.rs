@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
-//! Host-configured CLM System One adapter; wire and HTTP belong here, policy to core/runtime.
+//! Host-configured CLM System One adapter; codec here, shared HTTP in sapho-http.
 //!
 //! # Prepare a host-managed provider
 //!
