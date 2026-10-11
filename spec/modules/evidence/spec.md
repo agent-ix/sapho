@@ -33,6 +33,9 @@ Owning component: `sapho-evidence` for dataset validation, scoring, ranking and 
 - [FR-068: Compare confidence distributions without labels](functional/FR-068.md)
 - [IT-011: Verify slice metrics and recording confidence drift](integration/IT-011.md)
 - [FR-083: Fit a deterministic development calibration map and score it](functional/FR-083.md)
+- [FR-069: Pre-register a held-out promotion gate](functional/FR-069.md)
+- [FR-070: Evaluate every pre-registered promotion bar](functional/FR-070.md)
+- [IT-012: Verify a bound held-out gate and process verdict](integration/IT-012.md)
 
 ## References
 
