@@ -485,6 +485,182 @@ fn generic_bindings_require_model_and_reject_provider_fields() {
     }
 }
 
+/// Trace: FR-072-AC-3, IT-013-SC-04
+#[cfg(feature = "clm")]
+#[test]
+fn graph_ask_refuses_provider_endpoint_and_credential_fields() {
+    let root = tempfile::tempdir().unwrap();
+    let graph_path = root.path().join("graph.yaml");
+    for field in ["endpoint", "credential", "api_key"] {
+        let invalid = graph(&["fast_a"]).replace(
+            "kind: ask, backend: fast_a",
+            &format!("kind: ask, backend: fast_a, {field}: forbidden"),
+        );
+        std::fs::write(&graph_path, invalid).unwrap();
+        let result = invoke(&["validate", path(&graph_path)]);
+        assert_eq!(
+            result.status.code(),
+            Some(2),
+            "{field}: {}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+    }
+}
+
+/// Trace: FR-072-AC-6
+#[cfg(feature = "clm")]
+#[test]
+fn offline_commands_ignore_missing_and_malformed_service_files() {
+    use sapho_core::{Datum, Inputs, ItemId, SourceId, Value};
+    use sapho_evidence::{Case, Dataset, LabelKind, LabelProvenance, Split};
+    use std::collections::BTreeMap;
+
+    let root = tempfile::tempdir().unwrap();
+    let graph_path = root.path().join("graph.yaml");
+    std::fs::write(&graph_path, graph(&["fast_a"])).unwrap();
+    let input = root.path().join("input.json");
+    std::fs::write(&input, br#"{"text":"synthetic"}"#).unwrap();
+    let bindings = root.path().join("bindings.yaml");
+    std::fs::write(
+        &bindings,
+        "fast_a: {provider: systemone, model: model-a, distribution_policy: {kind: strict}}\n",
+    )
+    .unwrap();
+    let (endpoint, _, server) = fake("model-a", 0.8, 0);
+    let service_file = root.path().join("services.json");
+    std::fs::write(
+        &service_file,
+        serde_json::to_vec(&serde_json::json!({"services":{"fast_a":{"base_url":endpoint}}}))
+            .unwrap(),
+    )
+    .unwrap();
+    let recording = root.path().join("recording.json");
+    let recorded = invoke(&[
+        "record",
+        path(&graph_path),
+        "--input",
+        path(&input),
+        "--bindings",
+        path(&bindings),
+        "--service-config",
+        path(&service_file),
+        "--recording",
+        path(&recording),
+    ]);
+    assert!(
+        recorded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recorded.stderr)
+    );
+    server.join().unwrap();
+    let dataset = root.path().join("dataset.json");
+    let fixture = Dataset {
+        id: SourceId::new("offline-services").unwrap(),
+        cases: vec![Case {
+            id: ItemId::new("case-1").unwrap(),
+            split: Split::Development,
+            inputs: Inputs::from([(
+                "text".into(),
+                Datum::new("input", Value::Text("synthetic".into())).unwrap(),
+            )]),
+            labels: BTreeMap::from([("result0".into(), true)]),
+            label_provenance: LabelProvenance {
+                kind: LabelKind::Human,
+                source: "synthetic-curator".into(),
+                reference: "fixture".into(),
+            },
+        }],
+    };
+    std::fs::write(&dataset, serde_json::to_vec(&fixture).unwrap()).unwrap();
+    let tune_output = root.path().join("tuned.json");
+    for malformed in [false, true] {
+        if malformed {
+            std::fs::write(&service_file, b"not valid service JSON").unwrap();
+        } else {
+            std::fs::remove_file(&service_file).unwrap();
+        }
+        for command in ["validate", "inspect"] {
+            let result = Command::new(env!("CARGO_BIN_EXE_sapho"))
+                .env_clear()
+                .env("SAPHO_SERVICE_CONFIG", &service_file)
+                .args([command, path(&graph_path)])
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{command}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        let replayed = invoke(&[
+            "replay",
+            path(&graph_path),
+            "--input",
+            path(&input),
+            "--bindings",
+            path(&bindings),
+            "--service-config",
+            path(&service_file),
+            "--recording",
+            path(&recording),
+        ]);
+        assert!(
+            replayed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&replayed.stderr)
+        );
+        let measured = invoke(&[
+            "measure",
+            path(&graph_path),
+            "--dataset",
+            path(&dataset),
+            "--bindings",
+            path(&bindings),
+            "--service-config",
+            path(&service_file),
+            "--replay",
+            path(&recording),
+            "--split",
+            "development",
+        ]);
+        assert!(
+            measured.status.success(),
+            "{}",
+            String::from_utf8_lossy(&measured.stderr)
+        );
+        let measurement: serde_json::Value = serde_json::from_slice(&measured.stdout).unwrap();
+        assert_eq!(
+            measurement["measurement"]["outputs"]["result0"]["scored"],
+            1
+        );
+        let tuned = invoke(&[
+            "tune",
+            "--candidate",
+            path(&graph_path),
+            "--dataset",
+            path(&dataset),
+            "--bindings",
+            path(&bindings),
+            "--service-config",
+            path(&service_file),
+            "--replay",
+            path(&recording),
+            "--output-name",
+            "result0",
+            "--metric",
+            "brier",
+            "--output",
+            path(&tune_output),
+        ]);
+        assert!(
+            tuned.status.success(),
+            "{}",
+            String::from_utf8_lossy(&tuned.stderr)
+        );
+        std::fs::remove_file(&tune_output).unwrap();
+    }
+}
+
 /// Trace: FR-072-AC-5, IT-013-SC-05
 #[cfg(feature = "clm")]
 #[test]
