@@ -118,7 +118,7 @@ pub struct RosterMetric {
     pub measurement: OutputMeasurement,
     /// Shared calibration metric availability.
     pub ece: Option<f64>,
-    /// Reason when the shared metric has no scored Probability cases.
+    /// Reason when ECE is inapplicable or has no scored Probability cases.
     pub ece_absent_reason: Option<String>,
 }
 /// One actual model under a binding, or its response-less bucket.
@@ -652,10 +652,14 @@ pub fn roster(
                 let schema = BTreeMap::from([(output.clone(), schemas[&output].clone())]);
                 let measurement = measure(&subset, split, &schema, &selected, max_cases)?;
                 if let Some(value) = measurement.outputs.get(&output) {
-                    let ece = if let crate::Metrics::Probability { ece, .. } = &value.metrics {
-                        *ece
-                    } else {
-                        None
+                    let (ece, ece_absent_reason) = match &value.metrics {
+                        crate::Metrics::Probability { ece: Some(ece), .. } => (Some(*ece), None),
+                        crate::Metrics::Probability { .. } => {
+                            (None, Some("zero_scored_probability_cases".into()))
+                        }
+                        crate::Metrics::Boolean { .. } | crate::Metrics::Unsupported { .. } => {
+                            (None, Some("not_probability".into()))
+                        }
                     };
                     outputs.entry(output).or_default().insert(
                         kind,
@@ -663,7 +667,7 @@ pub fn roster(
                             case_ids: ids.into_iter().collect(),
                             measurement: value.clone(),
                             ece,
-                            ece_absent_reason: ece.is_none().then(|| "not_computed".into()),
+                            ece_absent_reason,
                         },
                     );
                 }

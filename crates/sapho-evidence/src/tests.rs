@@ -337,6 +337,31 @@ fn shadow_probability_brier_and_missing_coverage_have_explicit_absence() {
     .unwrap();
     assert_eq!(report.kinds[0].challenger.failed, 1);
     assert_eq!(report.kinds[0].beat_champion, None);
+    for case in &data.cases {
+        incomplete.insert(
+            case.id.clone(),
+            CaseOutcome::Failed {
+                error: SaphoError::new(ErrorCode::ReplayMiss, "missing shadow"),
+                models: Vec::new(),
+            },
+        );
+    }
+    let empty_matched = compare_shadow(
+        &data,
+        Split::HeldOut,
+        &schemas,
+        &champion,
+        &incomplete,
+        &request,
+        10,
+    )
+    .unwrap();
+    assert!(empty_matched.kinds[0].matched_cases.is_empty());
+    assert_eq!(empty_matched.kinds[0].challenger.ece, None);
+    assert_eq!(
+        empty_matched.kinds[0].challenger.ece_reason.as_deref(),
+        Some("zero_matched_scored_cases")
+    );
 }
 /// Trace: FR-062-AC-1, FR-062-AC-2, FR-062-AC-3, FR-062-AC-4,
 /// FR-062-AC-5, FR-062-AC-6, FR-062-AC-7, FR-063-AC-3, FR-063-AC-4,
@@ -526,6 +551,61 @@ fn roster_partitions_actual_models_and_projects_only_measured_fields() {
     assert!((ece.unwrap() - 0.2).abs() < 1e-12);
     assert_eq!(a_metric.ece, *ece);
     assert!(a_metric.ece_absent_reason.is_none());
+    let boolean_entry = report
+        .entries
+        .iter()
+        .find(|entry| {
+            entry.binding == other && entry.actual_model.as_deref() == Some("custom-model")
+        })
+        .unwrap();
+    let boolean_metric = &boolean_entry.outputs["flag"][&LabelKind::Human];
+    assert_eq!(boolean_metric.measurement.scored, 1);
+    assert_eq!(boolean_metric.ece, None);
+    assert_eq!(
+        boolean_metric.ece_absent_reason.as_deref(),
+        Some("not_probability")
+    );
+    let mut unscored_cases = cases.clone();
+    let CaseOutcome::Completed {
+        outputs: case_outputs,
+        ..
+    } = &mut unscored_cases.get_mut(&data.cases[0].id).unwrap().outcome
+    else {
+        panic!("completed fixture outcome expected")
+    };
+    case_outputs.insert(
+        "result".into(),
+        Datum::new("unscored", Value::Number(0.8)).unwrap(),
+    );
+    let unscored_report = roster(
+        &data,
+        Split::Development,
+        &identity,
+        "0.1",
+        &outputs,
+        &mappings,
+        &unscored_cases,
+        10,
+    )
+    .unwrap();
+    let unscored_entry = unscored_report
+        .entries
+        .iter()
+        .find(|entry| entry.binding == judge && entry.actual_model.as_deref() == Some("A"))
+        .unwrap();
+    let unscored_metric = &unscored_entry.outputs["result"][&LabelKind::Human];
+    assert_eq!(
+        (
+            unscored_metric.measurement.scored,
+            unscored_metric.measurement.unscored
+        ),
+        (0, 1)
+    );
+    assert_eq!(unscored_metric.ece, None);
+    assert_eq!(
+        unscored_metric.ece_absent_reason.as_deref(),
+        Some("zero_scored_probability_cases")
+    );
     assert_eq!(
         report
             .unattributed
