@@ -6,7 +6,10 @@ use sapho_core::{
     Answer, ErrorCode, ModelRequest, ModelResponse, Probability, Question, Result, SaphoError,
     Usage, Value, bounded_json, decode_json,
 };
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Serialize,
+    ser::{SerializeMap, SerializeSeq, Serializer},
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn invalid(message: &'static str) -> SaphoError {
@@ -71,12 +74,43 @@ struct WireLevel {
     label: String,
     description: String,
 }
+/// Borrowed plain projection so the byte ceiling applies before allocating JSON state.
+struct Plain<'a>(&'a Value);
+impl Serialize for Plain<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        match self.0 {
+            Value::Boolean(value) => serializer.serialize_bool(*value),
+            Value::Number(value) => value.serialize(serializer),
+            Value::Text(value) => value.serialize(serializer),
+            Value::Probability(value) => value.get().serialize(serializer),
+            Value::Degree(value) => value.get().serialize(serializer),
+            Value::Optional(None) => serializer.serialize_none(),
+            Value::Optional(Some(value)) => Plain(value).serialize(serializer),
+            Value::List(items) => {
+                let mut sequence = serializer.serialize_seq(Some(items.len()))?;
+                for item in items {
+                    sequence.serialize_element(&Plain(&item.value))?;
+                }
+                sequence.end()
+            }
+            Value::Record(fields) => {
+                let mut map = serializer.serialize_map(Some(fields.len()))?;
+                for (key, value) in fields {
+                    map.serialize_entry(key, &Plain(value))?;
+                }
+                map.end()
+            }
+            Value::Questions(value) => value.serialize(serializer),
+            Value::Answers(value) => value.serialize(serializer),
+        }
+    }
+}
 fn input(request: &ModelRequest, ceiling: usize) -> Result<Input> {
     let Value::Record(state) = &request.state else {
         return Err(invalid("Decisions state must be a record"));
     };
     let Some(envelope) = state.get("decisions_input") else {
-        return serde_json::to_string(&request.state.to_plain_json()?)
+        return String::from_utf8(bounded_json(&Plain(&request.state), ceiling)?)
             .map(Input::Text)
             .map_err(|_| invalid("Cannot serialize Decisions state"));
     };
@@ -274,8 +308,8 @@ struct WireUsage {
     input_tokens: u64,
     output_tokens: u64,
     total_tokens: u64,
-    input_tokens_details: Option<InputTokenDetails>,
-    output_tokens_details: Option<OutputTokenDetails>,
+    input_tokens_details: InputTokenDetails,
+    output_tokens_details: OutputTokenDetails,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -320,16 +354,11 @@ pub(crate) fn decode(
         return Err(answer_error("missing_model"));
     }
     let _ = response.usage.total_tokens;
-    let _ = response
-        .usage
-        .input_tokens_details
-        .as_ref()
-        .map(|details| (details.cached_tokens, details.cache_write_tokens));
-    let _ = response
-        .usage
-        .output_tokens_details
-        .as_ref()
-        .map(|details| details.reasoning_tokens);
+    let _ = (
+        response.usage.input_tokens_details.cached_tokens,
+        response.usage.input_tokens_details.cache_write_tokens,
+        response.usage.output_tokens_details.reasoning_tokens,
+    );
     if response.answers.len() < request.questions.len() {
         return Err(SaphoError::new(
             ErrorCode::MissingAnswer,

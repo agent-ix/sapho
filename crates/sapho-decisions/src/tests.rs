@@ -543,6 +543,18 @@ async fn malformed_answer_matrix_refuses_with_typed_errors_and_raw_exchange() {
     let mut absent_usage = base.clone();
     absent_usage.as_object_mut().unwrap().remove("usage");
     cases.push((absent_usage, ErrorCode::InvalidAnswer));
+    let mut absent_input_details = base.clone();
+    absent_input_details["usage"]
+        .as_object_mut()
+        .unwrap()
+        .remove("input_tokens_details");
+    cases.push((absent_input_details, ErrorCode::InvalidAnswer));
+    let mut absent_output_details = base.clone();
+    absent_output_details["usage"]
+        .as_object_mut()
+        .unwrap()
+        .remove("output_tokens_details");
+    cases.push((absent_output_details, ErrorCode::InvalidAnswer));
     let mut unknown = base.clone();
     unknown["answers"][0]["private"] = json!("sentinel");
     cases.push((unknown, ErrorCode::InvalidAnswer));
@@ -628,6 +640,43 @@ async fn cancelled_inference_releases_its_permit() {
     seam.release.notify_one();
     second.await.unwrap().unwrap();
 }
+/// Trace: FR-086-AC-3, IT-018-SC-05
+#[tokio::test]
+async fn permit_wait_expires_without_dispatching_a_second_call() {
+    let seam = Arc::new(Waiting {
+        calls: AtomicUsize::new(0),
+        release: tokio::sync::Notify::new(),
+    });
+    let backend = Arc::new(
+        DecisionsBackend::with_transport(
+            seam.clone(),
+            Limits {
+                timeout: Duration::from_millis(100),
+                in_flight: 1,
+                ..Limits::default()
+            },
+        )
+        .unwrap(),
+    );
+    let first = tokio::spawn({
+        let backend = backend.clone();
+        async move { backend.infer(&request()).await }
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while seam.calls.load(Ordering::SeqCst) != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let second = backend.infer(&request()).await.unwrap_err();
+    assert_eq!(second.code, ErrorCode::DeadlineExceeded);
+    assert_eq!(seam.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        first.await.unwrap().unwrap_err().code,
+        ErrorCode::DeadlineExceeded
+    );
+}
 async fn http_fixture(reply: Vec<u8>) -> (reqwest::Url, tokio::task::JoinHandle<()>) {
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -678,6 +727,61 @@ async fn advertised_and_streamed_response_overflow_are_bounded() {
         ErrorCode::LimitExceeded
     );
     task.await.unwrap();
+    let body = "x".repeat(128);
+    let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n", body.len(), body).into_bytes();
+    let (url, task) = http_fixture(reply).await;
+    let backend = DecisionsBackend::prepare_http(
+        &SecretValue::new("test"),
+        Limits {
+            response_bytes: 64,
+            ..Limits::default()
+        },
+        url,
+    )
+    .unwrap();
+    assert_eq!(
+        backend.infer(&request()).await.unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+    task.await.unwrap();
+}
+/// Trace: FR-086-AC-3, IT-018-SC-05
+#[tokio::test]
+async fn stalled_streamed_body_expires_under_complete_deadline() {
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = reqwest::Url::parse(&format!(
+        "http://{}/v1/decisions",
+        listener.local_addr().unwrap()
+    ))
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut bytes = [0; 4096];
+        let _ = stream.read(&mut bytes).await.unwrap();
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    });
+    let backend = DecisionsBackend::prepare_http(
+        &SecretValue::new("test"),
+        Limits {
+            timeout: Duration::from_millis(50),
+            ..Limits::default()
+        },
+        url,
+    )
+    .unwrap();
+    assert_eq!(
+        backend.infer(&request()).await.unwrap_err().code,
+        ErrorCode::DeadlineExceeded
+    );
+    server.await.unwrap();
 }
 
 /// Trace: FR-085-AC-2, FR-085-AC-5, FR-086-AC-2, IT-018-SC-02
@@ -727,6 +831,24 @@ async fn invalid_envelopes_and_cardinalities_never_reach_transport() {
     };
     yes.clear();
     cases.push(empty_criterion);
+    let mut reserved_text = request();
+    reserved_text.state = Value::Record(BTreeMap::from([(
+        "decisions_input".into(),
+        Value::Text("ordinary text".into()),
+    )]));
+    cases.push(reserved_text);
+    let mut reserved_extra = request();
+    reserved_extra.state = Value::Record(BTreeMap::from([
+        (
+            "decisions_input".into(),
+            Value::Record(BTreeMap::from([
+                ("text".into(), Value::Text("Inspect".into())),
+                ("images".into(), Value::List(vec![])),
+            ])),
+        ),
+        ("extra".into(), Value::Text("ordinary".into())),
+    ]));
+    cases.push(reserved_extra);
     for image in [
         "file-123",
         "data:image/png;base64,???",
@@ -775,6 +897,16 @@ async fn invalid_envelopes_and_cardinalities_never_reach_transport() {
         ));
     }
     assert_eq!(seam.calls.load(Ordering::SeqCst), 0);
+    let mut huge_state = request();
+    huge_state.state = Value::Record(BTreeMap::from([(
+        "large".into(),
+        Value::Text("x".repeat(1_048_576)),
+    )]));
+    assert_eq!(
+        backend.infer(&huge_state).await.unwrap_err().code,
+        ErrorCode::LimitExceeded
+    );
+    assert_eq!(seam.calls.load(Ordering::SeqCst), 0);
     let mut exact_max = request();
     exact_max.questions = (0..32)
         .map(|index| NamedQuestion {
@@ -819,4 +951,36 @@ async fn redirect_and_transport_failure_are_single_attempt_redacted_errors() {
     assert_eq!(error.code, ErrorCode::BackendFailed);
     assert!(!format!("{error:?}").contains("secret-sentinel"));
     assert!(!format!("{error:?}").contains(&address.to_string()));
+}
+/// Trace: FR-086-AC-4, IT-018-SC-05
+#[tokio::test]
+async fn quota_response_discards_body_and_private_request_diagnostics() {
+    let quota = br#"{"error":{"type":"insufficient_quota","message":"body-sentinel input-sentinel header-sentinel"}}"#;
+    let reply = format!("HTTP/1.1 429 Too Many Requests\r\nX-Private: header-sentinel\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", quota.len()).into_bytes()
+        .into_iter().chain(quota.iter().copied()).collect();
+    let (mut url, task) = http_fixture(reply).await;
+    url.set_path("/v1/decisions/url-sentinel");
+    let backend =
+        DecisionsBackend::prepare_http(&SecretValue::new("key-sentinel"), Limits::default(), url)
+            .unwrap();
+    let mut req = request();
+    req.state = Value::Record(BTreeMap::from([(
+        "input".into(),
+        Value::Text("input-sentinel".into()),
+    )]));
+    let error = backend.infer(&req).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::RateLimited);
+    assert_eq!(error.context["http_status"], "429");
+    assert!(error.raw.is_none());
+    let diagnostics = format!("{error:?} {}", serde_json::to_string(&error).unwrap());
+    for sentinel in [
+        "key-sentinel",
+        "input-sentinel",
+        "body-sentinel",
+        "header-sentinel",
+        "url-sentinel",
+    ] {
+        assert!(!diagnostics.contains(sentinel));
+    }
+    task.await.unwrap();
 }

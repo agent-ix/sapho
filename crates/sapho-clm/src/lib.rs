@@ -18,10 +18,12 @@ mod wire;
 use async_trait::async_trait;
 use ix_cli_kit::secrets::SecretValue;
 use reqwest::{
-    Client, Url,
+    Url,
     header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue},
 };
 use sapho_core::{ErrorCode, ModelBackend, ModelRequest, ModelResponse, Result, SaphoError};
+use sapho_http::{CallGate, NativeTransport};
+pub use sapho_http::{HttpResponse, Transport};
 use std::{net::IpAddr, sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 
@@ -107,73 +109,6 @@ fn endpoint(base_url: &str) -> std::result::Result<Url, ConfigurationError> {
     url.set_path(&path);
     Ok(url)
 }
-/// Bounded HTTP result at the native transport seam; headers and secrets are not evidence.
-pub struct HttpResponse {
-    /// HTTP status used for typed error classification.
-    pub status: u16,
-    /// Complete response bytes within the caller's ceiling.
-    pub body: Vec<u8>,
-}
-/// Native HTTP boundary for deterministic host tests and alternative bounded transports.
-/// Implementations must enforce `max_bytes` while collecting response data and avoid
-/// returning private input or credential text in errors. Backend also checks final length.
-#[async_trait]
-pub trait Transport: Send + Sync {
-    /// Send one attempt; redirects and retries are prohibited.
-    async fn post(&self, body: &[u8], max_bytes: usize) -> Result<HttpResponse>;
-}
-struct HttpTransport {
-    client: Client,
-    endpoint: Url,
-}
-#[async_trait]
-impl Transport for HttpTransport {
-    async fn post(&self, body: &[u8], max_bytes: usize) -> Result<HttpResponse> {
-        let mut response = self
-            .client
-            .post(self.endpoint.clone())
-            .body(body.to_vec())
-            .send()
-            .await
-            .map_err(transport_error)?;
-        let status = response.status().as_u16();
-        // Error bodies can echo credentials or inputs; never read or retain them.
-        if status != 200 {
-            return Ok(HttpResponse {
-                status,
-                body: Vec::new(),
-            });
-        }
-        if response
-            .content_length()
-            .is_some_and(|length| length > u64::try_from(max_bytes).unwrap_or(u64::MAX))
-        {
-            return Err(failure(ErrorCode::LimitExceeded));
-        }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(transport_error)? {
-            if bytes
-                .len()
-                .checked_add(chunk.len())
-                .is_none_or(|size| size > max_bytes)
-            {
-                return Err(failure(ErrorCode::LimitExceeded));
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        Ok(HttpResponse {
-            status,
-            body: bytes,
-        })
-    }
-}
-fn transport_error(error: reqwest::Error) -> SaphoError {
-    failure(if error.is_timeout() {
-        ErrorCode::DeadlineExceeded
-    } else {
-        ErrorCode::BackendFailed
-    })
-}
 fn failure(code: ErrorCode) -> SaphoError {
     SaphoError::new(code, "CLM request refused")
 }
@@ -182,7 +117,7 @@ fn failure(code: ErrorCode) -> SaphoError {
 pub struct ClmBackend {
     transport: Arc<dyn Transport>,
     limits: Limits,
-    capacity: Semaphore,
+    capacity: CallGate,
 }
 impl ClmBackend {
     /// Construct the production HTTP adapter. No credential-store or model operations occur.
@@ -204,14 +139,10 @@ impl ClmBackend {
             value.set_sensitive(true);
             headers.insert(AUTHORIZATION, value);
         }
-        let client = Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .default_headers(headers)
-            .timeout(limits.timeout)
-            .build()
-            .map_err(|_| ConfigurationError::Transport)?;
-        Self::with_transport(Arc::new(HttpTransport { client, endpoint }), limits)
+        let transport =
+            NativeTransport::new(endpoint, headers, limits.timeout, "CLM request refused")
+                .map_err(|_| ConfigurationError::Transport)?;
+        Self::with_transport(Arc::new(transport), limits)
     }
     /// Inject only the native HTTP seam; serialization/decoding/limits remain real.
     pub fn with_transport(
@@ -222,7 +153,7 @@ impl ClmBackend {
         Ok(Self {
             transport,
             limits,
-            capacity: Semaphore::new(limits.in_flight),
+            capacity: CallGate::new(limits.in_flight),
         })
     }
 }
@@ -233,36 +164,27 @@ impl ModelBackend for ClmBackend {
             .checked_add(self.limits.timeout)
             .ok_or_else(|| failure(ErrorCode::DeadlineExceeded))?;
         let body = wire::encode(request, self.limits.request_bytes)?;
-        tokio::time::timeout_at(deadline, async {
-            let _permit = self
-                .capacity
-                .acquire()
-                .await
-                .map_err(|_| failure(ErrorCode::BackendFailed))?;
-            if tokio::time::Instant::now() >= deadline {
-                return Err(failure(ErrorCode::DeadlineExceeded));
-            }
-            let response = self
-                .transport
-                .post(&body, self.limits.response_bytes)
-                .await?;
-            if response.status != 200 {
-                let code = match response.status {
-                    401 | 403 => ErrorCode::Unauthorized,
-                    429 => ErrorCode::RateLimited,
-                    400 | 422 => ErrorCode::ServiceValidation,
-                    _ => ErrorCode::BackendFailed,
-                };
-                return Err(failure(code).with_context("http_status", response.status.to_string()));
-            }
-            let decoded = wire::decode(request, &response.body, self.limits.response_bytes)?;
-            if tokio::time::Instant::now() >= deadline {
-                return Err(failure(ErrorCode::DeadlineExceeded));
-            }
-            Ok(decoded)
-        })
-        .await
-        .map_err(|_| failure(ErrorCode::DeadlineExceeded))?
+        self.capacity
+            .run(deadline, "CLM request refused", || async {
+                let response = self
+                    .transport
+                    .post(&body, self.limits.response_bytes)
+                    .await?;
+                if response.status != 200 {
+                    let code = match response.status {
+                        401 | 403 => ErrorCode::Unauthorized,
+                        429 => ErrorCode::RateLimited,
+                        400 | 422 => ErrorCode::ServiceValidation,
+                        _ => ErrorCode::BackendFailed,
+                    };
+                    return Err(
+                        failure(code).with_context("http_status", response.status.to_string())
+                    );
+                }
+                let decoded = wire::decode(request, &response.body, self.limits.response_bytes)?;
+                Ok(decoded)
+            })
+            .await
     }
 }
 #[cfg(test)]

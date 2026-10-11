@@ -2215,6 +2215,7 @@ dependencies = [
  "ix-cli-kit",
  "reqwest",
  "sapho-core",
+ "sapho-http",
  "sapho-recording",
  "sapho-systemone",
  "serde",
@@ -2244,6 +2245,7 @@ dependencies = [
  "ix-cli-kit",
  "reqwest",
  "sapho-core",
+ "sapho-http",
  "sapho-recording",
  "serde",
  "serde_json",
@@ -2272,6 +2274,16 @@ dependencies = [
  "serde_json",
  "serde_stacker",
  "sha2",
+ "tokio",
+]
+
+[[package]]
+name = "sapho-http"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "reqwest",
+ "sapho-core",
  "tokio",
 ]
 
