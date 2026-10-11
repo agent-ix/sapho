@@ -28,6 +28,9 @@ pub struct NativeTransport {
     endpoint: Url,
     error_message: &'static str,
 }
+/// Redacted native client construction failure.
+#[derive(Debug)]
+pub struct NativeConfigError;
 impl NativeTransport {
     /// Construct a no-retry, no-redirect client without sending a request.
     pub fn new(
@@ -35,14 +38,14 @@ impl NativeTransport {
         headers: HeaderMap,
         timeout: Duration,
         error_message: &'static str,
-    ) -> std::result::Result<Self, ()> {
+    ) -> std::result::Result<Self, NativeConfigError> {
         let client = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
             .timeout(timeout)
             .default_headers(headers)
             .build()
-            .map_err(|_| ())?;
+            .map_err(|_| NativeConfigError)?;
         Ok(Self {
             client,
             endpoint,
