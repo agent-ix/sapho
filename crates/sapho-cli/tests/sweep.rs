@@ -208,6 +208,73 @@ fn stock_sweep_validates_full_grid_and_never_overwrites_sources_or_destination()
     );
 }
 
+/// Trace: FR-080-AC-3, IT-016-SC-03, IT-016-SC-05
+#[test]
+fn twenty_candidate_sweep_and_tune_each_require_an_explicit_raised_ceiling() {
+    let root = tempfile::tempdir().unwrap();
+    let base = root.path().join("base.json");
+    write(&base, &serde_json::to_vec(&source_graph()).unwrap());
+    let grid = root.path().join("grid.json");
+    write(
+        &grid,
+        br#"{"axes":[{"id":"cutoff","values":[0.5,0.6,0.7,0.8,0.9]},{"id":"weights","values":[[0.1,0.9],[0.25,0.75],[0.5,0.5],[0.75,0.25]]}]}"#,
+    );
+    let dest = root.path().join("generated");
+    let sweep_args = [
+        "sweep",
+        path(&base),
+        "--grid",
+        path(&grid),
+        "--output-dir",
+        path(&dest),
+    ];
+    assert_eq!(cli(&sweep_args).status.code(), Some(2));
+    assert!(!dest.exists());
+    let generated = cli(&[sweep_args.as_slice(), &["--max-candidates", "20"]].concat());
+    assert_eq!(
+        generated.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&generated.stdout)
+    );
+    assert_eq!(json(&generated)["candidates"], 20);
+
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dataset = repo.join("examples/data/code-review-dataset.json");
+    let recording = repo.join("examples/recordings/code-review.json");
+    let mut tune_args = vec!["tune".to_owned()];
+    for index in 0..20 {
+        let candidate = dest.join(format!("candidate-{index:04}.json"));
+        assert!(candidate.is_file());
+        tune_args.push("--candidate".into());
+        tune_args.push(path(&candidate).into());
+    }
+    tune_args.extend([
+        "--dataset".into(),
+        path(&dataset).into(),
+        "--output-name".into(),
+        "needs_review".into(),
+        "--metric".into(),
+        "agreement".into(),
+        "--replay".into(),
+        path(&recording).into(),
+    ]);
+    let borrowed = tune_args.iter().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!(cli(&borrowed).status.code(), Some(2));
+    tune_args.extend(["--max-candidates".into(), "20".into()]);
+    let borrowed = tune_args.iter().map(String::as_str).collect::<Vec<_>>();
+    let tuned = cli(&borrowed);
+    assert_eq!(
+        tuned.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&tuned.stdout)
+    );
+    let report = json(&tuned);
+    assert_eq!(report["candidates"].as_array().unwrap().len(), 20);
+    assert_eq!(report["ranking"].as_array().unwrap().len(), 20);
+}
+
 /// Trace: FR-080-AC-3, FR-080-AC-4, IT-016-SC-05, IT-016-SC-06
 #[test]
 fn generated_candidates_tune_like_handwritten_and_replay_unchanged_requests() {
