@@ -236,6 +236,8 @@ pub(crate) struct FitCalibrationArgs {
     #[arg(long)]
     pub(crate) bindings: Option<PathBuf>,
     #[arg(long)]
+    pub(crate) service_config: Option<PathBuf>,
+    #[arg(long)]
     pub(crate) replay: Option<PathBuf>,
     #[arg(long)]
     pub(crate) output_name: String,

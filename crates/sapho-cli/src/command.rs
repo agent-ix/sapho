@@ -568,6 +568,7 @@ fn fit_calibration_command(args: FitCalibrationArgs) -> Result<Response, CliErro
             &graph.definition,
             &metadata,
             replay.map(|registry| move || Ok(registry)),
+            args.service_config.as_deref(),
         )?
     };
     if runner.inspection().signature.outputs.get(&args.output_name) != Some(&ValueType::Probability)
