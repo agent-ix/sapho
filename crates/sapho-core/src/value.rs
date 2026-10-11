@@ -95,6 +95,10 @@ unit_scalar!(
     "A model outcome probability; never an aggregate heuristic score."
 );
 unit_scalar!(
+    CalibratedProbability,
+    "A fitted probability, distinct from a raw model probability."
+);
+unit_scalar!(
     Degree,
     "A degree used by an explicitly configured heuristic operator."
 );
@@ -137,6 +141,10 @@ pub enum ValueType {
     Text,
     /// Model outcome probability.
     Probability,
+    /// Explicitly fitted probability.
+    CalibratedProbability,
+    /// Versioned fitted calibration map.
+    CalibrationMap,
     /// Heuristic degree.
     Degree,
     /// Explicit absence or a value of a declared type.
@@ -196,6 +204,8 @@ impl ValueType {
             | Self::Number
             | Self::Text
             | Self::Probability
+            | Self::CalibratedProbability
+            | Self::CalibrationMap
             | Self::Degree
             | Self::Questions
             | Self::Answers => Ok(()),
@@ -213,6 +223,8 @@ impl ValueType {
             | (Self::Number, Value::Number(_))
             | (Self::Text, Value::Text(_))
             | (Self::Probability, Value::Probability(_))
+            | (Self::CalibratedProbability, Value::CalibratedProbability(_))
+            | (Self::CalibrationMap, Value::CalibrationMap(_))
             | (Self::Degree, Value::Degree(_))
             | (Self::Questions, Value::Questions(_))
             | (Self::Answers, Value::Answers(_)) => Ok(()),
@@ -273,6 +285,10 @@ pub enum Value {
     Text(String),
     /// Model outcome probability.
     Probability(Probability),
+    /// Explicitly fitted probability.
+    CalibratedProbability(CalibratedProbability),
+    /// Versioned fitted map.
+    CalibrationMap(Box<crate::CalibrationMap>),
     /// Heuristic degree.
     Degree(Degree),
     /// Explicit absence or present value.
@@ -330,10 +346,12 @@ impl Value {
             }
             Self::Questions(q) => validate_questions(q),
             Self::Answers(a) => a.validate(),
+            Self::CalibrationMap(map) => map.validate(),
             Self::Boolean(_)
             | Self::Number(_)
             | Self::Text(_)
             | Self::Probability(_)
+            | Self::CalibratedProbability(_)
             | Self::Degree(_)
             | Self::Optional(None) => Ok(()),
         }
@@ -358,6 +376,10 @@ impl Serialize for Plain<'_> {
             Value::Number(value) => value.serialize(serializer),
             Value::Text(value) => value.serialize(serializer),
             Value::Probability(value) => value.get().serialize(serializer),
+            Value::CalibratedProbability(value) => value.get().serialize(serializer),
+            Value::CalibrationMap(_) => Err(serde::ser::Error::custom(
+                "Calibration map is not model state",
+            ))?,
             Value::Degree(value) => value.get().serialize(serializer),
             Value::Optional(None) => serializer.serialize_none(),
             Value::Optional(Some(value)) => Plain(value).serialize(serializer),

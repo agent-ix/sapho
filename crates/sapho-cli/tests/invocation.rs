@@ -1482,6 +1482,7 @@ fn error_objects_hold_code_message_and_context_only() {
             trace: Default::default(),
             error: Some(error.clone()),
             exit: ExitStatus::Refused,
+            calibration_identity: Vec::new(),
         })
         .unwrap(),
     ] {

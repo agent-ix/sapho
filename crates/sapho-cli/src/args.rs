@@ -58,6 +58,8 @@ pub(crate) enum Command {
     },
     /// Measure agreement against supplied labelled cases on an explicit split.
     Measure(MeasureArgs),
+    /// Fit one development-only calibration literal from raw Probability outcomes.
+    FitCalibration(FitCalibrationArgs),
     /// Measure an attributable per-model roster for one Dataset split.
     Roster(RosterArgs),
     /// Project measured roster entries to an ordinary typed graph literal.
@@ -224,6 +226,31 @@ impl From<ShadowMetricArg> for sapho_evidence::ShadowMetric {
             ShadowMetricArg::Ece => Self::Ece,
         }
     }
+}
+#[derive(Args)]
+pub(crate) struct FitCalibrationArgs {
+    #[command(flatten)]
+    pub(crate) graph: GraphArgs,
+    #[arg(long)]
+    pub(crate) dataset: PathBuf,
+    #[arg(long)]
+    pub(crate) bindings: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) service_config: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) replay: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) output_name: String,
+    #[arg(long)]
+    pub(crate) binding: String,
+    #[arg(long, value_enum)]
+    pub(crate) split: Partition,
+    #[arg(long)]
+    pub(crate) output: PathBuf,
+    #[arg(long, default_value_t = 1024)]
+    pub(crate) max_cases: usize,
+    #[command(flatten)]
+    pub(crate) limits: Limits,
 }
 #[derive(Args)]
 pub(crate) struct RosterArgs {

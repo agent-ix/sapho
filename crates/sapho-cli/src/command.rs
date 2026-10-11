@@ -9,15 +9,16 @@ use sapho_cli::{
     select_format, sweep,
 };
 use sapho_core::{
-    BackendRegistry, ErrorCode, Inputs, ItemId, ModelIdentity, PrimitiveRegistry,
-    ProviderDescriptor, Question, SaphoError, SourceId, ValueType, bounded_json, check_ports,
-    decode_json, measured_json_bytes,
+    BackendId, BackendRegistry, CalibrationMap, Datum, ErrorCode, Inputs, ItemId, ModelIdentity,
+    NodeId, PrimitiveRegistry, ProviderDescriptor, Question, SaphoError, SourceId, Value,
+    ValueType, bounded_json, check_ports, decode_json, measured_json_bytes,
 };
 use sapho_evidence::{
-    Candidate, CaseOutcome, Dataset, EvidenceError, Measurement, Metric as ScoreMetric,
-    RankedCandidate, Roster, RosterCall, RosterCase, RosterContributor, RosterMapping, RosterMode,
-    RosterQuestionKind, RosterSelection, ShadowComparison, ShadowComparisonRequest, ShadowMetric,
-    Split, compare_shadow, export_training, measure, project_roster_literal, rank, roster,
+    Candidate, CaseOutcome, Dataset, EvidenceError, FitAttribution, Measurement,
+    Metric as ScoreMetric, RankedCandidate, Roster, RosterCall, RosterCase, RosterContributor,
+    RosterMapping, RosterMode, RosterQuestionKind, RosterSelection, ShadowComparison,
+    ShadowComparisonRequest, ShadowMetric, Split, calibration_cases_digest, compare_shadow,
+    export_training, fit_calibration, measure, project_roster_literal, rank, roster,
 };
 use sapho_graph::{
     Binding, GraphFormat, GraphSpec, Operation, graph_semantic_identity, parse_config,
@@ -156,7 +157,7 @@ fn prepare<F: FnOnce() -> Result<BackendRegistry, CliError>>(
         live_registry(&inspection.backends, metadata, service_config)?
     };
     Ok((
-        Runner::new(graph, &primitives, registry)?,
+        Runner::new_stock(graph, &primitives, registry)?,
         inspection.backends,
     ))
 }
@@ -238,7 +239,7 @@ fn invoke(run: RunArgs, invocation: Invocation) -> Result<Response, CliError> {
             (registry, Vec::new())
         };
         (
-            Runner::new(&artifact.definition, &primitives, registry)?,
+            Runner::new_stock(&artifact.definition, &primitives, registry)?,
             recorders,
         )
     };
@@ -278,6 +279,11 @@ struct CaseRun {
     outcome: CaseOutcome,
     shadow: Option<CaseOutcome>,
     document: Vec<u8>,
+    calibration: Vec<CalibrationUse>,
+    ask_models: BTreeMap<String, Vec<ModelIdentity>>,
+}
+struct CalibrationUse {
+    map_id: String,
 }
 /// The per-case documents of a report, each held compressed and expanded only while it is
 /// written. The documents repeat their graph structure, so they shrink to a small fraction,
@@ -332,6 +338,46 @@ async fn run_cases(
             outcome: outcome(&report),
             shadow: shadow.map(|(id, output)| shadow_outcome(&report, id, output)),
             document: compress(&json)?,
+            calibration: report
+                .trace
+                .nodes
+                .iter()
+                .filter_map(|node| {
+                    if !matches!(node.operation, Operation::Calibrate)
+                        || node.status != NodeStatus::Completed
+                    {
+                        return None;
+                    }
+                    let Value::CalibrationMap(map) = &node.inputs.get("map")?.value else {
+                        return None;
+                    };
+                    Some(CalibrationUse {
+                        map_id: map.map_id.clone(),
+                    })
+                })
+                .collect(),
+            ask_models: report
+                .trace
+                .nodes
+                .iter()
+                .fold(BTreeMap::new(), |mut by_node, node| {
+                    if let ([root, id], Operation::Ask { .. }, Some(response)) = (
+                        node.path.as_slice(),
+                        &node.operation,
+                        node.model
+                            .as_ref()
+                            .and_then(|model| model.response.as_ref()),
+                    ) && root == "root"
+                    {
+                        by_node
+                            .entry(id.clone())
+                            .or_insert_with(Vec::new)
+                            .push(ModelIdentity {
+                                name: response.model.clone(),
+                            });
+                    }
+                    by_node
+                }),
         });
     }
     Ok(runs)
@@ -448,6 +494,283 @@ struct MeasurementReport {
     comparison: Option<ShadowComparison>,
     runs: Documents,
 }
+#[derive(Serialize)]
+struct CalibrationMismatchReport {
+    graph: GraphArtifact,
+    error: SaphoError,
+    runs: Documents,
+}
+fn raw_output_ask_source(graph: &GraphSpec, output: &str) -> Result<(NodeId, BackendId), CliError> {
+    let mut pending = Vec::new();
+    let Some(Binding::Node { node, .. }) = graph.outputs.get(output) else {
+        return Err(
+            SaphoError::new(ErrorCode::Config, "Raw output must come from a graph node").into(),
+        );
+    };
+    pending.push(node.clone());
+    let by_id = graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), node))
+        .collect::<BTreeMap<_, _>>();
+    let mut visited = std::collections::BTreeSet::new();
+    let mut asks = Vec::new();
+    while let Some(id) = pending.pop() {
+        if !visited.insert(id.clone()) {
+            continue;
+        }
+        let node = by_id
+            .get(&id)
+            .ok_or_else(|| SaphoError::new(ErrorCode::Config, "Output dependency absent"))?;
+        if let Operation::Ask { backend, .. } = &node.operation {
+            asks.push((id.clone(), backend.clone()));
+        }
+        if matches!(node.operation, Operation::Map { .. }) {
+            return Err(SaphoError::new(
+                ErrorCode::Config,
+                "Calibration fit requires one explicit Ask in the raw output closure",
+            )
+            .into());
+        }
+        for binding in node.inputs.values().chain(node.guard.iter()) {
+            if let Binding::Node { node, .. } = binding {
+                pending.push(node.clone());
+            }
+        }
+    }
+    match asks.as_slice() {
+        [source] => Ok(source.clone()),
+        _ => Err(SaphoError::new(
+            ErrorCode::Config,
+            "Calibration fit requires exactly one contributing Ask",
+        )
+        .into()),
+    }
+}
+fn fit_calibration_command(args: FitCalibrationArgs) -> Result<Response, CliError> {
+    if !matches!(args.split, Partition::Development) {
+        return Err(EvidenceError::InvalidCalibration("held_out_fit".into()).into());
+    }
+    let data = dataset(
+        &args.dataset,
+        args.limits.max_artifact_bytes,
+        args.max_cases,
+    )?;
+    if data.selected(Split::Development).next().is_none() {
+        return Err(EvidenceError::EmptySplit(Split::Development).into());
+    }
+    let graph = load_graph(&args.graph.graph, args.graph.format.map(GraphFormat::from))?;
+    let declared = BackendId::new(&args.binding)?;
+    let found = raw_output_ask_source(&graph.definition, &args.output_name)?.1;
+    if found != declared {
+        return Err(SaphoError::new(
+            ErrorCode::ModelMismatch,
+            "Fitting binding differs from raw output Ask",
+        )
+        .into());
+    }
+    let metadata = bindings(args.bindings.as_deref())?;
+    let replay = args
+        .replay
+        .as_deref()
+        .map(|path| replay_registry(path, &metadata, args.limits.max_artifact_bytes))
+        .transpose()?;
+    let runtime = runtime()?;
+    let (runner, _) = {
+        let _entered = runtime.enter();
+        prepare(
+            &graph.definition,
+            &metadata,
+            replay.map(|registry| move || Ok(registry)),
+            args.service_config.as_deref(),
+        )?
+    };
+    if runner.inspection().signature.outputs.get(&args.output_name) != Some(&ValueType::Probability)
+    {
+        return Err(SaphoError::new(
+            ErrorCode::TypeMismatch,
+            "Fitting output must be raw Probability",
+        )
+        .into());
+    }
+    let destination = ArtifactWriter::create(&args.output)?;
+    let result = (|| -> Result<Binding, CliError> {
+        let mut outcomes = BTreeMap::new();
+        let mut attribution = FitAttribution::new();
+        for case in data.selected(Split::Development) {
+            let report = runtime.block_on(runner.run(&case.inputs, args.limits.run(), None));
+            let lineage = contributing_responses(&graph.definition, &report.trace);
+            let contributors = lineage.get(&args.output_name).ok_or_else(|| {
+                SaphoError::new(ErrorCode::ModelMismatch, "Fitting output lineage absent")
+            })?;
+            let [contributor] = contributors.as_slice() else {
+                return Err(SaphoError::new(
+                    ErrorCode::ModelMismatch,
+                    "Fitting output has ambiguous model attribution",
+                )
+                .into());
+            };
+            if contributor.binding != declared {
+                return Err(SaphoError::new(
+                    ErrorCode::ModelMismatch,
+                    "Fitting binding differs from response",
+                )
+                .into());
+            }
+            let actual = contributor.actual_model.as_ref().ok_or_else(|| {
+                SaphoError::new(ErrorCode::ModelMismatch, "Fitting response absent")
+            })?;
+            attribution.insert(
+                case.id.clone(),
+                (
+                    declared.clone(),
+                    ModelIdentity {
+                        name: actual.clone(),
+                    },
+                ),
+            );
+            outcomes.insert(case.id.clone(), outcome(&report));
+        }
+        let identity = graph_semantic_identity(&graph.definition)?;
+        let map = fit_calibration(
+            &data,
+            Split::Development,
+            &args.output_name,
+            &outcomes,
+            &attribution,
+            &identity,
+            args.max_cases,
+        )?;
+        Ok(Binding::Literal {
+            value: Datum::new("calibration_map", Value::CalibrationMap(Box::new(map)))?,
+            value_type: ValueType::CalibrationMap,
+        })
+    })();
+    let literal = match result {
+        Ok(literal) => literal,
+        Err(error) => {
+            destination.discard()?;
+            return Err(error);
+        }
+    };
+    if let Err(error) = measured_json_bytes(&literal, args.limits.max_artifact_bytes) {
+        destination.discard()?;
+        return Err(error.into());
+    }
+    respond(
+        literal,
+        ExitStatus::Completed,
+        args.limits.max_artifact_bytes,
+        Some(destination),
+    )
+}
+fn check_development_calibration_observations(
+    dataset: &Dataset,
+    graph: &GraphSpec,
+    runs: &[CaseRun],
+    max_cases: usize,
+) -> Result<(), CliError> {
+    let mut maps = BTreeMap::<String, CalibrationMap>::new();
+    for node in graph
+        .nodes
+        .iter()
+        .chain(graph.subgraphs.values().flat_map(|body| body.nodes.iter()))
+    {
+        for binding in node.inputs.values() {
+            if let Binding::Literal { value, .. } = binding
+                && let Value::CalibrationMap(map) = &value.value
+            {
+                maps.insert(map.map_id.clone(), (**map).clone());
+            }
+        }
+    }
+    for map in maps.values() {
+        if !runs
+            .iter()
+            .any(|run| run.calibration.iter().any(|used| used.map_id == map.map_id))
+        {
+            continue;
+        }
+        if calibration_cases_digest(dataset, &map.raw_output, max_cases)? != map.fit_cases_digest {
+            continue;
+        }
+        if !graph.outputs.contains_key(&map.raw_output) {
+            return Err(SaphoError::new(
+                ErrorCode::ModelMismatch,
+                "Calibration raw fit output unavailable for development verification",
+            )
+            .with_context("map_id", &map.map_id)
+            .with_context("raw_output", &map.raw_output)
+            .into());
+        }
+        let (source_node, source_binding) =
+            raw_output_ask_source(graph, &map.raw_output).map_err(|_| {
+                SaphoError::new(
+                    ErrorCode::ModelMismatch,
+                    "Calibration raw output source differs",
+                )
+            })?;
+        if source_binding != map.fit_binding {
+            return Err(SaphoError::new(
+                ErrorCode::ModelMismatch,
+                "Calibration raw output binding differs",
+            )
+            .with_context("map_id", &map.map_id)
+            .into());
+        }
+        // The fitted cohort needs one raw output and one contributing response
+        // per case. Executed calibration nodes can be guarded or repeated.
+        if runs.iter().any(|run| {
+            !matches!(&run.outcome, CaseOutcome::Completed { outputs, .. }
+                if outputs.get(&map.raw_output).is_some_and(|datum| matches!(&datum.value, Value::Probability(_))))
+                || run.ask_models.get(source_node.as_str()).is_none_or(|models| models.len() != 1)
+        }) {
+            continue;
+        }
+        let mut outcomes = BTreeMap::new();
+        let mut attribution = FitAttribution::new();
+        for run in runs {
+            outcomes.insert(run.id.clone(), run.outcome.clone());
+            let model = run
+                .ask_models
+                .get(source_node.as_str())
+                .and_then(|models| models.first())
+                .ok_or_else(|| {
+                    SaphoError::new(
+                        ErrorCode::CodeFailed,
+                        "Comparable calibration response absent",
+                    )
+                })?;
+            attribution.insert(run.id.clone(), (source_binding.clone(), model.clone()));
+        }
+        let fitted = fit_calibration(
+            dataset,
+            Split::Development,
+            &map.raw_output,
+            &outcomes,
+            &attribution,
+            &map.fit_graph_semantic_identity,
+            max_cases,
+        )
+        .map_err(|_| {
+            SaphoError::new(
+                ErrorCode::ModelMismatch,
+                "Calibration fit observations differ",
+            )
+        })?;
+        if fitted.fit_observation_digest != map.fit_observation_digest {
+            return Err(SaphoError::new(
+                ErrorCode::ModelMismatch,
+                "Calibration fit observations differ",
+            )
+            .with_context("map_id", &map.map_id)
+            .with_context("expected", &map.fit_observation_digest)
+            .with_context("observed", fitted.fit_observation_digest)
+            .into());
+        }
+    }
+    Ok(())
+}
 fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
     let options = &args.options;
     let data = dataset(
@@ -501,20 +824,62 @@ fn measurement(args: MeasureArgs) -> Result<Response, CliError> {
         }
     }
     let destination = claim(options.output.as_deref())?;
-    let (outcomes, shadows, runs) = split(runtime.block_on(run_cases(
+    let case_runs = match runtime.block_on(run_cases(
         &runner,
         &data,
         selected,
         &options.limits,
         selection,
-    ))?);
-    let measurement = measure(
+    )) {
+        Ok(value) => value,
+        Err(error) => {
+            if let Some(destination) = destination {
+                destination.discard()?;
+            }
+            return Err(error);
+        }
+    };
+    if selected == Split::Development {
+        match check_development_calibration_observations(
+            &data,
+            &graph.definition,
+            &case_runs,
+            options.max_cases,
+        ) {
+            Ok(()) => {}
+            Err(CliError::Engine(error)) if error.code == ErrorCode::ModelMismatch => {
+                let (_, _, runs) = split(case_runs);
+                return respond(
+                    CalibrationMismatchReport { graph, error, runs },
+                    ExitStatus::Refused,
+                    options.limits.max_artifact_bytes,
+                    destination,
+                );
+            }
+            Err(error) => {
+                if let Some(destination) = destination {
+                    destination.discard()?;
+                }
+                return Err(error);
+            }
+        }
+    }
+    let (outcomes, shadows, runs) = split(case_runs);
+    let measurement = match measure(
         &data,
         selected,
         &runner.inspection().signature.outputs,
         &outcomes,
         options.max_cases,
-    )?;
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            if let Some(destination) = destination {
+                destination.discard()?;
+            }
+            return Err(error.into());
+        }
+    };
     let comparison = selection
         .map(|(shadow, output)| {
             let request = ShadowComparisonRequest {
@@ -1069,6 +1434,7 @@ pub(crate) fn execute(cli: Cli) -> Result<Response, CliError> {
         Command::Record { run, recording } => invoke(run, Invocation::Record(recording)),
         Command::Replay { run, recording } => invoke(run, Invocation::Replay(recording)),
         Command::Measure(args) => measurement(args),
+        Command::FitCalibration(args) => fit_calibration_command(args),
         Command::Roster(args) => roster_command(args),
         Command::RosterLiteral(args) => roster_literal_command(args),
         Command::Tune(args) => tuning(args),

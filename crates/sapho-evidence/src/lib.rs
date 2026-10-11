@@ -28,7 +28,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 mod shadow;
 pub use shadow::*;
+mod calibration;
 mod roster;
+pub use calibration::{FitAttribution, calibration_cases_digest, fit_calibration};
 pub use roster::*;
 
 pub mod drift;
@@ -105,6 +107,9 @@ pub enum EvidenceError {
     /// A confidence drift selector, threshold or projected observation is invalid.
     #[error("Invalid confidence drift input")]
     InvalidDriftInput,
+    /// Fitting data, attribution or split is ineligible.
+    #[error("Invalid calibration evidence: {0}")]
+    InvalidCalibration(String),
 }
 /// Explicit development/held-out partition; tuning and exports always select development.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -296,6 +301,17 @@ pub enum Metrics {
         /// Ten confidence deciles, including empty ones.
         calibration: Vec<CalibrationBucket>,
         /// Inclusive confidence threshold rows; empty with no scored cases.
+        risk_coverage: Vec<RiskCoverageRow>,
+    },
+    /// Fitted probability metrics, separate from raw probability metrics.
+    CalibratedProbability {
+        /// Brier mean; absent with no scored cases.
+        brier: Option<f64>,
+        /// Shared predicted-label ECE; absent with no scored cases.
+        ece: Option<f64>,
+        /// Shared confidence deciles.
+        calibration: Vec<CalibrationBucket>,
+        /// Shared inclusive confidence threshold rows.
         risk_coverage: Vec<RiskCoverageRow>,
     },
     /// A missing or unsupported output cannot be scored as a probability.
@@ -503,6 +519,12 @@ fn measure_inner(
                             calibration: empty_buckets(),
                             risk_coverage: Vec::new(),
                         },
+                        Some(ValueType::CalibratedProbability) => Metrics::CalibratedProbability {
+                            brier: None,
+                            ece: None,
+                            calibration: empty_buckets(),
+                            risk_coverage: Vec::new(),
+                        },
                         other => Metrics::Unsupported {
                             value_type: other.cloned(),
                         },
@@ -554,11 +576,29 @@ fn measure_inner(
                                     .or_default()
                                     .push((p.max(1.0 - p), (p >= 0.5) == *label));
                             }
+                            (
+                                Metrics::CalibratedProbability { .. },
+                                Value::CalibratedProbability(value),
+                            ) => {
+                                counts.scored += 1;
+                                let p = value.get();
+                                let delta = p - if *label { 1.0 } else { 0.0 };
+                                *squared_errors.entry(name.clone()).or_default() += delta * delta;
+                                observations
+                                    .entry(name.clone())
+                                    .or_default()
+                                    .push((p.max(1.0 - p), (p >= 0.5) == *label));
+                            }
                             (Metrics::Unsupported { .. }, _) => {
                                 counts.unscored += 1;
                                 prediction.unscored = Some(UnscoredReason::UnsupportedType);
                             }
-                            (Metrics::Boolean { .. } | Metrics::Probability { .. }, _) => {
+                            (
+                                Metrics::Boolean { .. }
+                                | Metrics::Probability { .. }
+                                | Metrics::CalibratedProbability { .. },
+                                _,
+                            ) => {
                                 counts.unscored += 1;
                                 prediction.unscored = Some(UnscoredReason::TypeMismatch);
                             }
@@ -589,6 +629,12 @@ fn measure_inner(
                 )
             }
             Metrics::Probability {
+                brier,
+                ece,
+                calibration,
+                risk_coverage,
+            }
+            | Metrics::CalibratedProbability {
                 brier,
                 ece,
                 calibration,
@@ -736,6 +782,7 @@ pub fn rank(
         let score = match (&o.metrics, metric) {
             (Metrics::Boolean { agreement, .. }, Metric::Agreement) => *agreement,
             (Metrics::Probability { brier, .. }, Metric::Brier) => *brier,
+            (Metrics::CalibratedProbability { brier, .. }, Metric::Brier) => *brier,
             _ => None,
         };
         if let Some(score) = score.filter(|v| v.is_finite()) {
