@@ -388,7 +388,9 @@ pub fn measure_with_thresholds(
     {
         return Err(EvidenceError::InvalidThresholds);
     }
-    let mut report = measure_inner(dataset, split, schemas, outcomes, max_cases, None, thresholds)?;
+    let mut report = measure_inner(
+        dataset, split, schemas, outcomes, max_cases, None, thresholds,
+    )?;
     let kinds = dataset
         .selected(split)
         .map(|case| case.label_provenance.kind)

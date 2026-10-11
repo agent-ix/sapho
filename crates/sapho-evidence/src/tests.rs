@@ -276,10 +276,27 @@ fn shadow_probability_brier_and_missing_coverage_have_explicit_absence() {
     assert!((kind.champion.brier.unwrap() - 0.16).abs() < 1e-12);
     assert!((kind.challenger.brier.unwrap() - 0.01).abs() < 1e-12);
     assert_eq!(kind.beat_champion, Some(true));
-    assert_eq!(kind.champion.ece, None);
+    assert!((kind.champion.ece.unwrap() - 0.4).abs() < 1e-12);
+    assert!((kind.challenger.ece.unwrap() - 0.1).abs() < 1e-12);
+    assert!(kind.champion.ece_reason.is_none());
+    let ece_request = ShadowComparisonRequest {
+        metric: ShadowMetric::Ece,
+        ..request.clone()
+    };
     assert_eq!(
-        kind.champion.ece_reason.as_deref(),
-        Some("shared_sapho_21_ece_unavailable")
+        compare_shadow(
+            &data,
+            Split::HeldOut,
+            &schemas,
+            &champion,
+            &challenger,
+            &ece_request,
+            10,
+        )
+        .unwrap()
+        .kinds[0]
+            .beat_champion,
+        Some(true)
     );
     let high_floor = ShadowComparisonRequest {
         min_scored: 3,
@@ -502,14 +519,13 @@ fn roster_partitions_actual_models_and_projects_only_measured_fields() {
     assert_eq!(b_metric.case_ids, vec![data.cases[1].id.clone()]);
     assert_eq!(a_metric.measurement.scored, 1);
     assert_eq!(b_metric.measurement.scored, 1);
-    assert_eq!(
-        a_metric.measurement.metrics,
-        Metrics::Probability {
-            brier: Some(0.03999999999999998)
-        }
-    );
-    assert_eq!(a_metric.ece, None);
-    assert_eq!(a_metric.ece_absent_reason.as_deref(), Some("not_computed"));
+    let Metrics::Probability { brier, ece, .. } = &a_metric.measurement.metrics else {
+        panic!("Probability metrics expected")
+    };
+    assert!((brier.unwrap() - 0.04).abs() < 1e-12);
+    assert!((ece.unwrap() - 0.2).abs() < 1e-12);
+    assert_eq!(a_metric.ece, *ece);
+    assert!(a_metric.ece_absent_reason.is_none());
     assert_eq!(
         report
             .unattributed
@@ -653,7 +669,10 @@ fn roster_partitions_actual_models_and_projects_only_measured_fields() {
     let Value::Record(replay_human) = &replay_result["human"] else {
         panic!("human")
     };
-    assert_eq!(replay_human["ece"], Value::Optional(None));
+    assert!(matches!(
+        &replay_human["ece"],
+        Value::Optional(Some(value)) if matches!(value.as_ref(), Value::Number(_))
+    ));
     replay.values_mut().next().unwrap().calls[0].mode = RosterMode::Live;
     assert!(
         roster(

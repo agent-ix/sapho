@@ -187,7 +187,7 @@ pub(crate) struct MeasureArgs {
     /// Public decision output mapped by the selected shadow observation.
     #[arg(long, requires = "shadow")]
     pub(crate) shadow_output: Option<String>,
-    /// Comparison metric; ECE is unavailable until SAPHO-21 lands.
+    /// Comparison metric; ECE uses the shared predicted-label confidence metric.
     #[arg(long, value_enum, requires = "shadow")]
     pub(crate) shadow_metric: Option<ShadowMetricArg>,
     /// Required positive scored cases in each role.

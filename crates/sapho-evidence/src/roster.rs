@@ -118,7 +118,7 @@ pub struct RosterMetric {
     pub measurement: OutputMeasurement,
     /// Shared calibration metric availability.
     pub ece: Option<f64>,
-    /// `not_computed` until SAPHO-21 provides the shared metric.
+    /// Reason when the shared metric has no scored Probability cases.
     pub ece_absent_reason: Option<String>,
 }
 /// One actual model under a binding, or its response-less bucket.
@@ -353,7 +353,7 @@ fn profile_value(
             metric_types.insert("scored".into(), ValueType::Number);
             let (agreement, brier) = match &metric.measurement.metrics {
                 crate::Metrics::Boolean { agreement, .. } => (*agreement, None),
-                crate::Metrics::Probability { brier } => (None, *brier),
+                crate::Metrics::Probability { brier, .. } => (None, *brier),
                 crate::Metrics::Unsupported { .. } => (None, None),
             };
             for (field, value) in [
@@ -652,13 +652,18 @@ pub fn roster(
                 let schema = BTreeMap::from([(output.clone(), schemas[&output].clone())]);
                 let measurement = measure(&subset, split, &schema, &selected, max_cases)?;
                 if let Some(value) = measurement.outputs.get(&output) {
+                    let ece = if let crate::Metrics::Probability { ece, .. } = &value.metrics {
+                        *ece
+                    } else {
+                        None
+                    };
                     outputs.entry(output).or_default().insert(
                         kind,
                         RosterMetric {
                             case_ids: ids.into_iter().collect(),
                             measurement: value.clone(),
-                            ece: None,
-                            ece_absent_reason: Some("not_computed".into()),
+                            ece,
+                            ece_absent_reason: ece.is_none().then(|| "not_computed".into()),
                         },
                     );
                 }
