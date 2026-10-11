@@ -1525,7 +1525,7 @@ fn converted_guard_checks_stale_map_in_stock_commands_without_public_calibrated_
     let good_report: serde_json::Value = serde_json::from_slice(&replay_good.stdout).unwrap();
     assert_eq!(good_report["outputs"]["decision"]["value"]["value"], true);
     assert_eq!(
-        good_report["outputs"]["slow_model"]["value"]["value"],
+        good_report["outputs"]["slow_model"]["value"]["value"]["value"],
         "slow-model"
     );
     assert_eq!(
