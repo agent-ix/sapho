@@ -1,7 +1,25 @@
 {
   "files": [
     "collections-light.svg",
-    "collections-dark.svg"
+    "collections-dark.svg",
+    "how-it-works-light.svg",
+    "how-it-works-dark.svg",
+    "model-answers-light.svg",
+    "model-answers-dark.svg",
+    "combine-strengths-light.svg",
+    "combine-strengths-dark.svg",
+    "layers-light.svg",
+    "layers-dark.svg",
+    "guard-light.svg",
+    "guard-dark.svg",
+    "evidence-loop-light.svg",
+    "evidence-loop-dark.svg",
+    "evidence-loop-still-light.svg",
+    "evidence-loop-still-dark.svg",
+    "multi-stage-light.svg",
+    "multi-stage-dark.svg",
+    "multi-stage-still-light.svg",
+    "multi-stage-still-dark.svg"
   ],
   "generated_by": "ixd build"
 }
