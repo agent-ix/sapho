@@ -2,7 +2,7 @@
 CARGO ?= cargo
 export CARGO_TARGET_DIR := target
 
-.PHONY: help fmt fmt-check lint test build clean deny audit-unsafe docs docs-check docs-examples spec coverage ci
+.PHONY: reports help fmt fmt-check lint test build clean deny audit-unsafe docs docs-check docs-examples spec coverage ci
 help:
 	@echo "Targets: fmt fmt-check lint test build clean deny audit-unsafe docs docs-check docs-examples spec coverage ci"
 fmt:
@@ -34,11 +34,17 @@ docs-examples:
 	$(CARGO) run --locked -p sapho-evidence --example measurement
 	$(CARGO) run --locked -p sapho-clm --example clm_configure
 	$(CARGO) build --locked -p sapho-cli --no-default-features
+	$(CARGO) test --locked -p sapho-cli --test evidence_reports
 	python3 scripts/check_docs.py
 docs-check: docs
 	$(CARGO) test --locked --workspace --doc --all-features
 	$(CARGO) test --locked --workspace --doc --no-default-features
 	$(MAKE) docs-examples
+# Regenerate the committed reports the evidence-loop figure reads, using the real commands.
+REVIEW_DATA = --dataset examples/data/code-review-dataset.json --replay examples/recordings/code-review.json
+reports:
+	$(CARGO) run --locked -q -p sapho-cli -- tune --candidate examples/graphs/code-review.yaml --candidate examples/graphs/code-review-relaxed.yaml $(REVIEW_DATA) --output-name needs_review --metric agreement > examples/reports/code-review-tune.json
+	$(CARGO) run --locked -q -p sapho-cli -- measure examples/graphs/code-review.yaml $(REVIEW_DATA) --split held_out > examples/reports/code-review-measure-held-out.json
 spec:
 	quire validate --scope . "spec/**/*.md"
 	quire validate --scope . "reviews/**/*.md"
