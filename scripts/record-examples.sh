@@ -7,8 +7,9 @@
 # Needs a CLI built with --features jev and TYPESAFE_API_KEY. Jev's answers
 # vary by a few hundredths between runs, so a new recording changes the
 # documented numbers: update the docs and scripts/check_docs.py (which pins
-# them), and re-render the figures (docs/images/figures.py reads the
-# recordings) with the docs-figures skill from agent-ix/dev-tools.
+# them), and re-render the figures that read the recordings (docs/images/figures.py)
+# with the docs-figures skill from agent-ix/dev-tools. The collections figure
+# reads no recording; `make figures` renders it from docs/images/figures.json.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
