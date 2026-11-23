@@ -8,7 +8,11 @@ Regenerate from the repository root with the agent-ix/dev-tools skill:
     python3 <dev-tools>/skills/docs-figures/scripts/render.py docs/images/figures.py
 
 Add --check to confirm the committed SVGs are current. Model answers are read
-from the recordings in examples/recordings/.
+from the recordings in examples/recordings/. The collections figure is defined in
+docs/images/figures.json and rendered by `make figures`. The figures here read the
+recordings by matching the recorded state, then print probabilities to two decimals,
+and animate; bindings cannot express the lookup, the rounding or the
+animation-with-data combination yet.
 """
 
 import json
@@ -366,37 +370,6 @@ def guard():
     return f
 
 
-def collections():
-    """Many items: map, filter and pairs keep each item's identity."""
-    f = Figure(
-        "collections",
-        980,
-        210,
-        "n statements are mapped through a model subgraph, giving one answer per statement. "
-        "filter keeps the k that pass, pairs forms every candidate with m components, a "
-        "second map judges each candidate, and findings keep the IDs of the items they came from.",
-    )
-    cy = 70
-    f.box(0, cy - 30, 130, 60, "ink", "statements", "n items")
-    f.box(170, cy - 30, 150, 60, "model", "map", "ask each item")
-    f.box(360, cy - 30, 120, 60, "logic", "filter", "mask: passed")
-    f.box(520, cy - 30, 130, 60, "logic", "pairs", "k × m")
-    f.box(690, cy - 30, 130, 60, "model", "map", "judge each pair")
-    f.box(860, cy - 30, 120, 60, "ink", "findings", "item IDs kept")
-    f.box(360, 134, 120, 50, "ink", "components", "m items")
-    f.line([(130, cy), (167, cy)], "ink")
-    f.line([(320, cy), (357, cy)], "model")
-    f.note(325, cy - 9, "n", "model")
-    f.line([(480, cy), (517, cy)], "logic")
-    f.note(487, cy - 9, "k", "logic")
-    f.line([(480, 159), (585, 159), (585, cy + 33)], "ink")
-    f.line([(650, cy), (687, cy)], "logic")
-    f.line([(820, cy), (857, cy)], "model", weight=2.4)
-    f.text(0, 128, "each item carries its ID", "evidence", "mono", SMALL)
-    f.text(0, 145, "and sources through every step", "evidence", "mono", SMALL)
-    return f
-
-
 def evidence_loop():
     """Record once, then measure and tune offline against labelled cases.
 
@@ -585,7 +558,6 @@ FIGURES = [
     combine_strengths,
     layers,
     guard,
-    collections,
     evidence_loop,
     multi_stage,
 ]

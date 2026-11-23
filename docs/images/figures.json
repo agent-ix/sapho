@@ -1,0 +1,29 @@
+{
+  "figures": [
+    {
+      "id": "collections",
+      "width": 980, "height": 210,
+      "label": "n statements are mapped through a model subgraph, giving one answer per statement. filter keeps the k that pass, pairs forms every candidate with m components, a second map judges each candidate, and findings keep the IDs of the items they came from.",
+      "items": [
+        {"k":"box","at":[0,40,130,60],"role":"ink","title":"statements","subs":["n items"]},
+        {"k":"box","at":[170,40,150,60],"role":"model","title":"map","subs":["ask each item"]},
+        {"k":"box","at":[360,40,120,60],"role":"logic","title":"filter","subs":["mask: passed"]},
+        {"k":"box","at":[520,40,130,60],"role":"logic","title":"pairs","subs":["k × m"]},
+        {"k":"box","at":[690,40,130,60],"role":"model","title":"map","subs":["judge each pair"]},
+        {"k":"box","at":[860,40,120,60],"role":"ink","title":"findings","subs":["item IDs kept"]},
+        {"k":"box","at":[360,134,120,50],"role":"ink","title":"components","subs":["m items"]},
+        {"k":"line","points":[[130,70],[167,70]]},
+        {"k":"line","points":[[320,70],[357,70]],"role":"model"},
+        {"k":"note","at":[325,61],"text":"n","role":"model"},
+        {"k":"line","points":[[480,70],[517,70]],"role":"logic"},
+        {"k":"note","at":[487,61],"text":"k","role":"logic"},
+        {"k":"line","points":[[480,159],[585,159],[585,103]]},
+        {"k":"line","points":[[650,70],[687,70]],"role":"logic"},
+        {"k":"line","points":[[820,70],[857,70]],"role":"model","weight":2.4},
+        {"k":"text","at":[0,128],"text":"each item carries its ID","role":"evidence","size":12},
+        {"k":"text","at":[0,145],"text":"and sources through every step","role":"evidence","size":12}
+      ]
+    }
+  ]
+}
+
