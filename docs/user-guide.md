@@ -1027,7 +1027,7 @@ commands. The [AGPL license](../LICENSE), [CLA](../CLA.md) and
 [content rights](../CONTENT_RIGHTS.md) describe contribution terms.
 
 The figures are light and dark SVGs defined in
-[`images/figures.py`](images/figures.py) and rendered by the `docs-figures`
-skill from [agent-ix/dev-tools](https://github.com/agent-ix/dev-tools); their
-model values come from the recordings in
-[`examples/recordings/`](../examples/recordings/).
+[`images/figures.json`](images/figures.json) and rendered by `make figures`
+(`make figures-check` confirms they are current), which runs `ixd build` from
+[agent-ix/ix-diagrams](https://github.com/agent-ix/ix-diagrams). Their model values
+come from the recordings in [`examples/recordings/`](../examples/recordings/).

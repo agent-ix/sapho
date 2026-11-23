@@ -1,0 +1,368 @@
+{
+  "data": {
+    "cr_case": {"from":"json","path":"examples/data/code-review-input.json","pointer":"","raw":true},
+    "cr_ex": {"from":"json","path":"examples/recordings/code-review.json","pointer":"/exchanges","raw":true},
+    "rq_ex": {"from":"json","path":"examples/recordings/requirement-check.json","pointer":"/exchanges","raw":true},
+    "cr_cases": {"from":"json","path":"examples/data/code-review-dataset.json","pointer":"/cases","raw":true},
+    "combine": {"from":"json","path":"examples/data/combine-input.json","pointer":"/samples","raw":true},
+    "st_brake_lamp": {"from":"json","path":"examples/data/requirements/brake-lamp.json","pointer":"/statement"},
+    "st_cabin_light": {"from":"json","path":"examples/data/requirements/cabin-light.json","pointer":"/statement"},
+    "st_pump": {"from":"json","path":"examples/data/requirements/pump.json","pointer":"/statement"},
+    "st_report": {"from":"json","path":"examples/data/requirements/report.json","pointer":"/statement"},
+    "st_fast": {"from":"json","path":"examples/data/requirements/fast.json","pointer":"/statement"},
+    "cr_contract_ex": {"from":"expr","value":"find(where(where(cr_ex, 'request.backend', 'judge'), 'request.questions.id', 'contract_risk'), 'request.state.value.change.value', cr_case.change)"},
+    "judge_kind": {"from":"expr","value":"where(where(rq_ex, 'request.backend', 'judge'), 'request.questions.id', 'kind')"},
+    "judge_complete": {"from":"expr","value":"where(where(rq_ex, 'request.backend', 'judge'), 'request.questions.id', 'complete')"},
+    "expert_complete": {"from":"expr","value":"where(where(rq_ex, 'request.backend', 'expert'), 'request.questions.id', 'complete')"},
+    "stmts": {"from":"expr","value":"[rec('label', 'brake lamp', 'kind', find(judge_kind, 'request.state.value.statement.value', st_brake_lamp), 'complete', find(judge_complete, 'request.state.value.statement.value', st_brake_lamp), 'experts', where(expert_complete, 'request.state.value.statement.value', st_brake_lamp)), rec('label', 'cabin light', 'kind', find(judge_kind, 'request.state.value.statement.value', st_cabin_light), 'complete', find(judge_complete, 'request.state.value.statement.value', st_cabin_light), 'experts', where(expert_complete, 'request.state.value.statement.value', st_cabin_light)), rec('label', 'pump pressure', 'kind', find(judge_kind, 'request.state.value.statement.value', st_pump), 'complete', find(judge_complete, 'request.state.value.statement.value', st_pump), 'experts', where(expert_complete, 'request.state.value.statement.value', st_pump)), rec('label', 'report promptly', 'kind', find(judge_kind, 'request.state.value.statement.value', st_report), 'complete', find(judge_complete, 'request.state.value.statement.value', st_report), 'experts', where(expert_complete, 'request.state.value.statement.value', st_report)), rec('label', 'respond quickly', 'kind', find(judge_kind, 'request.state.value.statement.value', st_fast), 'complete', find(judge_complete, 'request.state.value.statement.value', st_fast), 'experts', where(expert_complete, 'request.state.value.statement.value', st_fast))]"},
+    "report_row": {"from":"expr","value":"stmts[3]"},
+    "fast_row": {"from":"expr","value":"stmts[4]"},
+    "brake_row": {"from":"expr","value":"stmts[0]"}
+  },
+  "figures": [
+    {
+      "id": "collections",
+      "width": 980, "height": 210,
+      "label": "n statements are mapped through a model subgraph, giving one answer per statement. filter keeps the k that pass, pairs forms every candidate with m components, a second map judges each candidate, and findings keep the IDs of the items they came from.",
+      "items": [
+        {"k":"box","at":[0,40,130,60],"role":"ink","title":"statements","subs":["n items"]},
+        {"k":"box","at":[170,40,150,60],"role":"model","title":"map","subs":["ask each item"]},
+        {"k":"box","at":[360,40,120,60],"role":"logic","title":"filter","subs":["mask: passed"]},
+        {"k":"box","at":[520,40,130,60],"role":"logic","title":"pairs","subs":["k × m"]},
+        {"k":"box","at":[690,40,130,60],"role":"model","title":"map","subs":["judge each pair"]},
+        {"k":"box","at":[860,40,120,60],"role":"ink","title":"findings","subs":["item IDs kept"]},
+        {"k":"box","at":[360,134,120,50],"role":"ink","title":"components","subs":["m items"]},
+        {"k":"line","points":[[130,70],[167,70]]},
+        {"k":"line","points":[[320,70],[357,70]],"role":"model"},
+        {"k":"note","at":[325,61],"text":"n","role":"model"},
+        {"k":"line","points":[[480,70],[517,70]],"role":"logic"},
+        {"k":"note","at":[487,61],"text":"k","role":"logic"},
+        {"k":"line","points":[[480,159],[585,159],[585,103]]},
+        {"k":"line","points":[[650,70],[687,70]],"role":"logic"},
+        {"k":"line","points":[[820,70],[857,70]],"role":"model","weight":2.4},
+        {"k":"text","at":[0,128],"text":"each item carries its ID","role":"evidence","size":12},
+        {"k":"text","at":[0,145],"text":"and sources through every step","role":"evidence","size":12}
+      ]
+    },
+    {
+      "id": "how-it-works",
+      "width": 980, "height": 356,
+      "let": {
+        "contract": "=cr_contract_ex.response.answers.contract_risk.probability",
+        "gap": "=cr_contract_ex.response.answers.test_gap.probability",
+        "api": "=cr_case.public_api_changed",
+        "risky": "=contract >= 0.7",
+        "untested": "=gap >= 0.8",
+        "either": "=risky or untested",
+        "decision": "=api and either"
+      },
+      "label": "A code change and two yes/no questions go to Jev in one request. Jev answers {contract:.2f} for contract risk and {gap:.2f} for a test gap. {contract:.2f} {if(risky, 'clears', 'misses')} its 0.7 threshold and {gap:.2f} {if(untested, 'clears', 'misses')} its 0.8 threshold, so OR gives {if(either, 'true', 'false')}. AND with the public_api_changed fact from your code gives needs_review = {if(decision, 'true', 'false')}.",
+      "items": [
+        {"k":"box","at":[156,4,128,64],"role":"model","title":"questions","subs":["contract_risk?","test_gap?"]},
+        {"k":"box","at":[0,142,100,56],"role":"ink","title":"change","subs":["the diff"]},
+        {"k":"box","at":[156,142,128,56],"role":"model","title":"ask Jev","subs":["1 request"]},
+        {"k":"box","at":[324,98,136,50],"role":"model","title":"contract_risk","subs":["P(yes) = {contract:.2f}"]},
+        {"k":"box","at":[324,192,136,50],"role":"model","title":"test_gap","subs":["P(yes) = {gap:.2f}"]},
+        {"k":"box","at":[500,98,96,50],"role":"logic","title":"≥ 0.7","subs":["{if(risky, 'true', 'false')}"]},
+        {"k":"box","at":[500,192,96,50],"role":"logic","title":"≥ 0.8","subs":["{if(untested, 'true', 'false')}"]},
+        {"k":"box","at":[636,145,64,50],"role":"logic","title":"or","subs":["{if(either, 'true', 'false')}"]},
+        {"k":"box","at":[500,270,200,50],"role":"code","title":"public_api_changed","subs":["your code · {if(api, 'true', 'false')}"]},
+        {"k":"box","at":[740,145,64,50],"role":"logic","title":"and","subs":["{if(decision, 'true', 'false')}"]},
+        {"k":"box","at":[844,142,136,56],"role":"ink","title":"needs_review","subs":["{if(decision, 'true', 'false')} + trace"]},
+        {"k":"line","points":[[100,170],[153,170]],"role":"ink"},
+        {"k":"note","at":[108,161],"text":"state","role":"muted"},
+        {"k":"line","points":[[220,68],[220,139]],"role":"model"},
+        {"k":"line","points":[[284,170],[304,170],[304,123],[321,123]],"role":"model"},
+        {"k":"line","points":[[304,170],[304,217],[321,217]],"role":"model"},
+        {"k":"note","at":[312,175],"text":"answers","role":"model"},
+        {"k":"line","points":[[460,123],[497,123]],"role":"model"},
+        {"k":"line","points":[[460,217],[497,217]],"role":"model"},
+        {"k":"line","points":[[596,123],[616,123],[616,160],[633,160]],"role":"logic"},
+        {"k":"line","points":[[596,217],[616,217],[616,180],[633,180]],"role":"logic"},
+        {"k":"line","points":[[700,170],[737,170]],"role":"logic"},
+        {"k":"line","points":[[700,295],[772,295],[772,198]],"role":"code"},
+        {"k":"line","points":[[804,170],[841,170]],"role":"logic","weight":2.4},
+        {"k":"legend","at":[0,352],"entries":[["code","your code","box"],["model","model answer","box"],["logic","your rule","box"],["ink","input / decision","box"]]}
+      ]
+    },
+    {
+      "id": "model-answers",
+      "width": 980, "height": 306,
+      "let": {
+        "p": "=cr_contract_ex.response.answers.contract_risk.probability",
+        "kind": "=fast_row.kind.response.answers.kind",
+        "testable": "=fast_row.kind.response.answers.testable",
+        "q_yes": "=find(cr_contract_ex.request.questions, 'id', 'contract_risk').question",
+        "q_kind": "=find(fast_row.kind.request.questions, 'id', 'kind').question",
+        "q_test": "=find(fast_row.kind.request.questions, 'id', 'testable').question",
+        "options": "=pluck(q_kind.options, 'label')",
+        "conditional": "=kind.probabilities.event + kind.probabilities.state + kind.probabilities.unwanted",
+        "top": "=len(q_test.levels) - 1",
+        "levels": "=str(range(len(q_test.levels)))",
+        "kind_extra": "=join(['selected ', kind.selected, ' · confidence ', fmt(kind.confidence, 2)], '')",
+        "test_extra": "=join(['expected ', fmt(testable.expected, 2), ' of ', top, ' · confidence ', fmt(testable.confidence, 2)], '')"
+      },
+      "label": "Three answers from Jev. Yes/no: yes {p:.2f}, no {1 - p:.2f}; counting label true gives {p:.2f}. Choice: {join(zip_join(options, fmt(pick(kind.probabilities, options), 2), ' '), ', ')}, {kind_extra}; counting event, state, unwanted gives {conditional:.2f}. Score: {join(rsub(zip_join(levels, fmt(pick(testable.probabilities, levels), 2), ' '), '^', 'level '), ', ')}, {test_extra}; counting level {top} gives {get(testable.probabilities, str(top)):.2f}.",
+      "items": [
+        {"k":"text","at":[0,16],"text":"yes / no","role":"ink","font":"title"},
+        {"k":"para","at":[0,36],"text":"=q_yes.instructions","width":300},
+        {"k":"repeat","over":["yes","no"],"let":{"y":"=76 + i * 24","v":"=if(i == 0, p, 1 - p)"},"items":[
+          {"k":"text","at":[0,"=y + 10"],"text":"=row","role":"ink","size":12},
+          {"k":"rect","at":[96,"=y",160,12],"role":"faint","stroke":false,"opacity":0.35,"rx":2},
+          {"k":"bar","at":[96,"=y","=160 * v",12],"role":"=if(i == 0, 'model', 'muted')"},
+          {"k":"text","at":[264,"=y + 10"],"text":"{v:.2f}","role":"ink","size":12}
+        ]},
+        {"k":"line","points":[[0,214],[300,214]],"role":"faint","weight":1,"arrow":false},
+        {"k":"text","at":[0,238],"text":"probability","role":"model","font":"title"},
+        {"k":"text","at":[0,258],"text":"labels [true]  →  {p:.2f}","role":"model","size":12},
+
+        {"k":"text","at":[340,16],"text":"choice","role":"ink","font":"title"},
+        {"k":"para","at":[340,36],"text":"=q_kind.instructions","width":300},
+        {"k":"repeat","over":"options","let":{"y":"=76 + i * 24","v":"=get(kind.probabilities, row)"},"items":[
+          {"k":"text","at":[340,"=y + 10"],"text":"=row","role":"ink","size":12},
+          {"k":"rect","at":[436,"=y",160,12],"role":"faint","stroke":false,"opacity":0.35,"rx":2},
+          {"k":"bar","at":[436,"=y","=160 * v",12],"role":"=if(contains(['event', 'state', 'unwanted'], row), 'model', 'muted')"},
+          {"k":"text","at":[604,"=y + 10"],"text":"{v:.2f}","role":"ink","size":12}
+        ]},
+        {"k":"text","at":[340,190],"text":"=kind_extra","role":"muted","size":12},
+        {"k":"line","points":[[340,214],[640,214]],"role":"faint","weight":1,"arrow":false},
+        {"k":"text","at":[340,238],"text":"probability","role":"model","font":"title"},
+        {"k":"text","at":[340,258],"text":"labels [event, state, unwanted]  →  {conditional:.2f}","role":"model","size":12},
+
+        {"k":"text","at":[680,16],"text":"score","role":"ink","font":"title"},
+        {"k":"para","at":[680,36],"text":"=q_test.instructions","width":300},
+        {"k":"repeat","over":"=levels","let":{"y":"=76 + i * 24","v":"=get(testable.probabilities, row)"},"items":[
+          {"k":"text","at":[680,"=y + 10"],"text":"level {row}","role":"ink","size":12},
+          {"k":"rect","at":[776,"=y",160,12],"role":"faint","stroke":false,"opacity":0.35,"rx":2},
+          {"k":"bar","at":[776,"=y","=160 * v",12],"role":"=if(row == str(top), 'model', 'muted')"},
+          {"k":"text","at":[944,"=y + 10"],"text":"{v:.2f}","role":"ink","size":12}
+        ]},
+        {"k":"text","at":[680,190],"text":"=test_extra","role":"muted","size":12},
+        {"k":"line","points":[[680,214],[980,214]],"role":"faint","weight":1,"arrow":false},
+        {"k":"text","at":[680,238],"text":"probability","role":"model","font":"title"},
+        {"k":"text","at":[680,258],"text":"labels [{top}]  →  {get(testable.probabilities, str(top)):.2f}","role":"model","size":12},
+        {"k":"legend","at":[0,302],"entries":[["model","counted by probability","fill"],["muted","not counted","fill"]]}
+      ]
+    },
+    {
+      "id": "combine-strengths",
+      "width": 900, "height": 236,
+      "let": {
+        "a": "=combine[0].support", "b": "=combine[1].support", "c": "=combine[2].support",
+        "mean": "=(combine[0].weight * a + combine[1].weight * b + combine[2].weight * c) / (combine[0].weight + combine[1].weight + combine[2].weight)",
+        "lo": "=min(a, b, c)", "hi": "=max(a, b, c)",
+        "rows": [
+          {"n":"min","w":"weakest part decides","y":64},
+          {"n":"max","w":"strongest part decides","y":110},
+          {"n":"weighted_mean","w":"weights 2 : 1 : 1","y":156}
+        ],
+        "scores": "=[lo, hi, mean]",
+        "samples": [{"n":"A"},{"n":"B"},{"n":"C"}],
+        "supports": "=[a, b, c]"
+      },
+      "label": "Strengths A {a:.1f}, B {b:.1f} and C {c:.1f}. Minimum gives {lo:.2f} and maximum {hi:.2f}; a weighted mean with weights {combine[0].weight}, {combine[1].weight} and {combine[2].weight} gives {mean:.2f}. With review when the result is below 0.7, minimum and mean ask for review and maximum does not.",
+      "items": [
+        {"k":"text","at":[0,34],"text":"strengths","role":"ink","font":"title"},
+        {"k":"line","points":[[236,30],[716,30]],"role":"faint","weight":1,"arrow":false},
+        {"k":"repeat","over":"samples","let":{"v":"=supports[i]"},"items":[
+          {"k":"dot","at":["=236 + 480 * v",30,6],"role":"model"},
+          {"k":"text","at":["=236 + 480 * v",16],"text":"{row.n} {v:.1f}","role":"ink","size":12,"anchor":"middle"}
+        ]},
+        {"k":"repeat","over":"rows","let":{"v":"=scores[i]"},"items":[
+          {"k":"text","at":[0,"=row.y + 12"],"text":"=row.n","role":"logic","font":"title"},
+          {"k":"text","at":[0,"=row.y + 29"],"text":"=row.w","role":"muted","size":12},
+          {"k":"rect","at":[236,"=row.y + 2",480,16],"role":"faint","stroke":false,"opacity":0.35,"rx":2},
+          {"k":"bar","at":[236,"=row.y + 2","=480 * v",16],"role":"logic"},
+          {"k":"text","at":[740,"=row.y + 15"],"text":"{v:.2f}","role":"ink","size":12},
+          {"k":"text","at":[796,"=row.y + 15"],"text":"=if(v < 0.7, 'review', 'no review')","role":"=if(v < 0.7, 'evidence', 'muted')","font":"title"}
+        ]},
+        {"k":"line","points":[[572,48],[572,196]],"role":"evidence","weight":1.5,"dashed":true,"arrow":false},
+        {"k":"text","at":[578,212],"text":"review if < 0.7","role":"evidence","size":12},
+        {"k":"text","at":[236,212],"text":"0","role":"muted","size":12,"anchor":"middle"},
+        {"k":"text","at":[476,212],"text":"0.5","role":"muted","size":12,"anchor":"middle"},
+        {"k":"text","at":[716,212],"text":"1","role":"muted","size":12,"anchor":"middle"}
+      ]
+    },
+    {
+      "id": "layers",
+      "width": 980, "height": 250,
+      "let": {
+        "kind": "=report_row.kind.response.answers.kind",
+        "event": "=kind.probabilities.event",
+        "conditional": "=kind.probabilities.event + kind.probabilities.state + kind.probabilities.unwanted",
+        "first": "=report_row.complete.response.answers.complete.probability"
+      },
+      "label": "Layer 1 asks Jev which pattern the requirement follows. Its answer, has_condition {conditional:.2f}, is placed in the context for layer 2 next to the same statement. Layer 2 asks whether the condition and response are stated and gets {first:.2f}, which goes on to the expert check.",
+      "items": [
+        {"k":"text","at":[0,14],"text":"LAYER 1","role":"muted","size":12},
+        {"k":"text","at":[0,152],"text":"LAYER 2","role":"muted","size":12},
+        {"k":"box","at":[0,34,150,56],"role":"ink","title":"statement","subs":["“…it promptly.”"]},
+        {"k":"box","at":[196,34,150,56],"role":"model","title":"ask Jev","subs":["kind? · testable?"]},
+        {"k":"box","at":[392,31,210,62],"role":"model","title":"kind","subs":["event {event:.2f}","has_condition = {conditional:.2f}"]},
+        {"k":"box","at":[196,172,210,68],"role":"logic","title":"context for layer 2","subs":["statement","has_condition: {conditional:.2f}"]},
+        {"k":"box","at":[452,178,150,56],"role":"model","title":"ask Jev","subs":["complete?"]},
+        {"k":"box","at":[648,178,150,56],"role":"model","title":"first answer","subs":["P(yes) = {first:.2f}"]},
+        {"k":"line","points":[[150,62],[193,62]],"role":"ink"},
+        {"k":"line","points":[[346,62],[389,62]],"role":"model"},
+        {"k":"line","points":[[497,93],[497,130],[301,130],[301,169]],"role":"model","weight":2.4},
+        {"k":"note","at":[510,116],"text":"the layer-1 answer","sub":"becomes context","role":"model"},
+        {"k":"line","points":[[75,90],[75,206],[193,206]],"role":"ink"},
+        {"k":"note","at":[84,198],"text":"same text","role":"muted"},
+        {"k":"line","points":[[406,206],[449,206]],"role":"logic"},
+        {"k":"line","points":[[602,206],[645,206]],"role":"model"},
+        {"k":"line","points":[[798,206],[880,206]],"role":"model","weight":2.4},
+        {"k":"note","at":[806,197],"text":"to the","role":"muted"},
+        {"k":"text","at":[806,228],"text":"expert check","role":"muted","size":12}
+      ]
+    },
+    {
+      "id": "guard",
+      "width": 980, "height": 420,
+      "let": {
+        "asked": "=where(stmts, 'experts.request.backend', 'expert')",
+        "firsts": "=pluck(pluck(stmts, 'complete'), 'response.answers.complete.probability')",
+        "unsure": "=pluck(pluck(asked, 'complete'), 'response.answers.complete.probability')",
+        "experts": "=pluck(flatten(pluck(asked, 'experts')), 'response.answers.complete.probability')",
+        "ticks": [{"t":"0"},{"t":"0.2"},{"t":"0.5"},{"t":"0.8"},{"t":"1"}]
+      },
+      "label": "First answers for {len(stmts)} requirements: {join(fmt(firsts, 2), ', ')}. Only {join(fmt(unsure, 2), ', ')} falls in the unsure band from 0.2 to 0.8, so only that statement goes to the expert, which answers {join(fmt(experts, 2), ', ')}. The others keep their first answer. Coalesce picks the expert's answer when one exists, and the result is compared with 0.8.",
+      "items": [
+        {"k":"text","at":[0,14],"text":"first answer · P(complete)","role":"ink","font":"title"},
+        {"k":"rect","at":[298,28,384,128],"role":"evidence","stroke":false,"opacity":0.08,"rx":2},
+        {"k":"text","at":[490,14],"text":"unsure: 0.2 ≤ P < 0.8 → ask the expert","role":"evidence","size":12,"anchor":"middle"},
+        {"k":"repeat","over":"stmts","let":{"y":"=44 + i * 24","p":"=row.complete.response.answers.complete.probability","was_asked":"=len(row.experts) > 0","e":"=if(len(row.experts) > 0, row.experts[0].response.answers.complete.probability, 0)","px":"=170 + 640 * p","ex":"=170 + 640 * e"},"items":[
+          {"k":"text","at":[0,"=y + 4"],"text":"=row.label","role":"ink","size":12},
+          {"k":"line","points":[[170,"=y"],[810,"=y"]],"role":"faint","weight":1,"arrow":false},
+          {"k":"dot","at":["=px","=y",5.5],"role":"model"},
+          {"k":"text","at":["=px + 12","=y + 4"],"text":"{p:.2f}","role":"ink","size":12,"when":"=not was_asked and p < 0.9"},
+          {"k":"text","at":["=px - 12","=y + 4"],"text":"{p:.2f}","role":"ink","size":12,"anchor":"end","when":"=not was_asked and p >= 0.9"},
+          {"k":"line","points":[["=px - 8","=y"],["=ex + 9","=y"]],"role":"evidence","weight":1.5,"dashed":true,"when":"=was_asked"},
+          {"k":"dot","at":["=ex","=y",5.5],"role":"evidence","filled":false,"when":"=was_asked"},
+          {"k":"text","at":["=px + 12","=y + 4"],"text":"{p:.2f}","role":"ink","size":12,"when":"=was_asked"},
+          {"k":"text","at":["=ex","=y - 10"],"text":"expert {e:.2f}","role":"evidence","size":12,"anchor":"middle","when":"=was_asked"}
+        ]},
+        {"k":"repeat","over":"ticks","items":[
+          {"k":"text","at":["=170 + 640 * row.t","=172"],"text":"=row.t","role":"muted","size":12,"anchor":"middle"}
+        ]},
+        {"k":"box","at":[0,302,140,56],"role":"model","title":"first answer","subs":["layer 2"]},
+        {"k":"box","at":[184,302,150,56],"role":"logic","title":"unsure?","subs":["0.2 ≤ P < 0.8"]},
+        {"k":"box","at":[420,250,150,56],"role":"model","title":"ask the expert","subs":["guarded"],"dashed":true},
+        {"k":"box","at":[620,302,150,56],"role":"logic","title":"coalesce","subs":["expert, else first"]},
+        {"k":"box","at":[830,302,150,56],"role":"ink","title":"complete ≥ 0.8","subs":["ok"]},
+        {"k":"line","points":[[140,330],[181,330]],"role":"model"},
+        {"k":"line","points":[[334,316],[370,316],[370,278],[417,278]],"role":"logic","dashed":true},
+        {"k":"note","at":[378,304],"text":"true","role":"logic"},
+        {"k":"line","points":[[570,278],[595,278],[595,320],[617,320]],"role":"model","dashed":true},
+        {"k":"note","at":[578,268],"text":"{fmt(experts[0], 2)}","role":"model","when":"=len(asked) == 1"},
+        {"k":"line","points":[[70,358],[70,392],[695,392],[695,361]],"role":"model"},
+        {"k":"note","at":[380,384],"text":"the first answer, kept when the expert is skipped","role":"muted","anchor":"middle"},
+        {"k":"line","points":[[770,330],[827,330]],"role":"logic","weight":2.4},
+        {"k":"legend","at":[0,418],"entries":[["model","skipped for {len(stmts) - len(asked)} of {len(stmts)} statements","dash"]]}
+      ]
+    },
+    {
+      "id": "evidence-loop",
+      "width": 980, "height": 300, "cycle": 10.3,
+      "let": {
+        "dev": "=len(where(cr_cases, 'split', 'development'))",
+        "held": "=len(where(cr_cases, 'split', 'held_out'))",
+        "saved": "=len(cr_ex)",
+        "best": "0.7 / 0.8 rule", "best_score": 1.0,
+        "other": "0.9 / 0.9 rule", "other_score": 0.67,
+        "held_agreement": 1.0,
+        "end": 9.8,
+        "edges": [
+          {"pts":[[160,48],[209,48]],"role":"logic","w":1.5,"dash":false,"travel":0.4,"t0":0.4,"dt":0,"n":1},
+          {"pts":[[160,185],[186,185],[186,60],[209,60]],"role":"evidence","w":1.5,"dash":false,"travel":0.8,"t0":0.4,"dt":0,"n":1},
+          {"pts":[[372,48],[421,48]],"role":"model","w":1.5,"dash":false,"travel":0.5,"t0":1.5,"dt":0.16,"n":"=saved"},
+          {"pts":[[584,48],[657,48]],"role":"evidence","w":2.4,"dash":false,"travel":0.6,"t0":3.4,"dt":0.6,"n":2},
+          {"pts":[[755,82],[755,147]],"role":"logic","w":1.5,"dash":false,"travel":0.5,"t0":5.2,"dt":0,"n":1},
+          {"pts":[[160,200],[421,200]],"role":"evidence","w":1.5,"dash":false,"travel":0.6,"t0":6.3,"dt":0.2,"n":"=dev"},
+          {"pts":[[504,220],[504,245]],"role":"evidence","w":1.5,"dash":true,"travel":0.3,"t0":7.2,"dt":0,"n":1}
+        ]
+      },
+      "label": "A graph and a labelled dataset of {len(cr_cases)} cases, {dev} for development and {held} held out. sapho record runs once per case against Jev and the {saved} answers are saved in one recording. Tune and measure then run offline: tuning on development cases scores the {best} {best_score:.2f} and the {other} {other_score:.2f}. The chosen rule is measured once on held-out cases, and development cases can be exported for a trainer outside Sapho.",
+      "items": [
+        {"k":"box","at":[0,20,160,56],"role":"logic","title":"graph","subs":["code-review.yaml"],"lit":[[0.2,"=end"]]},
+        {"k":"box","at":[0,150,160,70],"role":"evidence","title":"labelled cases","subs":["{dev} development","{held} held out"],"lit":[[0.2,"=end"]]},
+        {"k":"box","at":[212,20,160,56],"role":"model","title":"sapho record","subs":["Jev · once per case"],"lit":[[1.2,"=end"]]},
+        {"k":"box","at":[424,20,160,56],"role":"evidence","title":"recording","subs":[[{"text":"{saved} saved answers","windows":[["=1.5 + 0.16 * (saved - 1) + 0.5","=end"]],"still":true}]],"lit":[[2.0,"=end"]]},
+        {"k":"box","at":[660,14,190,68],"role":"logic","title":"sapho tune","subs":[[{"text":"{best}  {best_score:.2f}","windows":[[4.0,"=end"]],"still":true}],[{"text":"{other}  {other_score:.2f}","windows":[[4.6,"=end"]],"still":true}]],"lit":[[4.0,"=end"]]},
+        {"k":"box","at":[660,150,190,70],"role":"logic","title":"sapho measure","subs":["held out · once",[{"text":"agreement {held_agreement:.2f}","windows":[[5.8,"=end"]],"still":true}]],"lit":[[5.7,"=end"]]},
+        {"k":"box","at":[424,150,160,70],"role":"evidence","title":"export-training","subs":["development only","JSONL"],"lit":[[7.1,"=end"]]},
+        {"k":"box","at":[424,248,160,52],"role":"ink","title":"your trainer","subs":["outside Sapho"],"dashed":true,"lit":[[7.5,"=end"]]},
+        {"k":"repeat","over":"edges","items":[
+          {"k":"line","points":"=row.pts","role":"=row.role","weight":"=row.w","dashed":"=row.dash","anim":{"lit":[["=row.t0","=end"]]}},
+          {"k":"repeat","over":"=range(row.n)","as":"step","items":[
+            {"k":"token","points":"=row.pts","role":"=row.role","start":"=row.t0 + row.dt * step","end":"=row.t0 + row.dt * step + row.travel"}
+          ]}
+        ]},
+        {"k":"note","at":[380,40],"text":"live","role":"model"},
+        {"k":"note","at":[592,40],"text":"offline","role":"evidence"},
+        {"k":"note","at":[764,120],"text":"pick the winner","role":"logic"}
+      ]
+    },
+    {
+      "id": "multi-stage",
+      "width": 980, "height": 392, "cycle": "=end1 + 0.5",
+      "let": {
+        "t0": 0.2, "end0": "=t0 + 9.6", "t1": "=end0 + 0.5", "end1": "=t1 + 7.8",
+        "k0": "=report_row.kind.response.answers.kind",
+        "ev0": "=k0.probabilities.event",
+        "cond0": "=k0.probabilities.event + k0.probabilities.state + k0.probabilities.unwanted",
+        "first0": "=report_row.complete.response.answers.complete.probability",
+        "exp0": "=if(len(report_row.experts) > 0, report_row.experts[0].response.answers.complete.probability, 0)",
+        "final0": "=if(first0 >= 0.2 and first0 < 0.8, exp0, first0)",
+        "ok0": "=final0 >= 0.8",
+        "k1": "=brake_row.kind.response.answers.kind",
+        "ev1": "=k1.probabilities.event",
+        "cond1": "=k1.probabilities.event + k1.probabilities.state + k1.probabilities.unwanted",
+        "first1": "=brake_row.complete.response.answers.complete.probability",
+        "final1": "=first1",
+        "ok1": "=first1 >= 0.8",
+        "shape": "=ensure(first0 >= 0.2 and first0 < 0.8 and (first1 < 0.2 or first1 >= 0.8), 'multi-stage: the report statement must be unsure and the brake-lamp statement sure')",
+        "skipped": "=len(stmts) - len(where(stmts, 'experts.request.backend', 'expert'))",
+        "edges": [
+          {"pts":[[150,50],[193,50]],"role":"ink","w":1.5,"dash":false,"d":0.3,"tr":0.4,"u":true,"s":true},
+          {"pts":[[346,50],[389,50]],"role":"model","w":1.5,"dash":false,"d":1.1,"tr":0.4,"u":true,"s":true},
+          {"pts":[[497,81],[497,108],[301,108],[301,133]],"role":"model","w":2.4,"dash":false,"d":1.8,"tr":1.0,"u":true,"s":true},
+          {"pts":[[104,78],[104,170],[193,170]],"role":"ink","w":1.5,"dash":false,"d":1.8,"tr":1.0,"u":true,"s":true},
+          {"pts":[[406,170],[449,170]],"role":"logic","w":1.5,"dash":false,"d":3.1,"tr":0.4,"u":true,"s":true},
+          {"pts":[[602,170],[645,170]],"role":"model","w":1.5,"dash":false,"d":3.8,"tr":0.4,"u":true,"s":true},
+          {"pts":[[798,170],[835,170]],"role":"model","w":1.5,"dash":false,"d":4.5,"tr":0.4,"u":true,"s":true},
+          {"pts":[[909,198],[909,236],[527,236],[527,265]],"role":"logic","w":1.5,"dash":true,"d":5.2,"tr":1.0,"u":true,"s":false},
+          {"pts":[[602,296],[645,296]],"role":"model","w":1.5,"dash":true,"d":6.5,"tr":0.4,"u":true,"s":false},
+          {"pts":[[798,296],[835,296]],"role":"model","w":2.4,"dash":false,"d":7.2,"tr":0.4,"u":true,"s":false},
+          {"pts":[[960,198],[960,265]],"role":"logic","w":1.5,"dash":false,"d":5.2,"tr":0.6,"u":false,"s":true}
+        ]
+      },
+      "still_label": "Three model layers for one requirement. Layer 1 asks Jev for its pattern: event {ev0:.2f}, so has_condition is {cond0:.2f}. Layer 2 sees that answer next to the statement and asks whether the condition and response are stated: {first0:.2f}. That is in the unsure band from 0.2 to 0.8, so layer 3 asks the expert, which answers {exp0:.2f}, below the 0.8 needed to pass. {skipped} of {len(stmts)} recorded statements never reach layer 3.",
+      "label": "Three model layers for one requirement. Layer 1 asks Jev for its pattern: event {ev0:.2f}, so has_condition is {cond0:.2f}. Layer 2 sees that answer next to the statement and asks whether the condition and response are stated: {first0:.2f}. That is in the unsure band from 0.2 to 0.8, so layer 3 asks the expert, which answers {exp0:.2f}, below the 0.8 needed to pass. {skipped} of {len(stmts)} recorded statements never reach layer 3. The animation then replays a statement layer 2 is sure about ({first1:.2f}), which skips the expert.",
+      "items": [
+        {"k":"text","at":[0,12],"text":"LAYER 1 · Jev","role":"muted","size":12},
+        {"k":"text","at":[0,132],"text":"LAYER 2 · Jev","role":"muted","size":12},
+        {"k":"text","at":[0,258],"text":"LAYER 3 · expert, only when unsure","role":"muted","size":12},
+        {"k":"box","at":[0,22,150,56],"role":"ink","title":"statement","subs":[[{"text":"“…it promptly.”","windows":[["=t0","=end0"]],"still":true},{"text":"“…within 100 ms.”","windows":[["=t1","=end1"]],"still":false}]],"lit":[["=t0","=end0"],["=t1","=end1"]]},
+        {"k":"box","at":[196,22,150,56],"role":"model","title":"ask Jev","subs":["kind? · testable?"],"lit":[["=t0 + 0.7","=end0"],["=t1 + 0.7","=end1"]]},
+        {"k":"box","at":[392,19,210,62],"role":"model","title":"kind","subs":[[{"text":"event {ev0:.2f}","windows":[["=t0 + 1.5","=end0"]],"still":true},{"text":"event {ev1:.2f}","windows":[["=t1 + 1.5","=end1"]],"still":false}],[{"text":"has_condition = {cond0:.2f}","windows":[["=t0 + 1.5","=end0"]],"still":true},{"text":"has_condition = {cond1:.2f}","windows":[["=t1 + 1.5","=end1"]],"still":false}]],"lit":[["=t0 + 1.5","=end0"],["=t1 + 1.5","=end1"]]},
+        {"k":"box","at":[196,136,210,68],"role":"logic","title":"context for layer 2","subs":["statement",[{"text":"has_condition: {cond0:.2f}","windows":[["=t0 + 2.8","=end0"]],"still":true},{"text":"has_condition: {cond1:.2f}","windows":[["=t1 + 2.8","=end1"]],"still":false}]],"lit":[["=t0 + 2.8","=end0"],["=t1 + 2.8","=end1"]]},
+        {"k":"box","at":[452,142,150,56],"role":"model","title":"ask Jev","subs":["complete?"],"lit":[["=t0 + 3.5","=end0"],["=t1 + 3.5","=end1"]]},
+        {"k":"box","at":[648,142,150,56],"role":"model","title":"first answer","subs":[[{"text":"P(yes) = {first0:.2f}","windows":[["=t0 + 4.2","=end0"]],"still":true},{"text":"P(yes) = {first1:.2f}","windows":[["=t1 + 4.2","=end1"]],"still":false}]],"lit":[["=t0 + 4.2","=end0"],["=t1 + 4.2","=end1"]]},
+        {"k":"box","at":[838,142,142,56],"role":"logic","title":"unsure?","subs":[[{"text":"0.2 ≤ {first0:.2f} < 0.8","windows":[["=t0 + 4.9","=end0"]],"still":true},{"text":"0.2 ≤ {first1:.2f} < 0.8","windows":[["=t1 + 4.9","=end1"]],"still":false}]],"lit":[["=t0 + 4.9","=end0"],["=t1 + 4.9","=end1"]]},
+        {"k":"box","at":[452,268,150,56],"role":"model","title":"ask the expert","subs":["guarded"],"dashed":true,"lit":[["=t0 + 6.2","=end0"]]},
+        {"k":"box","at":[648,268,150,56],"role":"model","title":"expert answer","subs":[[{"text":"P(yes) = {exp0:.2f}","windows":[["=t0 + 6.9","=end0"]],"still":true}]],"lit":[["=t0 + 6.9","=end0"]]},
+        {"k":"box","at":[838,268,142,56],"role":"ink","title":[{"text":"ok = {if(ok0, 'true', 'false')}","windows":[["=t0 + 7.6","=end0"]],"still":true},{"text":"ok = {if(ok1, 'true', 'false')}","windows":[["=t1 + 5.8","=end1"]],"still":false}],"subs":[[{"text":"{final0:.2f} {if(ok0, '≥', '<')} 0.8","windows":[["=t0 + 7.6","=end0"]],"still":true},{"text":"{final1:.2f} {if(ok1, '≥', '<')} 0.8","windows":[["=t1 + 5.8","=end1"]],"still":false}]],"lit":[["=t0 + 7.6","=end0"],["=t1 + 5.8","=end1"]]},
+        {"k":"repeat","over":"edges","let":{"win":"=if(row.u and row.s, [[t0 + row.d, end0], [t1 + row.d, end1]], if(row.u, [[t0 + row.d, end0]], [[t1 + row.d, end1]]))"},"items":[
+          {"k":"line","points":"=row.pts","role":"=row.role","weight":"=row.w","dashed":"=row.dash","anim":{"lit":"=win"}},
+          {"k":"token","points":"=row.pts","role":"=row.role","start":"=t0 + row.d","end":"=t0 + row.d + row.tr","when":"=row.u"},
+          {"k":"token","points":"=row.pts","role":"=row.role","start":"=t1 + row.d","end":"=t1 + row.d + row.tr","when":"=row.s"}
+        ]},
+        {"k":"note","at":[510,104],"text":"the layer-1 answer","sub":"becomes context","role":"model"},
+        {"k":"note","at":[110,162],"text":"same text","role":"muted"},
+        {"k":"note","at":[535,254],"text":"true","role":"logic","anim":{"appear":[["=t0 + 4.9","=end0"]],"still":true}},
+        {"k":"note","at":[952,252],"text":"false","role":"logic","anchor":"end","anim":{"appear":[["=t1 + 4.9","=end1"]],"still":true}},
+        {"k":"legend","at":[0,388],"entries":[["model","model answer","box"],["logic","your rule","box"],["ink","input / decision","box"],["model","skipped for {skipped} of {len(stmts)} statements","dash"]]}
+      ]
+    }
+  ]
+}
