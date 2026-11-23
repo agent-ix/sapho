@@ -22,6 +22,16 @@ fn sapho(args: &[&str]) -> Vec<u8> {
     output.stdout
 }
 
+fn parse(bytes: &[u8]) -> serde_json::Value {
+    serde_json::from_slice(bytes).expect("report is JSON")
+}
+
+fn agreement(report: &serde_json::Value) -> f64 {
+    report["measurement"]["outputs"]["needs_review"]["metrics"]["agreement"]
+        .as_f64()
+        .expect("agreement")
+}
+
 fn assert_committed(report: &str, regenerated: &[u8]) {
     let committed = std::fs::read(root().join(report)).expect("committed report");
     assert!(
@@ -37,6 +47,7 @@ const DATASET: [&str; 4] = [
     "examples/recordings/code-review.json",
 ];
 
+/// Trace: FR-037-AC-1, TC-037
 #[test]
 fn committed_tune_report_matches_regeneration() {
     let mut args = vec![
@@ -48,16 +59,30 @@ fn committed_tune_report_matches_regeneration() {
     ];
     args.extend(DATASET);
     args.extend(["--output-name", "needs_review", "--metric", "agreement"]);
-    assert_committed("examples/reports/code-review-tune.json", &sapho(&args));
+    let regenerated = sapho(&args);
+    assert_committed("examples/reports/code-review-tune.json", &regenerated);
+    // The figure labels candidate 0 as the best rule and candidate 1 as the other.
+    let ranking = &parse(&regenerated)["ranking"];
+    assert_eq!(ranking[0]["input_index"], 0);
+    assert_eq!(ranking[1]["input_index"], 1);
+    assert!(ranking[0]["score"].as_f64().unwrap() > ranking[1]["score"].as_f64().unwrap());
 }
 
+/// Trace: FR-036-AC-1, TC-036
 #[test]
 fn committed_held_out_measure_report_matches_regeneration() {
     let mut args = vec!["measure", "examples/graphs/code-review.yaml"];
     args.extend(DATASET);
     args.extend(["--split", "held_out"]);
+    let regenerated = sapho(&args);
     assert_committed(
         "examples/reports/code-review-measure-held-out.json",
-        &sapho(&args),
+        &regenerated,
     );
+    assert_eq!(agreement(&parse(&regenerated)), 1.0);
+
+    let mut development = vec!["measure", "examples/graphs/code-review.yaml"];
+    development.extend(DATASET);
+    development.extend(["--split", "development"]);
+    assert_eq!(agreement(&parse(&sapho(&development))), 1.0);
 }
