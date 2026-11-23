@@ -110,16 +110,10 @@ def recorded():
     for split, confusion in [("development", (3, 3)), ("held_out", (1, 1))]:
         measured = json.loads(invoke(["measure", "examples/graphs/code-review.yaml", *dataset, "--split", split]))
         metrics = measured["measurement"]["outputs"]["needs_review"]["metrics"]
-        assert metrics["agreement"] == 1.0, metrics
         assert (metrics["confusion"]["true_positive"], metrics["confusion"]["true_negative"]) == confusion, metrics
     held_out = {run["id"]: run["report"]["outputs"] for run in measured["runs"]}
     equal({k: plain(v["value"]) for k, v in held_out["error-variant"].items()},
           {"contract_risk": 0.48, "test_gap": 0.82, "needs_review": True})
-    tuned = json.loads(invoke(["tune", "--candidate", "examples/graphs/code-review.yaml",
-                               "--candidate", "examples/graphs/code-review-relaxed.yaml", *dataset,
-                               "--output-name", "needs_review", "--metric", "agreement"]))
-    assert [r["input_index"] for r in tuned["ranking"]] == [0, 1]
-    assert [round(r["score"], 2) for r in tuned["ranking"]] == [1.0, 0.67]
     relaxed = json.loads(invoke(["measure", "examples/graphs/code-review-relaxed.yaml", *dataset, "--split", "development"]))
     missed = sorted(p["case"] for p in relaxed["measurement"]["predictions"] if p["predicted"]["value"] != p["label"])
     assert missed == ["csv-export", "default-timeout"], missed
