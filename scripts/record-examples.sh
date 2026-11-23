@@ -9,6 +9,10 @@
 # documented numbers: update the docs and scripts/check_docs.py (which pins
 # them), and re-render the figures that read the recordings with `make figures`
 # (docs/images/figures.json, rendered by `ixd build` from agent-ix/ix-diagrams).
+# The evidence-loop figure types the tune and measure results (best_score,
+# other_score, held_agreement in its `let`) by hand: no producer records them
+# (documented FR-010 exception, IXD-57). Update them together with the numbers
+# scripts/check_docs.py pins whenever the examples are re-recorded.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
