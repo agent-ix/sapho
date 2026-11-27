@@ -8,7 +8,6 @@ edition = "2024"
 rust-version = "1.98"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/agent-ix/sapho"
-authors = ["Agent IX <agent@agent-ix.dev>"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive", "rc"] }
