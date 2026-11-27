@@ -9,7 +9,7 @@ The [embedding guide](user-guide.md) explains questions, combiners, collections,
 
 ## Install and try an offline rule
 
-Use the repository's Rust 1.98.1 toolchain. From a Sapho checkout:
+Use the repository's Rust 1.100.0 toolchain. From a Sapho checkout:
 
 ```sh
 cargo install --path crates/sapho-cli --locked

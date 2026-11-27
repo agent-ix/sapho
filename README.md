@@ -110,7 +110,7 @@ explains the nodes that connect the layers.
 ## Install the CLI
 
 You need Rust 1.98 or later and access to this repository. The checkout pins
-Rust 1.98.1.
+Rust 1.100.0.
 
 ```sh
 git clone https://github.com/agent-ix/sapho.git

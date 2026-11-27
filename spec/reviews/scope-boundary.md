@@ -78,4 +78,4 @@ Pass for implementation after the recorded specification corrections and Quire v
 | Jev SDK protocol | Guaranteed adapter translation via injected transport | IT-003 |
 | Hosted model judgment correctness | Assumed; no quality claim | Consumer labelled evaluation |
 | Recording filesystem path | Caller-owned; exclusive create and bounded read/write | TC-027 and TC-028 |
-| Rust 1.98.1 | Build requirement | NFR-004 |
+| Rust 1.100.0 | Build requirement | NFR-004 |
