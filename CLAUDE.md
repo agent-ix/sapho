@@ -19,7 +19,7 @@ assert observable values, and inject doubles only at native/backend seams.
 
 ## Commands
 
-Rust is pinned to 1.98.1. Use one workspace target directory.
+Rust is pinned to 1.100.0. Use one workspace target directory.
 make fmt; make lint; make test; make docs; make deny; make ci.
 Spec gate: quire validate --scope . "spec/**/*.md".
 Default tests require no network, model server or credential.

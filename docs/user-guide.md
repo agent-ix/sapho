@@ -33,7 +33,7 @@ For a command-line workflow, start with the [CLI guide](cli-guide.md): validate,
 
 ## Install
 
-Use Rust 1.98 or later. Sapho's checkout pins Rust 1.98.1. In your application:
+Use Rust 1.98 or later. Sapho's checkout pins Rust 1.100.0. In your application:
 
 ```toml
 [dependencies]
